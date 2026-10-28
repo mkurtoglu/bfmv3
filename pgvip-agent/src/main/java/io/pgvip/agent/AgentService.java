@@ -16,6 +16,7 @@ import io.pgvip.common.json.JsonMap;
 import io.pgvip.common.model.ApiResult;
 import io.pgvip.common.model.NodeStatus;
 import io.pgvip.common.model.OperationStatus;
+import io.pgvip.common.model.PgRole;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -52,7 +53,7 @@ public class AgentService {
     private volatile long probedAtNanos;
 
     public AgentService(AgentConfig cfg) throws IOException {
-        this(cfg, new ProcessRunner(), new LeaseGuard());
+        this(cfg, new ProcessRunner(), LeaseGuard.persistent(cfg.stateDir));
     }
 
     public AgentService(AgentConfig cfg, ProcessRunner runner, LeaseGuard lease) throws IOException {
@@ -109,7 +110,9 @@ public class AgentService {
     void leaseTick() {
         try {
             PgSnapshot s = snapshot;
-            if (s.isPrimary() && lease.mustFence() && !fence.fenced()) {
+            // Fence unless PostgreSQL is stopped or confirmed to be a replica: a primary whose probe fails (no free
+            // connection, psql timeout) must not outlive its lease either.
+            if (s.running() && s.role() != PgRole.REPLICA && lease.mustFence() && !fence.fenced()) {
                 fenceNow("primary lease expired (epoch " + lease.info().epoch() + ")");
             }
         } catch (RuntimeException e) {
@@ -117,26 +120,34 @@ public class AgentService {
         }
     }
 
-    /** Releases the VIP and, unless configured otherwise, stops PostgreSQL. Never blocked by other work. */
-    synchronized String fenceNow(String reason) {
+    /**
+     * Releases the VIP and, unless configured otherwise, stops PostgreSQL. Never blocked by other work. The node is
+     * marked fenced even when a step fails (so it is never started as primary again on its own), but the result then
+     * says the fence is incomplete.
+     */
+    synchronized ApiResult fenceNow(String reason) {
         LOG.warning("FENCING: " + reason);
         StringBuilder out = new StringBuilder();
+        boolean complete = true;
         try {
             out.append(vip.release());
         } catch (RuntimeException e) {
+            complete = false;
             out.append("VIP release failed: ").append(e.getMessage());
         }
         if ("stop".equals(cfg.fenceAction)) {
             try {
                 out.append("; ").append(pg.stop(cfg.fenceStopMode));
             } catch (RuntimeException e) {
+                complete = false;
                 out.append("; stop failed: ").append(e.getMessage());
             }
         }
         fence.set(reason);
         lease.revoke();
         refresh();
-        return out.toString();
+        return complete ? ApiResult.ok(out.toString()) : new ApiResult(false, "fence incomplete: " + out, null,
+                null);
     }
 
     public NodeStatus status() {
@@ -248,6 +259,11 @@ public class AgentService {
         if (allowPrimary && fence.fenced()) {
             throw AgentException.conflict("node is fenced and may only start as a replica: " + fence.reason());
         }
+        if (allowPrimary) {
+            // A lease left from an earlier term must not fence the primary the watcher is starting now; the
+            // watcher grants a fresh one right after the start.
+            lease.revoke();
+        }
         String msg = ops.exclusive("start", () -> pg.start(allowPrimary));
         refresh();
         return ApiResult.ok(msg);
@@ -324,7 +340,11 @@ public class AgentService {
 
     public ApiResult fence(JsonMap body) {
         String reason = body.str("reason", "fenced by watcher");
-        return ApiResult.ok(fenceNow(reason));
+        ApiResult r = fenceNow(reason);
+        if (!r.ok()) {
+            throw new AgentException(r.message());
+        }
+        return r;
     }
 
     public ApiResult clearFence(JsonMap body) {

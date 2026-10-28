@@ -15,6 +15,9 @@ final class TestStore implements StateStore {
     volatile boolean leader = true;
     volatile String leaderId;
     volatile boolean confirm = true;
+    volatile long term = 3;
+    /** The next n compare-and-set writes fail as if the Raft group had no leader. */
+    final java.util.concurrent.atomic.AtomicInteger failWrites = new java.util.concurrent.atomic.AtomicInteger();
 
     TestStore(String id, Mode mode) {
         this.inner = LocalStateStore.inMemory(id);
@@ -49,6 +52,9 @@ final class TestStore implements StateStore {
 
     @Override
     public boolean compareAndSet(String key, long expectedVersion, String value) {
+        if (failWrites.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
+            throw new io.pgvip.core.state.StateUnavailableException("no raft leader (test)");
+        }
         return inner.compareAndSet(key, expectedVersion, value);
     }
 
@@ -69,7 +75,7 @@ final class TestStore implements StateStore {
 
     @Override
     public Leadership leadership() {
-        return new Leadership(leader, leaderId, 3);
+        return new Leadership(leader, leaderId, term);
     }
 
     @Override

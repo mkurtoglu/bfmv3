@@ -26,9 +26,14 @@ public abstract class Operation implements Runnable {
 
     private static final Logger LOG = Logger.getLogger(Operation.class.getName());
 
+    /** How long to wait for a command whose outcome is unknown (transport failure, timeout) to show its effect. */
+    static final long SETTLE_MS = 150_000;
+
     protected final OpContext ctx;
     protected final OperationProgress progress;
     protected final String actor;
+    /** Set once a node has been made primary by this operation; the cluster is never released without it. */
+    protected volatile String madePrimary;
 
     protected Operation(OpContext ctx, OperationProgress progress, String actor) {
         this.ctx = ctx;
@@ -118,11 +123,13 @@ public abstract class Operation implements Runnable {
 
     /**
      * Takes the cluster for a role change: raises the epoch above every epoch the agents have seen and records the
-     * operation. Fails when {@code precondition} no longer holds (another watcher or operation got there first).
+     * operation and its target. Fails when {@code precondition} no longer holds (another watcher or operation got
+     * there first).
      */
-    protected ClusterState beginRoleOperation(Predicate<ClusterState> precondition, String why, long agentEpoch) {
+    protected ClusterState beginRoleOperation(Predicate<ClusterState> precondition, String why, long agentEpoch,
+                                              String target) {
         ClusterState.OperationRef ref = new ClusterState.OperationRef(progress.id(), progress.type(),
-                progress.target(), ctx.selfId(), actor, ctx.time().millis());
+                target, ctx.selfId(), actor, ctx.time().millis());
         try {
             ClusterState before = ctx.repo().current();
             ClusterState s = ctx.repo().update(precondition, why, cur -> cur
@@ -142,15 +149,96 @@ public abstract class Operation implements Runnable {
                 "operation " + progress.id() + " no longer holds the cluster", change);
     }
 
-    /** Releases the cluster; a no-op if this operation no longer holds it. */
+    /**
+     * Releases the cluster; a no-op if this operation no longer holds it. A node this operation made primary is
+     * always recorded on the way out, so the watcher's own guards never fence it as a rogue primary.
+     */
     protected void endRoleOperation(java.util.function.UnaryOperator<ClusterState> change) {
-        try {
-            updateOwned(s -> change.apply(s).withOperation(null).stamped(ctx.time().millis(), actor));
-        } catch (StateConflictException e) {
-            log("watcher", "cluster state was already released: " + e.getMessage());
-        } catch (RuntimeException e) {
-            LOG.log(Level.SEVERE, "cannot release cluster state", e);
-            log("watcher", "cannot release cluster state: " + e.getMessage());
+        for (int attempt = 1; ; attempt++) {
+            try {
+                String p = madePrimary;
+                updateOwned(s -> {
+                    ClusterState c = change.apply(s);
+                    return (p == null ? c : c.withPrimary(p)).withOperation(null).stamped(ctx.time().millis(), actor);
+                });
+                return;
+            } catch (StateConflictException e) {
+                log("watcher", "cluster state was already released: " + e.getMessage());
+                return;
+            } catch (RuntimeException e) {
+                LOG.log(Level.SEVERE, "cannot release cluster state", e);
+                log("watcher", "cannot release cluster state: " + e.getMessage());
+                if (madePrimary == null || attempt >= 30) {
+                    return;
+                }
+                try {
+                    ctx.time().sleep(1000);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+    }
+
+    /**
+     * Records {@code node} as primary right after it was made one, retrying while the shared state cannot be
+     * written (Raft election, disk error). Throws {@link Abort} when another watcher already took the cluster over;
+     * that watcher adopts the node from the operation's target.
+     */
+    protected void recordPrimary(String node) throws InterruptedException {
+        madePrimary = node;
+        for (int attempt = 1; ; attempt++) {
+            try {
+                updateOwned(s -> s.withPrimary(node).stamped(ctx.time().millis(), actor));
+                return;
+            } catch (StateConflictException e) {
+                throw new Abort(node + " is primary but this watcher no longer holds the cluster (" + e.getMessage()
+                        + "); the leading watcher adopts it");
+            } catch (RuntimeException e) {
+                log("watcher", "recording " + node + " as primary failed (attempt " + attempt + "): " + e.getMessage());
+                if (attempt >= 30) {
+                    throw new Abort(node + " is primary but could not be recorded: " + e.getMessage());
+                }
+                ctx.time().sleep(1000);
+            }
+        }
+    }
+
+    /**
+     * Before an irreversible step: this watcher must still lead (confirmed with a majority in Raft mode) and this
+     * operation must still hold the cluster. Otherwise another watcher may already be acting.
+     */
+    protected void checkStillLeading(String step) {
+        if (!ctx.store().confirmLeadership()) {
+            throw new Abort("this watcher lost the lead before: " + step);
+        }
+        ClusterState s = ctx.repo().current();
+        if (s == null || s.operation() == null || !progress.id().equals(s.operation().id())) {
+            throw new Abort("the operation no longer holds the cluster before: " + step);
+        }
+    }
+
+    /**
+     * Whether a failed call is a refusal the agent made before changing anything (409, 400). A timeout, a lost
+     * connection or a 500 during execution leaves the outcome unknown.
+     */
+    protected static boolean refusedBeforeActing(AgentCallException e) {
+        return e.reachable() && (e.httpStatus() == 409 || e.httpStatus() == 400);
+    }
+
+    /** Polls {@code node} until it runs as primary or {@code timeoutMs} pass; returns whether it does. */
+    protected boolean settlesAsPrimary(String node, long timeoutMs) throws InterruptedException {
+        long deadline = ctx.time().nanos() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (true) {
+            NodeStatus s = statusOrNull(node);
+            if (s != null && s.isPrimary()) {
+                return true;
+            }
+            if (ctx.time().nanos() - deadline >= 0) {
+                return false;
+            }
+            ctx.time().sleep(1000);
         }
     }
 

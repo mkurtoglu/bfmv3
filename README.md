@@ -34,7 +34,13 @@ PostgreSQL 13 or newer (the agent reloads `primary_conninfo` without a restart);
 - **Lease and self-fencing.** The leading watcher renews a lease on the primary every poll. With
   `self-fence: true`, a primary that stops getting renewals releases the VIP and stops PostgreSQL, and the
   watcher waits until any lease it or a previous leader granted has run out (TTL + margin) before promoting.
-  In Raft mode a leader confirms its leadership with a majority (ReadIndex) before every renewal.
+  In Raft mode a leader confirms its leadership with a majority (ReadIndex) before every renewal. The agent keeps
+  the lease in `state.dir/lease` with its wall-clock deadline, so a restarted agent still fences on time, and it
+  fences whenever PostgreSQL runs but cannot be confirmed to be a replica.
+- **Unknown outcomes are not guessed.** Commands get their own long timeout (`pgvip.agent.command-timeout`).
+  When a promote ends without a clear answer, the watcher waits to see whether the node becomes primary; it
+  never takes the VIP away from it or restarts the old primary while that is unknown. Before each irreversible
+  step an operation checks that its watcher still leads and still holds the cluster.
 - **Confirmation before failover.** The watcher asks every reachable replica whether it still reaches the
   primary's PostgreSQL port or streams from it; any "yes" blocks the failover. In Raft mode a majority of
   watchers must also have seen the primary gone within `observation-fresh`.

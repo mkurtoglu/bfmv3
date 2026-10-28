@@ -22,6 +22,10 @@ import java.util.List;
 /**
  * Agent client over HTTPS with mutual TLS (or plain HTTP with a bearer token in a lab).
  *
+ * <p>Two timeouts: a short one for probes (status, lease, peer check, operation progress) and a long one for
+ * commands that run PostgreSQL or VIP tools on the node (promote, stop, start, CHECKPOINT, arping). A command must
+ * not time out while the agent is still working on it, or the watcher would act on an outcome it does not know.
+ *
  * <p>System proxy settings are ignored on purpose: agents sit on the database network and a corporate proxy
  * in between would break mutual TLS.
  */
@@ -32,23 +36,27 @@ public class HttpAgentClient implements AgentClient {
     private final HttpClient http;
     private final String token;
     private final Duration timeout;
+    private final Duration commandTimeout;
 
-    public HttpAgentClient(String node, String baseUrl, HttpClient http, String token, Duration timeout) {
+    public HttpAgentClient(String node, String baseUrl, HttpClient http, String token, Duration timeout,
+                           Duration commandTimeout) {
         this.node = node;
         this.baseUrl = baseUrl;
         this.http = http;
         this.token = token;
         this.timeout = timeout;
+        this.commandTimeout = commandTimeout;
     }
 
     /**
      * A factory sharing one HTTP client between all nodes.
      *
-     * @param tls     mutual-TLS context, or null for plain HTTP
-     * @param token   optional bearer token
-     * @param timeout timeout of one call
+     * @param tls            mutual-TLS context, or null for plain HTTP
+     * @param token          optional bearer token
+     * @param timeout        timeout of a probe (and of connecting)
+     * @param commandTimeout timeout of a command; longer than the slowest thing the agent runs
      */
-    public static AgentClientFactory factory(SSLContext tls, String token, Duration timeout) {
+    public static AgentClientFactory factory(SSLContext tls, String token, Duration timeout, Duration commandTimeout) {
         HttpClient.Builder b = HttpClient.newBuilder()
                 .connectTimeout(timeout)
                 .proxy(HttpClient.Builder.NO_PROXY)
@@ -59,7 +67,7 @@ public class HttpAgentClient implements AgentClient {
             b.sslContext(tls).sslParameters(params);
         }
         HttpClient http = b.build();
-        return (NodeConfig n) -> new HttpAgentClient(n.name(), n.agentUrl(), http, token, timeout);
+        return (NodeConfig n) -> new HttpAgentClient(n.name(), n.agentUrl(), http, token, timeout, commandTimeout);
     }
 
     @Override
@@ -69,12 +77,12 @@ public class HttpAgentClient implements AgentClient {
 
     @Override
     public NodeStatus status() {
-        return NodeStatus.fromJson(call("GET", "/v1/status", null));
+        return NodeStatus.fromJson(call("GET", "/v1/status", null, timeout, false));
     }
 
     @Override
     public ApiResult grantLease(long epoch, long ttlMs, boolean fenceOnExpiry) {
-        return command("/v1/lease", body(epoch).put("ttlMs", ttlMs).put("fenceOnExpiry", fenceOnExpiry));
+        return probe("/v1/lease", body(epoch).put("ttlMs", ttlMs).put("fenceOnExpiry", fenceOnExpiry));
     }
 
     @Override
@@ -89,7 +97,7 @@ public class HttpAgentClient implements AgentClient {
 
     @Override
     public ApiResult vipCheck() {
-        return ApiResult.fromJson(call("GET", "/v1/vip/check", null, true));
+        return ApiResult.fromJson(call("GET", "/v1/vip/check", null, commandTimeout, true));
     }
 
     @Override
@@ -131,7 +139,8 @@ public class HttpAgentClient implements AgentClient {
 
     @Override
     public OperationStatus operation(String id) {
-        return OperationStatus.fromJson(call("GET", "/v1/operations/" + URLEncoder.encode(id, StandardCharsets.UTF_8), null));
+        return OperationStatus.fromJson(call("GET", "/v1/operations/" + URLEncoder.encode(id, StandardCharsets.UTF_8),
+                null, timeout, false));
     }
 
     @Override
@@ -146,12 +155,14 @@ public class HttpAgentClient implements AgentClient {
 
     @Override
     public ApiResult peerCheck(String host, int port, long timeoutMs) {
-        return command("/v1/peer-check", JsonMap.create().put("host", host).put("port", port).put("timeoutMs", timeoutMs));
+        return ApiResult.fromJson(call("POST", "/v1/peer-check", JsonMap.create().put("host", host).put("port", port)
+                .put("timeoutMs", timeoutMs), timeout.plusMillis(timeoutMs), false));
     }
 
     @Override
     public ApiResult ensureSlots(long epoch, List<String> names) {
-        return command("/v1/slots/ensure", body(epoch).put("names", names));
+        JsonMap b = body(epoch).put("names", names);
+        return names.isEmpty() ? probe("/v1/slots/ensure", b) : command("/v1/slots/ensure", b);
     }
 
     @Override
@@ -164,11 +175,11 @@ public class HttpAgentClient implements AgentClient {
     }
 
     private ApiResult command(String path, JsonMap body) {
-        return ApiResult.fromJson(call("POST", path, body));
+        return ApiResult.fromJson(call("POST", path, body, commandTimeout, false));
     }
 
-    private String call(String method, String path, JsonMap body) {
-        return call(method, path, body, false);
+    private ApiResult probe(String path, JsonMap body) {
+        return ApiResult.fromJson(call("POST", path, body, timeout, false));
     }
 
     /**
@@ -176,9 +187,9 @@ public class HttpAgentClient implements AgentClient {
      * {@code acceptRefusal} is set and the answer is a well-formed refusal (used by the VIP check, which
      * reports a taken address as a 409).
      */
-    private String call(String method, String path, JsonMap body, boolean acceptRefusal) {
+    private String call(String method, String path, JsonMap body, Duration callTimeout, boolean acceptRefusal) {
         HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(baseUrl + path))
-                .timeout(timeout)
+                .timeout(callTimeout)
                 .header("Accept", "application/json");
         if (token != null && !token.isEmpty()) {
             rb.header("Authorization", "Bearer " + token);

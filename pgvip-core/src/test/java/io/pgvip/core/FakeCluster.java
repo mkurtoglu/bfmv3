@@ -66,6 +66,12 @@ public final class FakeCluster implements AgentClientFactory {
         public boolean vipAddFails;
         public boolean dadBusy;
         public boolean promoteFails;
+        /** Promotes, but the answer never reaches the watcher (timeout). */
+        public boolean promoteTimesOut;
+        /** fence.action=vip-only: fencing releases the VIP and leaves PostgreSQL running. */
+        public boolean fenceKeepsRunning;
+        /** Called right after a successful promotion, before the answer goes back. */
+        public Runnable onPromote;
         public boolean rewindFails;
         public String clusterState = "in production";
         public long checkpointLsn;
@@ -185,7 +191,7 @@ public final class FakeCluster implements AgentClientFactory {
 
         private void selfFence(String reason) {
             vipHolder.remove(vip, name);
-            pgRunning = false;
+            pgRunning = fenceKeepsRunning;
             clusterState = "in production";
             fenced = true;
             fencedReason = reason;
@@ -292,6 +298,12 @@ public final class FakeCluster implements AgentClientFactory {
                     fenceOnExpiry = foe;
                 }
                 did("promote (timeline " + timeline + ")");
+                if (onPromote != null) {
+                    onPromote.run();
+                }
+                if (promoteTimesOut) {
+                    throw AgentCallException.unreachable(name, "unreachable: HttpTimeoutException: request timed out");
+                }
                 return ApiResult.ok("promoted");
             }
         }
@@ -475,7 +487,7 @@ public final class FakeCluster implements AgentClientFactory {
             synchronized (FakeCluster.this) {
                 reachable();
                 vipHolder.remove(vip, name);
-                if (pgRunning) {
+                if (pgRunning && !fenceKeepsRunning) {
                     pgRunning = false;
                     clusterState = "in production";
                 }

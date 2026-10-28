@@ -130,7 +130,7 @@ public final class FailoverOperation extends Operation {
         progress.running("epoch");
         ClusterState st = beginRoleOperation(
                 s -> s.epoch() == expectedEpoch && oldPrimary.equals(s.primary()) && s.failoverArmed(),
-                "cluster state changed since the failover decision", fresh.maxAgentEpoch());
+                "cluster state changed since the failover decision", fresh.maxAgentEpoch(), t);
         long epoch = st.epoch();
         progress.done("epoch", "epoch " + expectedEpoch + " -> " + epoch);
         event(EventType.FAILOVER_STARTED, oldPrimary, "Automatic failover started: " + oldPrimary + " -> " + t
@@ -155,13 +155,15 @@ public final class FailoverOperation extends Operation {
             } else {
                 progress.skipped("lease", "self-fencing is off; relying on the VIP duplicate check");
             }
-            // The old primary may have come back meanwhile: it must not be running as primary now.
+            // The old primary may have come back meanwhile, or a fence may have left PostgreSQL running (a failed
+            // stop, or fence.action=vip-only): never promote next to a running primary.
             NodeStatus again = statusOrNull(oldPrimary);
-            if (again != null && again.isPrimary() && !again.fenced()) {
+            if (again != null && again.isPrimary()) {
                 fenceOld(old, "automatic failover to " + t + " (epoch " + epoch + ")");
                 again = statusOrNull(oldPrimary);
                 if (again != null && again.isPrimary()) {
-                    throw new Abort(oldPrimary + " is running as primary again and could not be fenced");
+                    throw new Abort(oldPrimary + " still runs as primary" + (again.fenced() ? " (fenced)" : "")
+                            + "; promoting " + t + " would make two primaries");
                 }
             }
 
@@ -172,11 +174,14 @@ public final class FailoverOperation extends Operation {
                 progress.failed("vip", t + " is no longer a running replica");
                 throw new Abort(t + " is no longer a running replica");
             }
+            checkStillLeading("bringing up the VIP on " + t);
             try {
                 ApiResult r = agent(t).vipAcquire(epoch);
                 logResult(t, "vip acquire", r);
                 progress.done("vip", r.message());
             } catch (AgentCallException e) {
+                // Whatever happened on the node, the VIP is not known to be up: no promote. A VIP that comes up
+                // late on a replica is removed by the watcher's VIP guard.
                 progress.failed("vip", e.detail());
                 onVipFailure.accept(t);
                 throw new Abort("VIP could not be brought up on " + t + ": " + e.detail() + "; " + t
@@ -185,26 +190,36 @@ public final class FailoverOperation extends Operation {
 
             // 7. Promote.
             progress.running("promote");
+            checkStillLeading("promoting " + t);
             try {
                 ApiResult r = agent(t).promote(epoch, ctx.cfg().timing().leaseTtlMs(), ctx.cfg().selfFence());
+                madePrimary = t;
                 ctx.lease().granted();
                 logResult(t, "promote", r);
                 progress.done("promote", r.message());
             } catch (AgentCallException e) {
-                NodeStatus after = statusOrNull(t);
-                if (after != null && after.isPrimary()) {
+                if (refusedBeforeActing(e)) {
+                    progress.failed("promote", e.detail());
+                    releaseVip(t, epoch);
+                    throw new Abort("promote of " + t + " refused: " + e.detail());
+                }
+                // Timeout or failure half way: the promotion may still complete. Wait for it before deciding,
+                // and never take the VIP away from a node that may become primary.
+                log("watcher", "promote of " + t + " ended without a clear answer (" + e.detail() + "); waiting");
+                if (settlesAsPrimary(t, SETTLE_MS)) {
+                    madePrimary = t;
                     ctx.lease().granted();
                     progress.done("promote", "promoted (agent reported: " + e.detail() + ")");
                 } else {
                     progress.failed("promote", e.detail());
-                    releaseVip(t, epoch);
-                    throw new Abort("promote of " + t + " failed: " + e.detail());
+                    throw new Abort("promote of " + t + " did not complete: " + e.detail()
+                            + "; the VIP is left to the watcher's guard");
                 }
             }
 
             // 8. Record.
             progress.running("record");
-            updateOwned(s -> s.withPrimary(t).stamped(ctx.time().millis(), actor));
+            recordPrimary(t);
             progress.done("record", "primary is now " + t);
 
             // 9. Slots and replicas.

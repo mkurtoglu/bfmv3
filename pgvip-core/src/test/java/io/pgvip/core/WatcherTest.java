@@ -557,4 +557,113 @@ class WatcherTest {
         ticks(3);
         assertEquals(deadline, a.leaseDeadline, "no renewal without a confirmed majority");
     }
+
+    // ---------------------------------------------------------------- uncertain outcomes (review findings)
+
+    @Test
+    void promoteThatTimesOutButCompletesIsKept() {
+        threeNodes();
+        start(standalone());
+        cluster.node("pg-a2").promoteTimesOut = true;
+        cluster.crash("pg-a1");
+        ticks(3);
+        assertEquals("pg-a2", watcher.state().primary());
+        assertEquals("pg-a2", cluster.vipHolder(), "the VIP is not taken away from a node that became primary");
+        assertTrue(hasEvent(EventType.FAILOVER_FINISHED));
+        ticks(3);
+        assertFalse(cluster.node("pg-a2").fenced, "not fenced as a rogue primary");
+    }
+
+    @Test
+    void promotedPrimaryIsRecordedThroughStoreFailures() {
+        threeNodes();
+        TestStore s = new TestStore("w1", StateStore.Mode.STANDALONE);
+        start(standalone(), s);
+        cluster.node("pg-a2").onPromote = () -> s.failWrites.set(3);
+        cluster.crash("pg-a1");
+        ticks(3);
+        assertEquals("pg-a2", watcher.state().primary());
+        ticks(3);
+        assertEquals(PgRole.PRIMARY, cluster.node("pg-a2").role);
+        assertFalse(cluster.node("pg-a2").fenced);
+    }
+
+    @Test
+    void switchoverDoesNotRollBackAfterAnUncertainPromote() {
+        threeNodes();
+        start(standalone());
+        cluster.node("pg-a2").promoteFails = true;     // 500 half way: the outcome is unknown
+        OperationProgress.Snapshot sw = watcher.switchover("pg-a2", SwitchoverOperation.Options.defaults(), "admin",
+                "prod-main");
+        awaitIdle();
+        OperationProgress.Snapshot done = watcher.operation(sw.id()).orElseThrow();
+        assertEquals(OperationProgress.State.FAILED, done.state());
+        assertTrue(done.result().contains("state is unknown"), done.result());
+        assertFalse(cluster.node("pg-a1").pgRunning, "the old primary is not started next to an unknown target");
+        // The watcher then removes the VIP left on the replica and restarts the old primary in place.
+        ticks(4);
+        assertEquals("pg-a1", watcher.state().primary());
+        assertTrue(cluster.node("pg-a1").pgRunning);
+        assertEquals(PgRole.PRIMARY, cluster.node("pg-a1").role);
+        assertEquals("pg-a1", cluster.vipHolder());
+        assertEquals(PgRole.REPLICA, cluster.node("pg-a2").role);
+    }
+
+    @Test
+    void newLeaderAdoptsAPrimaryPromotedByAnUnfinishedOperation() {
+        threeNodes();
+        TestStore s = new TestStore("w1", StateStore.Mode.RAFT);
+        start(standalone(), s);
+        long epoch = watcher.state().epoch();
+        // Another watcher (w0) raised the epoch, promoted pg-a2 and lost the lead before recording it.
+        new io.pgvip.core.state.ClusterStateRepo(s).update(c -> true, "", c -> c.withEpoch(epoch + 1).withOperation(
+                new ClusterState.OperationRef("op-w0", "FAILOVER", "pg-a2", "w0", "watcher w0", time.millis())));
+        cluster.crash("pg-a1");
+        FakeCluster.Node b = cluster.node("pg-a2");
+        b.epoch = epoch + 1;
+        cluster.giveVip("pg-a2");
+        b.promote(epoch + 1, 30_000, false);
+        tick();
+        assertEquals("pg-a1", watcher.state().primary(), "waits before taking over another watcher's operation");
+        time.advance(40_000);
+        tick();
+        assertEquals("pg-a2", watcher.state().primary());
+        assertNull(watcher.state().operation());
+        ticks(3);
+        assertFalse(b.fenced, "adopted, not fenced");
+        assertEquals("pg-a2", cluster.vipHolder());
+    }
+
+    @Test
+    void fencedButRunningPrimaryIsRestoredInPlace() {
+        threeNodes();
+        start(standalone());
+        FakeCluster.Node a = cluster.node("pg-a1");
+        a.fenceKeepsRunning = true;
+        a.fence("primary lease expired (vip-only fence)");
+        assertTrue(a.pgRunning);
+        ticks(4);
+        assertFalse(a.fenced);
+        assertEquals("pg-a1", watcher.state().primary());
+        assertEquals("pg-a1", cluster.vipHolder());
+        assertEquals(PgRole.REPLICA, cluster.node("pg-a2").role, "no failover next to a running primary");
+        assertTrue(hasEvent(EventType.PRIMARY_RESTARTED));
+    }
+
+    @Test
+    void lagLimitHoldsAfterAWatcherRestart() {
+        threeNodes();
+        cluster.node("pg-a2").lag = 64L * 1024 * 1024;
+        cluster.node("pg-a3").lag = 64L * 1024 * 1024;
+        LocalStateStore shared = LocalStateStore.inMemory("w1");
+        start(standalone(), shared);
+        cluster.write(128L * 1024 * 1024);
+        ticks(2);
+        watcher.close();
+        cluster.crash("pg-a1");
+        watcher = new Watcher(standalone(), shared, cluster, time);
+        ticks(5);
+        assertEquals("pg-a1", watcher.state().primary());
+        assertTrue(event(EventType.FAILOVER_BLOCKED).message().contains("behind the primary"));
+    }
 }

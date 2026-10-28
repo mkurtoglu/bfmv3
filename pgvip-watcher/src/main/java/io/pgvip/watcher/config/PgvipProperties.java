@@ -89,10 +89,12 @@ public record PgvipProperties(
     }
 
     /**
-     * @param tls       mutual TLS towards the agents (recommended)
-     * @param tokenFile optional bearer token file (required when TLS is off)
+     * @param tls            mutual TLS towards the agents (recommended)
+     * @param tokenFile      optional bearer token file (required when TLS is off)
+     * @param commandTimeout how long a command (promote, stop, start, CHECKPOINT, VIP) may take on the agent; keep it
+     *                       above the agent's pg.start.timeout.seconds + 15 s and pg.promote.timeout.seconds
      */
-    public record Agent(@DefaultValue Tls tls, Path tokenFile) {
+    public record Agent(@DefaultValue Tls tls, Path tokenFile, @DefaultValue("180s") Duration commandTimeout) {
     }
 
     /** PKCS#12 stores shared by agent calls and, with Raft, by the watchers among themselves. */

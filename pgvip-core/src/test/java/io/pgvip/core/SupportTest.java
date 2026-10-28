@@ -80,7 +80,7 @@ class SupportTest {
         server.start();
         try {
             String url = "http://127.0.0.1:" + server.getAddress().getPort();
-            AgentClient c = HttpAgentClient.factory(null, "secret", Duration.ofSeconds(3))
+            AgentClient c = HttpAgentClient.factory(null, "secret", Duration.ofSeconds(3), Duration.ofSeconds(30))
                     .create(NodeConfig.of("pg-a1", url, "10.0.0.1", 5432, "DC1"));
             NodeStatus s = c.status();
             assertEquals("Bearer secret", auth.get());
@@ -103,7 +103,7 @@ class SupportTest {
         } finally {
             server.stop(0);
         }
-        AgentClient dead = HttpAgentClient.factory(null, null, Duration.ofMillis(500))
+        AgentClient dead = HttpAgentClient.factory(null, null, Duration.ofMillis(500), Duration.ofSeconds(1))
                 .create(NodeConfig.of("pg-x", "http://127.0.0.1:1", "10.0.0.9", 5432, "DC1"));
         AgentCallException e = assertThrows(AgentCallException.class, dead::status);
         assertFalse(e.reachable());

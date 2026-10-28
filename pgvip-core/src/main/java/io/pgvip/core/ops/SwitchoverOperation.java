@@ -206,7 +206,7 @@ public final class SwitchoverOperation extends Operation {
         // 1. Pause and epoch.
         progress.running("pause");
         ClusterState s = beginRoleOperation(c -> c.operation() == null && expectedPrimary.equals(c.primary()),
-                "the cluster changed; review the switchover again", view.maxAgentEpoch());
+                "the cluster changed; review the switchover again", view.maxAgentEpoch(), target);
         epoch = s.epoch();
         progress.done("pause", "epoch " + state.epoch() + " -> " + epoch);
         event(EventType.SWITCHOVER_STARTED, target, "Switchover " + oldPrimary + " -> " + target + " started by "
@@ -231,6 +231,7 @@ public final class SwitchoverOperation extends Operation {
 
             // 3. Stop the primary and drop its VIP.
             progress.running("stop");
+            checkStillLeading("stopping " + oldPrimary);
             String finalLsn;
             try {
                 ApiResult r = agent(oldPrimary).stop(epoch, "fast", true);
@@ -280,6 +281,7 @@ public final class SwitchoverOperation extends Operation {
 
             // 6. VIP on target.
             progress.running("vip");
+            checkStillLeading("bringing up the VIP on " + target);
             try {
                 ApiResult r = agent(target).vipAcquire(epoch);
                 vipOnTarget = true;
@@ -293,33 +295,36 @@ public final class SwitchoverOperation extends Operation {
 
             // 7. Promote.
             progress.running("promote");
+            checkStillLeading("promoting " + target);
             try {
                 ApiResult r = agent(target).promote(epoch, ctx.cfg().timing().leaseTtlMs(), ctx.cfg().selfFence());
                 promoted = true;
+                madePrimary = target;
                 ctx.lease().granted();
                 logResult(target, "promote", r);
                 progress.done("promote", r.message());
             } catch (AgentCallException e) {
-                NodeStatus after = statusOrNull(target);
-                if (after != null && after.isPrimary()) {
-                    promoted = true;
+                if (refusedBeforeActing(e)) {
+                    progress.failed("promote", e.detail());
+                    throw new Abort("promote of " + target + " refused: " + e.detail());
+                }
+                // From here on the target may become primary at any moment: no rollback to the old primary.
+                promoted = true;
+                log("watcher", "promote of " + target + " ended without a clear answer (" + e.detail() + "); waiting");
+                if (settlesAsPrimary(target, SETTLE_MS)) {
+                    madePrimary = target;
                     ctx.lease().granted();
                     progress.done("promote", "promoted (agent reported: " + e.detail() + ")");
                 } else {
                     progress.failed("promote", e.detail());
-                    if (after != null && after.isReplica()) {
-                        throw new Abort("promote of " + target + " failed: " + e.detail());
-                    }
-                    // Unknown outcome: never start a second primary next to a target that may have been promoted.
-                    promoted = true;
-                    throw new Abort("promote of " + target + " failed and its state is unknown (" + e.detail()
-                            + "); neither node is started as primary, check both before acting");
+                    throw new Abort("promote of " + target + " did not complete and its state is unknown ("
+                            + e.detail() + "); neither node is started as primary, check both before acting");
                 }
             }
 
             // 8. Record.
             progress.running("record");
-            updateOwned(c -> c.withPrimary(target).stamped(ctx.time().millis(), actor));
+            recordPrimary(target);
             progress.done("record", "primary is now " + target);
             ensureSlots(target, epoch);
 
@@ -389,6 +394,10 @@ public final class SwitchoverOperation extends Operation {
         }
         if (!oldStopped) {
             return target + " stays a replica; " + oldPrimary + " kept running as primary";
+        }
+        if (!ctx.store().confirmLeadership()) {
+            return target + " stays a replica; this watcher lost the lead, so " + oldPrimary + " is left stopped"
+                    + " for the leading watcher to restart";
         }
         StringBuilder sb = new StringBuilder(target + " stays a replica");
         try {

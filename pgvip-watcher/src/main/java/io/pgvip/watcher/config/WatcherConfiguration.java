@@ -91,7 +91,7 @@ public class WatcherConfiguration {
             throw new IllegalStateException("pgvip.agent: enable TLS or set a token file");
         }
         return HttpAgentClient.factory(ctx, token,
-                Duration.ofMillis(props.toClusterConfig().timing().agentTimeoutMs()));
+                Duration.ofMillis(props.toClusterConfig().timing().agentTimeoutMs()), props.agent().commandTimeout());
     }
 
     @Bean(destroyMethod = "close")

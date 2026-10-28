@@ -131,7 +131,7 @@ class WatcherPostgresIT {
                 3_000, 3_000, 3_000);
         ClusterConfig cfg = ClusterConfig.of("it", configs, timing);
         watcher = new Watcher(cfg, new LocalStateStore("w1", base.resolve("watcher")),
-                HttpAgentClient.factory(null, TOKEN, Duration.ofSeconds(2)), TimeSource.SYSTEM);
+                HttpAgentClient.factory(null, TOKEN, Duration.ofSeconds(2), Duration.ofSeconds(180)), TimeSource.SYSTEM);
         watcher.start();
 
         // Bootstrap: nothing runs yet; start a as primary, build b and c from it.

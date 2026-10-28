@@ -60,6 +60,7 @@ pgvip:
       truststore: /etc/pgvip/ca.p12
       truststore-password-file: /etc/pgvip/ca.pass
     # token-file: /etc/pgvip/agent.token    # optional; required when TLS is off
+    command-timeout: 180s                # promote / stop / start / CHECKPOINT / VIP; above pg.start.timeout + 15 s
 
   # Optional: three watchers in an Apache Ratis group. The same file on every watcher, only watcher-id differs.
   # Copy secret.key from the first watcher to the others so they can read the stored SMTP password.

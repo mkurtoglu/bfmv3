@@ -7,6 +7,7 @@ import io.pgvip.agent.state.LeaseGuard;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -92,5 +93,33 @@ class AgentUnitTest {
         var p = TestConfigs.base(dir);
         p.remove("api.token");
         assertThrows(IllegalArgumentException.class, () -> AgentConfig.of(p));
+    }
+
+    @Test
+    void leaseSurvivesAnAgentRestartAndNeverGrowsBeyondItsTtl(@TempDir Path dir) {
+        AtomicLong nanos = new AtomicLong(1_000_000_000L);
+        AtomicLong wall = new AtomicLong(1_800_000_000_000L);
+        Path file = dir.resolve("lease");
+        LeaseGuard first = new LeaseGuard(nanos::get, wall::get, file);
+        first.grant(7, 30_000, true);
+
+        // The agent restarts 10 s later (a fresh monotonic clock): 20 s are left.
+        wall.addAndGet(10_000);
+        AtomicLong nanos2 = new AtomicLong(5L);
+        LeaseGuard again = new LeaseGuard(nanos2::get, wall::get, file);
+        assertEquals(7, again.info().epoch());
+        assertTrue(again.info().fenceOnExpiry());
+        assertEquals(20_000, again.info().remainingMs());
+        nanos2.addAndGet(20_000_000_000L);
+        assertTrue(again.mustFence());
+
+        // A wall clock that jumped back cannot stretch the lease beyond its TTL.
+        wall.addAndGet(-3_600_000);
+        LeaseGuard jumped = new LeaseGuard(nanos2::get, wall::get, file);
+        assertEquals(30_000, jumped.info().remainingMs());
+
+        jumped.revoke();
+        assertFalse(Files.exists(file));
+        assertFalse(new LeaseGuard(nanos2::get, wall::get, file).info().granted());
     }
 }

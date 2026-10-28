@@ -1,6 +1,8 @@
 package io.pgvip.core;
 
 import io.pgvip.common.Lsn;
+import io.pgvip.common.json.Json;
+import io.pgvip.common.json.JsonMap;
 import io.pgvip.common.model.ApiResult;
 import io.pgvip.common.model.NodeStatus;
 import io.pgvip.common.model.SlotInfo;
@@ -105,6 +107,9 @@ public class Watcher implements AutoCloseable {
     private volatile String lastPrimaryName;
     private volatile String lastPrimaryLsn;
     private volatile Integer lastPrimaryTimeline;
+    private String persistedLsn;
+    private long persistedAtNanos;
+    static final String POSITION_KEY = "primary-position";
 
     // lease
     private volatile long lastRenewalNanos;
@@ -113,6 +118,7 @@ public class Watcher implements AutoCloseable {
     // leadership and alerts
     private String lastLeaderId;
     private boolean wasLeader;
+    private long leaderTerm = -1;
     /** When this watcher saw itself become leader; a lease granted by an earlier leader may run until then + TTL. */
     private volatile long leaderSinceNanos;
     private final Set<String> activeAlerts = new HashSet<>();
@@ -199,6 +205,7 @@ public class Watcher implements AutoCloseable {
         if (!lead.leader()) {
             return;
         }
+        persistPrimaryPosition();
         if (st == null) {
             bootstrap(v);
             return;
@@ -215,13 +222,16 @@ public class Watcher implements AutoCloseable {
             return;
         }
         renewLease(v, st);
+        if (st.primary() != null) {
+            releaseStrayVips(v, st);
+        }
         if (handlePrimary(v, st)) {
             return;
         }
         if (st.primary() == null) {
             return;
         }
-        guardVips(v, st);
+        restorePrimaryVip(v, st);
         fenceRogues(v, st);
         repairReplicas(v, st);
     }
@@ -255,11 +265,51 @@ public class Watcher implements AutoCloseable {
         });
     }
 
-    /** Own last primary position, raised by fresh observations from other watchers about the same primary. */
+    /**
+     * Keeps the newest primary position in the shared state (at most every 10 s, or at once after 1 MB), so a
+     * watcher that restarts while the primary is down still enforces the lag limit and the timeline check.
+     */
+    private void persistPrimaryPosition() {
+        String lsn = lastPrimaryLsn;
+        String primary = lastPrimaryName;
+        if (lsn == null || primary == null || lsn.equals(persistedLsn)) {
+            return;
+        }
+        Long moved = persistedLsn == null ? null : Lsn.diff(lsn, persistedLsn);
+        if (moved != null && moved < 1024 * 1024 && time.nanos() - persistedAtNanos < TimeUnit.SECONDS.toNanos(10)) {
+            return;
+        }
+        try {
+            store.put(POSITION_KEY, JsonMap.create().put("primary", primary).put("lsn", lsn)
+                    .put("timeline", lastPrimaryTimeline).put("timeMillis", time.millis()).toJson());
+            persistedLsn = lsn;
+            persistedAtNanos = time.nanos();
+        } catch (RuntimeException e) {
+            LOG.log(Level.FINE, "cannot store the primary position", e);
+        }
+    }
+
+    /**
+     * Own last primary position, raised by fresh observations from other watchers and by the stored position, all
+     * about the same primary.
+     */
     private OpContext.PrimaryInfo primaryInfo() {
         String lsn = lastPrimaryLsn;
         Integer tl = lastPrimaryTimeline;
         String primary = lastPrimaryName;
+        try {
+            StateStore.Versioned saved = store.get(POSITION_KEY);
+            if (saved != null) {
+                JsonMap m = Json.parseObject(saved.value());
+                if (Objects.equals(primary, m.str("primary")) && m.str("lsn") != null
+                        && (lsn == null || Lsn.compare(m.str("lsn"), lsn) > 0)) {
+                    lsn = m.str("lsn");
+                    tl = m.intOrNull("timeline") != null ? m.intOrNull("timeline") : tl;
+                }
+            }
+        } catch (RuntimeException e) {
+            LOG.log(Level.FINE, "cannot read the stored primary position", e);
+        }
         for (Observation o : observations()) {
             if (o.watcherId().equals(store.selfId()) || !Objects.equals(primary, o.primary())
                     || o.lastPrimaryLsn() == null) {
@@ -302,10 +352,12 @@ public class Watcher implements AutoCloseable {
     }
 
     private void trackLeadership(StateStore.Leadership lead) {
-        if (lead.leader() && !wasLeader) {
+        if (lead.leader() && (!wasLeader || lead.term() != leaderTerm)) {
+            // A new term means another watcher may have led (and renewed leases) in between.
             leaderSinceNanos = time.nanos();
         }
         wasLeader = lead.leader();
+        leaderTerm = lead.term();
         if (lead.leader() && !Objects.equals(lastLeaderId, lead.leaderId()) && store.mode() == StateStore.Mode.RAFT) {
             events.publish(EventType.LEADER_CHANGED, null, "Watcher " + store.selfId() + " leads the cluster (term "
                     + lead.term() + ")", actor);
@@ -354,21 +406,37 @@ public class Watcher implements AutoCloseable {
     }
 
     /** An operation recorded in the state that no thread here runs any more (watcher restart, leader change). */
+    /**
+     * An operation recorded in the state that no thread here runs any more (watcher restart, leader change).
+     * One that another watcher started is left alone until any lease that watcher granted could have run out
+     * (its own steps also stop once it notices it lost the lead). If its target already runs as the only primary,
+     * that node is adopted as primary rather than fenced. Returns null while waiting.
+     */
     private ClusterState clearStaleOperation(ClusterState st) {
         if (st.operation() == null) {
             return st;
         }
         ClusterState.OperationRef stale = st.operation();
-        long maxAgent = view.maxAgentEpoch();
+        if (!store.selfId().equals(stale.owner()) && time.nanos() - leaderSinceNanos
+                < TimeUnit.MILLISECONDS.toNanos(cfg.timing().leaseTtlMs() + cfg.timing().leaseMarginMs())) {
+            return null;
+        }
+        ClusterView v = view;
+        List<NodeView> running = v.runningPrimaries();
+        String adopt = stale.target() != null && running.size() == 1 && running.get(0).name().equals(stale.target())
+                && !running.get(0).fenced() ? stale.target() : null;
+        long maxAgent = v.maxAgentEpoch();
         try {
             ClusterState cleared = repo.update(s -> s.operation() != null && stale.id().equals(s.operation().id()),
                     "operation already cleared",
-                    s -> s.withOperation(null).withEpoch(Math.max(s.epoch(), maxAgent) + 1)
-                            .stamped(time.millis(), actor));
+                    s -> (adopt == null ? s : s.withPrimary(adopt)).withOperation(null)
+                            .withEpoch(Math.max(s.epoch(), maxAgent) + 1).stamped(time.millis(), actor));
             announceEpoch(cleared.epoch());
             events.publish(EventType.OPERATION, stale.target(), stale.type() + " started by " + stale.startedBy()
                     + " on watcher " + stale.owner() + " did not finish (watcher restarted or lost the lead);"
-                    + " the cluster was released with epoch " + cleared.epoch() + ". Check the nodes.", actor);
+                    + " the cluster was released with epoch " + cleared.epoch()
+                    + (adopt == null ? ". Check the nodes." : "; " + adopt + " already runs as primary and was"
+                    + " recorded as the primary."), actor);
             return cleared;
         } catch (StateConflictException e) {
             return readState();
@@ -526,7 +594,7 @@ public class Watcher implements AutoCloseable {
         }
         if (cfg.restartPrimaryFirst() && !restartAttempted && h.agentAnswered() && h != PrimaryHealth.NOT_PRIMARY
                 && pv != null && !pv.busy() && !(pv.status().pgRunning() && h == PrimaryHealth.PG_DOWN)
-                && v.runningPrimaries().isEmpty()) {
+                && v.runningPrimaries().stream().allMatch(n -> n.name().equals(primary))) {
             restartAttempted = true;
             submitRole(new StartPrimaryOperation(ctx, primary, true, actor));
             return true;
@@ -585,8 +653,8 @@ public class Watcher implements AutoCloseable {
 
     // ---------------------------------------------------------------- safety nets
 
-    /** No VIP on a non-primary; the primary gets its VIP back if it lost it (strays are removed first). */
-    private void guardVips(ClusterView v, ClusterState st) {
+    /** No VIP on a node that is not the primary (for example one left by a promote that never completed). */
+    private void releaseStrayVips(ClusterView v, ClusterState st) {
         for (NodeView n : v.nodes()) {
             if (!n.reachable() || n.status().vipAddress() == null || n.busy() || n.name().equals(st.primary())
                     || !n.status().vipHeld()) {
@@ -601,6 +669,10 @@ public class Watcher implements AutoCloseable {
                         + " is up on non-primary " + n.name() + " and could not be removed: " + e.detail());
             }
         }
+    }
+
+    /** The running primary gets its VIP back if it lost it. */
+    private void restorePrimaryVip(ClusterView v, ClusterState st) {
         NodeView p = v.node(st.primary()).orElse(null);
         if (p == null || !p.runningPrimary() || p.fenced() || p.busy() || p.status().vipAddress() == null
                 || p.status().vipHeld() || !dueForRepair(p.name())) {
