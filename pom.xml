@@ -14,8 +14,7 @@
     <module>pgvip-common</module>
     <module>pgvip-agent</module>
     <module>pgvip-core</module>
-    <module>pgvip-raft</module>
-    <module>pgvip-watcher</module>
+    <!-- Coming next: pgvip-raft (Apache Ratis state store) and pgvip-watcher (Spring Boot + Vaadin UI). -->
   </modules>
 
   <properties>
