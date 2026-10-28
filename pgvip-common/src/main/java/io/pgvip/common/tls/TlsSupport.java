@@ -1,7 +1,9 @@
 package io.pgvip.common.tls;
 
+import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import java.io.IOException;
 import java.io.InputStream;
@@ -42,6 +44,28 @@ public final class TlsSupport {
             return ctx;
         } catch (GeneralSecurityException | IOException e) {
             throw new IllegalStateException("Cannot build TLS context: " + e.getMessage(), e);
+        }
+    }
+
+    /** Key managers for this process's certificate (PKCS#12). */
+    public static KeyManager[] keyManagers(Path keyStore, char[] password) {
+        try {
+            KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            kmf.init(load(keyStore, password), password);
+            return kmf.getKeyManagers();
+        } catch (GeneralSecurityException | IOException e) {
+            throw new IllegalStateException("Cannot read key store " + keyStore + ": " + e.getMessage(), e);
+        }
+    }
+
+    /** Trust managers for the CA (PKCS#12). */
+    public static TrustManager[] trustManagers(Path trustStore, char[] password) {
+        try {
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            tmf.init(load(trustStore, password));
+            return tmf.getTrustManagers();
+        } catch (GeneralSecurityException | IOException e) {
+            throw new IllegalStateException("Cannot read trust store " + trustStore + ": " + e.getMessage(), e);
         }
     }
 
