@@ -96,11 +96,36 @@ public class PgProbe {
                         + " (SELECT status FROM pg_stat_wal_receiver),"
                         + " (SELECT sender_host FROM pg_stat_wal_receiver),"
                         + " (SELECT sender_port FROM pg_stat_wal_receiver),"
-                        + " coalesce((SELECT received_tli FROM pg_stat_wal_receiver),"
-                        + " (SELECT timeline_id FROM pg_control_checkpoint()))", T).get(0);
-        return new PgSnapshot(true, PgRole.REPLICA, parseInt(r.get(6)), sysId, version, null, r.get(0), r.get(1),
+                        + " (SELECT received_tli FROM pg_stat_wal_receiver),"
+                        + " (SELECT timeline_id FROM pg_control_checkpoint()),"
+                        + " (SELECT max(name) FROM pg_ls_waldir() WHERE name ~ '^[0-9A-F]{8}[.]history$')", T).get(0);
+        Integer timeline = replicaTimeline(parseInt(r.get(6)), parseInt(r.get(7)), r.get(8));
+        return new PgSnapshot(true, PgRole.REPLICA, timeline, sysId, version, null, r.get(0), r.get(1),
                 parseLong(r.get(2)), r.get(3), r.get(4), parseInt(r.get(5)), List.of(), List.of(),
                 ControlData.UNKNOWN, null);
+    }
+
+    /**
+     * The timeline a replica follows. While its WAL receiver runs that is the received timeline. Without one (the
+     * primary is gone) the last restartpoint can still be on an older timeline, so the newest timeline history file
+     * in pg_wal, which the replica fetched when it followed a promotion, counts too.
+     */
+    static Integer replicaTimeline(Integer receivedTli, Integer checkpointTli, String newestHistoryFile) {
+        if (receivedTli != null) {
+            return receivedTli;
+        }
+        Integer history = null;
+        if (newestHistoryFile != null && newestHistoryFile.length() >= 8) {
+            try {
+                history = Integer.parseInt(newestHistoryFile.substring(0, 8), 16);
+            } catch (NumberFormatException ignored) {
+                // not a history file name
+            }
+        }
+        if (history == null) {
+            return checkpointTli;
+        }
+        return checkpointTli == null ? history : Math.max(history, checkpointTli);
     }
 
     Map<String, String> placeholders() {

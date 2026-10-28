@@ -169,6 +169,30 @@ class WatcherTest {
         assertTrue(event(EventType.FAILOVER_FAILED).message().contains("no VIP, no promote"));
         assertNull(watcher.state().operation(), "the cluster is released after the failed attempt");
         assertFalse(cluster.log.stream().anyMatch(l -> l.contains("promote")));
+
+        // Once the VIP can be brought up again, the next attempt (after the retry wait) promotes.
+        cluster.node("pg-a2").vipAddFails = false;
+        cluster.node("pg-a3").vipAddFails = false;
+        tick();
+        assertEquals("pg-a1", watcher.state().primary(), "waits for the retry interval");
+        time.advance(Timing.defaults().failoverRetryMs());
+        ticks(1);
+        assertEquals("pg-a3", watcher.state().primary(), "pg-a2 failed the VIP last time; pg-a3 is chosen");
+    }
+
+    @Test
+    void onlyCandidateIsRetriedAfterAVipFailure() {
+        cluster.primary("pg-a1", "10.0.0.1", "DC1");
+        cluster.replica("pg-a2", "10.0.0.2", "DC1", "10.0.0.1");
+        start(standalone());
+        cluster.node("pg-a2").vipAddFails = true;
+        cluster.crash("pg-a1");
+        ticks(3);
+        assertEquals("pg-a1", watcher.state().primary());
+        cluster.node("pg-a2").vipAddFails = false;
+        time.advance(Timing.defaults().failoverRetryMs());
+        ticks(1);
+        assertEquals("pg-a2", watcher.state().primary(), "not skipped when it is the only choice");
     }
 
     @Test

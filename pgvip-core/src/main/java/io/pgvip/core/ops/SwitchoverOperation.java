@@ -70,9 +70,13 @@ public final class SwitchoverOperation extends Operation {
         return p;
     }
 
-    /** Checks shown before the operator confirms; any FAIL blocks the switchover. */
+    /**
+     * Checks shown before the operator confirms; any FAIL blocks the switchover.
+     *
+     * @param vipDryRun also run the duplicate-address check on the target (arping, takes a few seconds)
+     */
     public static List<PreCheck> preChecks(OpContext ctx, ClusterView view, ClusterState state, String target,
-                                           boolean leader) {
+                                           boolean leader, boolean vipDryRun) {
         List<PreCheck> out = new ArrayList<>();
         if (!leader) {
             out.add(PreCheck.fail("This watcher leads the cluster", "switchovers run on the leading watcher"));
@@ -125,19 +129,8 @@ public final class SwitchoverOperation extends Operation {
         } else {
             out.add(PreCheck.pass("Agents on both nodes online, epoch " + e, "Pass"));
         }
-        try {
-            ApiResult vc = ctx.agent(target).vipCheck();
-            String msg = vc.message() == null ? "" : vc.message();
-            boolean held = vc.data() != null && vc.data().bool("held", false);
-            boolean free = vc.data() != null && vc.data().bool("free", false);
-            if (vc.ok() || held || free || msg.contains("answers from another host") || msg.contains("disabled")) {
-                out.add(PreCheck.pass("Target agent may run sudo ip / arping (dry run)", free ? "VIP free"
-                        : msg.isEmpty() ? "Pass" : msg));
-            } else {
-                out.add(PreCheck.fail("Target agent may run sudo ip / arping (dry run)", msg));
-            }
-        } catch (AgentCallException ex) {
-            out.add(PreCheck.fail("Target agent may run sudo ip / arping (dry run)", ex.detail()));
+        if (vipDryRun) {
+            out.add(vipDryRun(ctx, target));
         }
         if (ctx.store().mode() == StateStore.Mode.RAFT) {
             List<StateStore.WatcherPeer> peers = ctx.store().peers();
@@ -174,11 +167,28 @@ public final class SwitchoverOperation extends Operation {
         return out;
     }
 
+    /** Runs arping -D through the target agent: proves sudo works and shows whether the VIP is taken. */
+    static PreCheck vipDryRun(OpContext ctx, String target) {
+        String title = "Target agent may run sudo ip / arping (dry run)";
+        try {
+            ApiResult vc = ctx.agent(target).vipCheck();
+            String msg = vc.message() == null ? "" : vc.message();
+            boolean held = vc.data() != null && vc.data().bool("held", false);
+            boolean free = vc.data() != null && vc.data().bool("free", false);
+            if (vc.ok() || held || free || msg.contains("answers from another host") || msg.contains("disabled")) {
+                return PreCheck.pass(title, free ? "VIP free" : msg.isEmpty() ? "Pass" : msg);
+            }
+            return PreCheck.fail(title, msg);
+        } catch (AgentCallException ex) {
+            return PreCheck.fail(title, ex.detail());
+        }
+    }
+
     @Override
     protected void execute() throws InterruptedException {
         ClusterView view = pollNow();
         ClusterState state = ctx.repo().current();
-        List<PreCheck> checks = preChecks(ctx, view, state, target, ctx.store().leadership().leader());
+        List<PreCheck> checks = preChecks(ctx, view, state, target, ctx.store().leadership().leader(), true);
         for (PreCheck c : checks) {
             log("pre-check", c.level() + " " + c.title() + (c.detail() == null ? "" : ": " + c.detail()));
         }

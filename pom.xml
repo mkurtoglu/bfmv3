@@ -15,6 +15,7 @@
     <module>pgvip-agent</module>
     <module>pgvip-core</module>
     <module>pgvip-raft</module>
+    <module>pgvip-watcher</module>
   </modules>
 
   <properties>

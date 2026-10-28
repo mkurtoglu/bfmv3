@@ -38,21 +38,24 @@ public final class FailoverOperation extends Operation {
     private final long expectedEpoch;
     private final Set<String> excluded;
     private final Consumer<String> onVipFailure;
+    private final Consumer<String> blocked;
 
     /**
      * @param oldPrimary    node the shared state names as primary
      * @param expectedEpoch epoch the decision was made under; the failover stops if the state moved on
      * @param excluded      replicas not to promote (recent VIP failures)
      * @param onVipFailure  told which node could not bring the VIP up, so the next attempt skips it for a while
+     * @param blocked       told why the failover could not start (the watcher reports each new reason once)
      */
     public FailoverOperation(OpContext ctx, String oldPrimary, long expectedEpoch, Set<String> excluded,
-                             Consumer<String> onVipFailure) {
+                             Consumer<String> onVipFailure, Consumer<String> blocked) {
         super(ctx, new OperationProgress(TYPE, null, ctx.watcherActor(), ctx.time(), plan(ctx, oldPrimary)),
                 ctx.watcherActor());
         this.oldPrimary = oldPrimary;
         this.expectedEpoch = expectedEpoch;
         this.excluded = excluded;
         this.onVipFailure = onVipFailure;
+        this.blocked = blocked;
     }
 
     private static List<String[]> plan(OpContext ctx, String old) {
@@ -85,7 +88,7 @@ public final class FailoverOperation extends Operation {
             String veto = confirmWithReplicas(old);
             if (veto != null) {
                 progress.failed("confirm", veto);
-                event(EventType.FAILOVER_BLOCKED, oldPrimary, "Automatic failover blocked: " + veto);
+                blocked.accept(veto);
                 throw new Abort("blocked: " + veto);
             }
         } else {
@@ -104,10 +107,14 @@ public final class FailoverOperation extends Operation {
         OpContext.PrimaryInfo info = ctx.primaryInfo().get();
         CandidateSelector.Result ranked = CandidateSelector.rank(ctx.cfg(), fresh, oldPrimary, info.timeline(),
                 info.lsn(), excluded);
+        if (ranked.best().isEmpty() && !excluded.isEmpty()) {
+            // A replica that recently failed to bring the VIP up is skipped only while there is another choice.
+            ranked = CandidateSelector.rank(ctx.cfg(), fresh, oldPrimary, info.timeline(), info.lsn(), Set.of());
+        }
         if (ranked.best().isEmpty()) {
             String why = "no eligible replica (" + ranked.rejectedSummary() + ")";
             progress.failed("choose", why);
-            event(EventType.FAILOVER_BLOCKED, oldPrimary, "Automatic failover blocked: " + why);
+            blocked.accept(why);
             throw new Abort(why);
         }
         CandidateSelector.Candidate target = ranked.best().get();
@@ -256,7 +263,9 @@ public final class FailoverOperation extends Operation {
                 answered++;
                 boolean reachable = r.data() != null && r.data().bool("reachable", false);
                 boolean streaming = r.data() != null && "streaming".equalsIgnoreCase(r.data().str("walReceiverStatus"))
-                        && Objects.equals(old.pgHost(), r.data().str("upstreamHost"));
+                        && Objects.equals(old.pgHost(), r.data().str("upstreamHost"))
+                        && (r.data().intOrNull("upstreamPort") == null
+                        || r.data().intOrNull("upstreamPort") == old.pgPort());
                 log("agent " + n.name(), "peer check " + old.pgHost() + ":" + old.pgPort() + ": "
                         + (reachable ? "reachable" : "not reachable (" + r.message() + ")")
                         + (streaming ? ", still streaming from it" : ""));

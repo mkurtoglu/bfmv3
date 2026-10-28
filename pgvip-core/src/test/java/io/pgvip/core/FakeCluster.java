@@ -509,7 +509,8 @@ public final class FakeCluster implements AgentClientFactory {
                 return ApiResult.ok(ok ? "connected" : "Connection refused", JsonMap.create()
                         .put("reachable", ok)
                         .put("walReceiverStatus", isStreaming() ? "streaming" : null)
-                        .put("upstreamHost", upstreamHost));
+                        .put("upstreamHost", upstreamHost)
+                        .put("upstreamPort", upstreamHost == null ? null : 5432));
             }
         }
 

@@ -353,6 +353,7 @@ public class AgentService {
                 .put("reachable", reachable)
                 .put("walReceiverStatus", s.walReceiverStatus())
                 .put("upstreamHost", s.upstreamHost())
+                .put("upstreamPort", s.upstreamPort())
                 .put("receiveLsn", s.receiveLsn()));
     }
 

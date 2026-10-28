@@ -93,7 +93,7 @@ public class Watcher implements AutoCloseable {
     private int primaryFailures;
     private boolean unreachableReported;
     private boolean restartAttempted;
-    private String blockedReason;
+    private volatile String blockedReason;
     private volatile long nextFailoverNanos;
     private final Map<String, Long> vipCooldownUntil = new ConcurrentHashMap<>();
     private final Map<String, Long> nextRepairNanos = new ConcurrentHashMap<>();
@@ -546,11 +546,12 @@ public class Watcher implements AutoCloseable {
             }
         });
         submitRole(new FailoverOperation(ctx, primary, st.epoch(), excluded, n -> vipCooldownUntil.put(n,
-                time.nanos() + TimeUnit.MILLISECONDS.toNanos(5 * cfg.timing().failoverRetryMs()))));
+                time.nanos() + TimeUnit.MILLISECONDS.toNanos(5 * cfg.timing().failoverRetryMs())),
+                why -> blocked(primary, why)));
         return true;
     }
 
-    private void blocked(String primary, String why) {
+    private synchronized void blocked(String primary, String why) {
         if (!why.equals(blockedReason)) {
             blockedReason = why;
             events.publish(EventType.FAILOVER_BLOCKED, primary, "Automatic failover not started: " + why, actor);
@@ -840,8 +841,13 @@ public class Watcher implements AutoCloseable {
         return Optional.empty();
     }
 
+    /** Every switchover check, including the VIP dry run on the target (takes a few seconds). */
     public List<PreCheck> switchoverChecks(String target) {
-        return SwitchoverOperation.preChecks(ctx, view, readState(), target, store.leadership().leader());
+        return switchoverChecks(target, true);
+    }
+
+    public List<PreCheck> switchoverChecks(String target, boolean vipDryRun) {
+        return SwitchoverOperation.preChecks(ctx, view, readState(), target, store.leadership().leader(), vipDryRun);
     }
 
     // ---------------------------------------------------------------- commands
@@ -871,7 +877,7 @@ public class Watcher implements AutoCloseable {
         if (!cfg.name().equals(confirmName == null ? null : confirmName.trim())) {
             throw new IllegalArgumentException("type the cluster name " + cfg.name() + " to confirm");
         }
-        List<PreCheck> checks = switchoverChecks(target);
+        List<PreCheck> checks = switchoverChecks(target, false);
         if (!PreCheck.allowed(checks)) {
             String why = checks.stream().filter(c -> c.level() == PreCheck.Level.FAIL)
                     .map(c -> c.title() + ": " + c.detail()).findFirst().orElse("pre-check failed");

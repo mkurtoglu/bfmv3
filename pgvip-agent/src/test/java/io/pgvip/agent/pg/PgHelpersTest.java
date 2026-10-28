@@ -34,4 +34,13 @@ class PgHelpersTest {
         assertEquals("'it''s'", Psql.literal("it's"));
         assertNull(PgProbe.parseInt("x"));
     }
+
+    @Test
+    void replicaTimelineUsesHistoryWhenTheReceiverIsGone() {
+        assertEquals(Integer.valueOf(3), PgProbe.replicaTimeline(3, 1, "00000002.history"));
+        assertEquals(Integer.valueOf(2), PgProbe.replicaTimeline(null, 1, "00000002.history"));
+        assertEquals(Integer.valueOf(4), PgProbe.replicaTimeline(null, 4, "00000002.history"));
+        assertEquals(Integer.valueOf(1), PgProbe.replicaTimeline(null, 1, null));
+        assertEquals(Integer.valueOf(10), PgProbe.replicaTimeline(null, null, "0000000A.history"));
+    }
 }
