@@ -93,21 +93,44 @@ scripts/local-lab.sh down
 
 ## Installation
 
-1. **Certificates.** `packaging/make-certs.sh /etc/pgvip/certs pg-a1=10.0.0.11 pg-a2=10.0.0.12 w1=10.0.9.1`
-   makes a private CA and one PKCS#12 store per agent and watcher. The addresses go into the certificates'
-   SAN and must match the `agent-url` the watcher uses. Keep `ca.key` offline.
-2. **Agents** (every PostgreSQL server):
-   - copy `pgvip-agent.jar` to `/opt/pgvip/`, `packaging/agent.properties.example` to
-     `/etc/pgvip/agent.properties` (mode 600, owner postgres) and the node's `.p12`/`.pass` plus `ca.p12`/`ca.pass`;
-   - install `packaging/sudoers-pgvip` as `/etc/sudoers.d/pgvip` with the node's VIP and interface;
-   - set `wal_log_hints = on` (or use data checksums) so `pg_rewind` works, and give replicas a
-     `replicator` role and `.pgpass`;
-   - disable the PostgreSQL unit and enable `packaging/pgvip-agent.service`.
-3. **Watcher** (one, or three for Raft): copy `pgvip-watcher.jar`, `packaging/watcher.yml.example` to
-   `/etc/pgvip/watcher.yml`, create users with `echo 'pw' | java -jar pgvip-watcher.jar hash-password`, and
-   enable `packaging/pgvip-watcher.service`. Back up `data-dir/secret.key`; with Raft copy it to all watchers.
+### Rocky Linux / RHEL 8 and 9 (RPM)
+
+```
+packaging/rpm/build.sh            # builds the jars and target/rpm/el8/*.rpm, target/rpm/el9/*.rpm
+```
+
+The packages are noarch and need `java-21-openjdk-headless` (Rocky 8.9+ / 9.3+), which `dnf` pulls in.
+
+| Package | What it installs |
+| --- | --- |
+| `pgvip-agent` | `/usr/share/pgvip/pgvip-agent.jar`, `/usr/bin/pgvip-agent`, `/etc/pgvip/agent.properties` (mode 600, owner postgres), `/etc/sudoers.d/pgvip`, `/var/lib/pgvip`, `pgvip-agent.service`; creates the `postgres` user if PostgreSQL is not installed yet |
+| `pgvip-watcher` | `/usr/share/pgvip/pgvip-watcher.jar`, `/usr/bin/pgvip-watcher`, `/usr/bin/pgvip-make-certs`, `/etc/pgvip/watcher.yml` (mode 640, group pgvip), `/var/lib/pgvip-watcher`, `pgvip-watcher.service`; creates the `pgvip` user |
+
+Configuration files are `%config(noreplace)`: an upgrade never overwrites them. An upgrade does not restart the
+services either, because a restart would interrupt a running `pg_basebackup`, `pg_rewind` or switchover; restart
+them when the cluster is idle. JVM options go into `/etc/pgvip/agent.env` (`PGVIP_AGENT_JAVA_OPTS`) and
+`/etc/pgvip/watcher.env` (`PGVIP_WATCHER_JAVA_OPTS`).
+
+1. **Certificates.** On one machine: `pgvip-make-certs /etc/pgvip/certs pg-a1=10.0.0.11 pg-a2=10.0.0.12 w1=10.0.9.1`
+   makes a private CA and one PKCS#12 store per agent and watcher. The addresses go into the certificates' SAN
+   and must match the `agent-url` the watcher uses. Keep `ca.key` offline.
+2. **Agents** (every PostgreSQL server): `dnf install pgvip-agent-*.rpm`, then
+   - edit `/etc/pgvip/agent.properties` and copy the node's `.p12`/`.pass` plus `ca.p12`/`ca.pass` to `/etc/pgvip/`;
+   - set the node's VIP and interface in `/etc/sudoers.d/pgvip`;
+   - set `wal_log_hints = on` (or use data checksums) so `pg_rewind` works, and give replicas a `replicator`
+     role and `.pgpass`;
+   - `systemctl disable postgresql-16` (the agent starts PostgreSQL), `systemctl enable --now pgvip-agent`.
+3. **Watcher** (one, or three for Raft): `dnf install pgvip-watcher-*.rpm`, edit `/etc/pgvip/watcher.yml`, create
+   users with `echo 'pw' | pgvip-watcher hash-password`, then `systemctl enable --now pgvip-watcher`. Back up
+   `/var/lib/pgvip-watcher/secret.key`; with Raft copy it to all watchers.
 4. **First start.** If one node already runs as primary, the watcher records it. Otherwise use
    *Start as primary* on one node in the console, then *Re-initialize* the others.
+
+### Other distributions
+
+Copy the jars to `/usr/share/pgvip/`, the scripts from `packaging/bin/` to `/usr/bin/`, the units from
+`packaging/` to `/etc/systemd/system/`, and the example settings to `/etc/pgvip/`; create the `pgvip` user for
+the watcher. Then follow the steps above.
 
 ## Watcher
 

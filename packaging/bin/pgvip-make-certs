@@ -1,8 +1,8 @@
 #!/bin/bash
 # Makes a private CA and one PKCS#12 key store per agent and watcher for mutual TLS.
 #
-#   make-certs.sh OUTDIR NAME=ADDRESS[,ADDRESS...] ...
-#   make-certs.sh /etc/pgvip/certs pg-a1=10.0.0.11 pg-a2=10.0.0.12 pg-dr1=10.20.0.11 w1=10.0.9.1,watcher1.example
+#   pgvip-make-certs OUTDIR NAME=ADDRESS[,ADDRESS...] ...
+#   pgvip-make-certs /etc/pgvip/certs pg-a1=10.0.0.11 pg-a2=10.0.0.12 pg-dr1=10.20.0.11 w1=10.0.9.1,watcher1.example
 #
 # Produces ca.crt, ca.key (keep it offline), ca.p12 + ca.pass (trust store for everyone), and NAME.p12 + NAME.pass
 # for each name. Copy NAME.p12, NAME.pass, ca.p12 and ca.pass to the matching host. Needs openssl and keytool.

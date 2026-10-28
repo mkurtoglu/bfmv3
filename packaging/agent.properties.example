@@ -1,12 +1,12 @@
 # pgVIP agent settings: /etc/pgvip/agent.properties, readable by the postgres user only (chmod 600).
-# Start: java -jar /opt/pgvip/pgvip-agent.jar /etc/pgvip/agent.properties  (see pgvip-agent.service)
+# Start: pgvip-agent (installed by the RPM with pgvip-agent.service; runs java -jar /usr/share/pgvip/pgvip-agent.jar)
 
 # Must equal the node name in the watcher configuration.
 node.name=pg-a1
 listen.address=0.0.0.0
 listen.port=8008
 
-# Mutual TLS: only holders of a certificate signed by the pgVIP CA may call the agent (see make-certs.sh).
+# Mutual TLS: only holders of a certificate signed by the pgVIP CA may call the agent (see pgvip-make-certs).
 tls.enabled=true
 tls.keystore=/etc/pgvip/pg-a1.p12
 tls.keystore.password.file=/etc/pgvip/pg-a1.pass

@@ -1,0 +1,14 @@
+#!/bin/bash
+# Starts the pgVIP watcher with /etc/pgvip/watcher.yml, or runs one of its commands:
+#   pgvip-watcher hash-password     prints a password hash for pgvip.users (reads the password from stdin or a tty)
+# JVM options can be set in PGVIP_WATCHER_JAVA_OPTS, for example in /etc/pgvip/watcher.env.
+JAR=/usr/share/pgvip/pgvip-watcher.jar
+case "${1:-}" in
+  hash-password)
+    exec java -Xmx256m -jar "$JAR" "$@"
+    ;;
+  *)
+    exec java ${PGVIP_WATCHER_JAVA_OPTS:--Xmx512m} -jar "$JAR" \
+      --spring.config.additional-location=file:/etc/pgvip/watcher.yml "$@"
+    ;;
+esac

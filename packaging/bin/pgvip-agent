@@ -1,0 +1,4 @@
+#!/bin/bash
+# Starts the pgVIP agent. Settings: /etc/pgvip/agent.properties (or the file given as the first argument).
+# JVM options can be set in PGVIP_AGENT_JAVA_OPTS, for example in /etc/pgvip/agent.env.
+exec java ${PGVIP_AGENT_JAVA_OPTS:--Xmx128m} -jar /usr/share/pgvip/pgvip-agent.jar "${1:-/etc/pgvip/agent.properties}"
