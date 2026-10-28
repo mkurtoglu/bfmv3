@@ -1,0 +1,14 @@
+target/
+.idea/
+*.iml
+.vscode/
+node_modules/
+pgvip-watcher/src/main/frontend/generated/
+pgvip-watcher/src/main/bundles/
+pgvip-watcher/vite.generated.ts
+pgvip-watcher/vite.config.ts
+pgvip-watcher/package.json
+pgvip-watcher/package-lock.json
+pgvip-watcher/tsconfig.json
+pgvip-watcher/types.d.ts
+/data/
