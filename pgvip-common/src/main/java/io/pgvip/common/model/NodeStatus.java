@@ -11,7 +11,7 @@ import java.util.List;
  *
  * <p>Replica fields ({@code receiveLsn}, {@code replayLsn}, {@code walReceiverStatus}, upstream)
  * are null on a primary; primary fields ({@code currentLsn}, {@code replicas}, {@code slots})
- * are null or empty on a replica.
+ * are null or empty on a replica. {@code vipAddress} is null when the agent does not manage a VIP.
  */
 public record NodeStatus(
         String node,

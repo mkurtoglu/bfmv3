@@ -17,10 +17,12 @@ import java.util.Optional;
  * @param restartPrimaryFirst  when the primary's agent answers but PostgreSQL is down, try restarting it in place
  *                             before failing over
  * @param fenceRoguePrimary    fence any node that runs as primary although the cluster state names another one
+ * @param confirmWithReplicas  before an automatic failover, ask every reachable replica whether it still reaches
+ *                             the primary; any "yes" blocks the failover
  */
 public record ClusterConfig(String name, List<NodeConfig> nodes, Timing timing, FailoverScope scope,
                             boolean selfFence, boolean autoRejoin, boolean restartPrimaryFirst,
-                            boolean fenceRoguePrimary) {
+                            boolean fenceRoguePrimary, boolean confirmWithReplicas) {
 
     public ClusterConfig {
         if (nodes == null || nodes.size() < 2) {
@@ -30,10 +32,19 @@ public record ClusterConfig(String name, List<NodeConfig> nodes, Timing timing, 
         if (distinct != nodes.size()) {
             throw new IllegalArgumentException("node names must be unique");
         }
+        long slots = nodes.stream().map(NodeConfig::slot).distinct().count();
+        if (slots != nodes.size()) {
+            throw new IllegalArgumentException("replication slot names must be unique");
+        }
         nodes = List.copyOf(nodes);
         timing = timing == null ? Timing.defaults() : timing;
         scope = scope == null ? FailoverScope.DC_LOCAL : scope;
         name = name == null || name.isBlank() ? "cluster" : name;
+    }
+
+    /** Defaults for a standalone watcher: no self-fencing; rejoin, restart in place and replica confirmation on. */
+    public static ClusterConfig of(String name, List<NodeConfig> nodes, Timing timing) {
+        return new ClusterConfig(name, nodes, timing, FailoverScope.DC_LOCAL, false, true, true, true, true);
     }
 
     public Optional<NodeConfig> node(String nodeName) {

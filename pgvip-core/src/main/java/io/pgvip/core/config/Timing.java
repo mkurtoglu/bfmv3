@@ -12,10 +12,13 @@ package io.pgvip.core.config;
  * @param maxLagBytes               replicas further behind than this are not promoted automatically
  * @param switchoverCatchupMs       how long a switchover waits for the target to replay the final WAL
  * @param operationTimeoutMs        how long long-running agent operations (rewind, reinit) may take
+ * @param failoverRetryMs           wait after a failed or blocked automatic failover before the next attempt
+ * @param repairRetryMs             wait between automatic rejoin / restart attempts on the same node
+ * @param replicaGraceMs            how long a replica may be stopped or not streaming before it is repaired
  */
 public record Timing(long pollIntervalMs, int failureThreshold, long agentTimeoutMs, long leaseTtlMs,
                      long leaseMarginMs, long observationFreshMs, long maxLagBytes, long switchoverCatchupMs,
-                     long operationTimeoutMs) {
+                     long operationTimeoutMs, long failoverRetryMs, long repairRetryMs, long replicaGraceMs) {
 
     public Timing {
         if (pollIntervalMs <= 0 || failureThreshold <= 0 || agentTimeoutMs <= 0 || leaseTtlMs <= 0) {
@@ -24,9 +27,17 @@ public record Timing(long pollIntervalMs, int failureThreshold, long agentTimeou
         if (leaseTtlMs < 3 * pollIntervalMs) {
             throw new IllegalArgumentException("leaseTtlMs must be at least three poll intervals");
         }
+        if (leaseMarginMs < agentTimeoutMs) {
+            throw new IllegalArgumentException("leaseMarginMs must be at least agentTimeoutMs, so a renewal still"
+                    + " in flight cannot outlive the wait");
+        }
+        if (observationFreshMs < 2 * pollIntervalMs) {
+            throw new IllegalArgumentException("observationFreshMs must be at least two poll intervals");
+        }
     }
 
     public static Timing defaults() {
-        return new Timing(2_000, 3, 3_000, 30_000, 5_000, 10_000, 16L * 1024 * 1024, 60_000, 6L * 3_600_000);
+        return new Timing(2_000, 3, 3_000, 30_000, 5_000, 10_000, 16L * 1024 * 1024, 60_000, 6L * 3_600_000,
+                60_000, 60_000, 30_000);
     }
 }

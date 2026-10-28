@@ -153,8 +153,9 @@ public class AgentService {
         return new NodeStatus(cfg.nodeName, AgentMain.VERSION, System.currentTimeMillis(), s.running(), s.role(),
                 s.timeline(), s.systemIdentifier(), s.serverVersionNum(), s.currentLsn(), s.receiveLsn(),
                 s.replayLsn(), s.replayDelayMs(), s.walReceiverStatus(), s.upstreamHost(), s.upstreamPort(),
-                s.replicas(), s.slots(), cfg.vipAddress, vipHeld, epoch.current(), lease.info(), fence.fenced(),
-                fence.reason(), c.clusterState(), c.checkpointLsn(), c.timeline(), ops.busy(), error);
+                s.replicas(), s.slots(), cfg.vipEnabled ? cfg.vipAddress : null, vipHeld, epoch.current(),
+                lease.info(), fence.fenced(), fence.reason(), c.clusterState(), c.checkpointLsn(), c.timeline(),
+                ops.busy(), error);
     }
 
     // ---- commands ----

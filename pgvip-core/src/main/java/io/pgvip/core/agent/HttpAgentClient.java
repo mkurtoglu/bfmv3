@@ -1,0 +1,226 @@
+package io.pgvip.core.agent;
+
+import io.pgvip.common.json.JsonException;
+import io.pgvip.common.json.JsonMap;
+import io.pgvip.common.model.ApiResult;
+import io.pgvip.common.model.NodeStatus;
+import io.pgvip.common.model.OperationStatus;
+import io.pgvip.core.config.NodeConfig;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import java.io.IOException;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.List;
+
+/**
+ * Agent client over HTTPS with mutual TLS (or plain HTTP with a bearer token in a lab).
+ *
+ * <p>System proxy settings are ignored on purpose: agents sit on the database network and a corporate proxy
+ * in between would break mutual TLS.
+ */
+public class HttpAgentClient implements AgentClient {
+
+    private final String node;
+    private final String baseUrl;
+    private final HttpClient http;
+    private final String token;
+    private final Duration timeout;
+
+    public HttpAgentClient(String node, String baseUrl, HttpClient http, String token, Duration timeout) {
+        this.node = node;
+        this.baseUrl = baseUrl;
+        this.http = http;
+        this.token = token;
+        this.timeout = timeout;
+    }
+
+    /**
+     * A factory sharing one HTTP client between all nodes.
+     *
+     * @param tls     mutual-TLS context, or null for plain HTTP
+     * @param token   optional bearer token
+     * @param timeout timeout of one call
+     */
+    public static AgentClientFactory factory(SSLContext tls, String token, Duration timeout) {
+        HttpClient.Builder b = HttpClient.newBuilder()
+                .connectTimeout(timeout)
+                .proxy(HttpClient.Builder.NO_PROXY)
+                .version(HttpClient.Version.HTTP_1_1);
+        if (tls != null) {
+            SSLParameters params = tls.getDefaultSSLParameters();
+            params.setProtocols(new String[]{"TLSv1.3", "TLSv1.2"});
+            b.sslContext(tls).sslParameters(params);
+        }
+        HttpClient http = b.build();
+        return (NodeConfig n) -> new HttpAgentClient(n.name(), n.agentUrl(), http, token, timeout);
+    }
+
+    @Override
+    public String node() {
+        return node;
+    }
+
+    @Override
+    public NodeStatus status() {
+        return NodeStatus.fromJson(call("GET", "/v1/status", null));
+    }
+
+    @Override
+    public ApiResult grantLease(long epoch, long ttlMs, boolean fenceOnExpiry) {
+        return command("/v1/lease", body(epoch).put("ttlMs", ttlMs).put("fenceOnExpiry", fenceOnExpiry));
+    }
+
+    @Override
+    public ApiResult vipAcquire(long epoch) {
+        return command("/v1/vip/acquire", body(epoch));
+    }
+
+    @Override
+    public ApiResult vipRelease(long epoch) {
+        return command("/v1/vip/release", body(epoch));
+    }
+
+    @Override
+    public ApiResult vipCheck() {
+        return ApiResult.fromJson(call("GET", "/v1/vip/check", null, true));
+    }
+
+    @Override
+    public ApiResult promote(long epoch, long leaseTtlMs, boolean fenceOnExpiry) {
+        return command("/v1/pg/promote", body(epoch).put("requireVip", true).put("leaseTtlMs", leaseTtlMs)
+                .put("fenceOnExpiry", fenceOnExpiry));
+    }
+
+    @Override
+    public ApiResult checkpoint(long epoch) {
+        return command("/v1/pg/checkpoint", body(epoch));
+    }
+
+    @Override
+    public ApiResult stop(long epoch, String mode, boolean releaseVip) {
+        return command("/v1/pg/stop", body(epoch).put("mode", mode).put("releaseVip", releaseVip));
+    }
+
+    @Override
+    public ApiResult start(long epoch, boolean allowPrimary) {
+        return command("/v1/pg/start", body(epoch).put("allowPrimary", allowPrimary));
+    }
+
+    @Override
+    public ApiResult follow(long epoch, String host, int port, String slot) {
+        return command("/v1/pg/follow", body(epoch).put("host", host).put("port", port).put("slot", slot));
+    }
+
+    @Override
+    public ApiResult demote(long epoch, String host, int port, String slot, boolean rewind, String stopMode) {
+        return command("/v1/pg/demote", body(epoch).put("host", host).put("port", port).put("slot", slot)
+                .put("rewind", rewind).put("stopMode", stopMode));
+    }
+
+    @Override
+    public ApiResult reinit(long epoch, String host, int port, String slot) {
+        return command("/v1/pg/reinit", body(epoch).put("host", host).put("port", port).put("slot", slot));
+    }
+
+    @Override
+    public OperationStatus operation(String id) {
+        return OperationStatus.fromJson(call("GET", "/v1/operations/" + URLEncoder.encode(id, StandardCharsets.UTF_8), null));
+    }
+
+    @Override
+    public ApiResult fence(String reason) {
+        return command("/v1/fence", JsonMap.create().put("reason", reason));
+    }
+
+    @Override
+    public ApiResult clearFence(long epoch) {
+        return command("/v1/fence/clear", body(epoch));
+    }
+
+    @Override
+    public ApiResult peerCheck(String host, int port, long timeoutMs) {
+        return command("/v1/peer-check", JsonMap.create().put("host", host).put("port", port).put("timeoutMs", timeoutMs));
+    }
+
+    @Override
+    public ApiResult ensureSlots(long epoch, List<String> names) {
+        return command("/v1/slots/ensure", body(epoch).put("names", names));
+    }
+
+    @Override
+    public ApiResult dropSlot(long epoch, String name) {
+        return command("/v1/slots/drop", body(epoch).put("name", name));
+    }
+
+    private static JsonMap body(long epoch) {
+        return JsonMap.create().put("epoch", epoch);
+    }
+
+    private ApiResult command(String path, JsonMap body) {
+        return ApiResult.fromJson(call("POST", path, body));
+    }
+
+    private String call(String method, String path, JsonMap body) {
+        return call(method, path, body, false);
+    }
+
+    /**
+     * Sends one request. Non-2xx answers become {@link AgentCallException} with the agent's message, unless
+     * {@code acceptRefusal} is set and the answer is a well-formed refusal (used by the VIP check, which
+     * reports a taken address as a 409).
+     */
+    private String call(String method, String path, JsonMap body, boolean acceptRefusal) {
+        HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(baseUrl + path))
+                .timeout(timeout)
+                .header("Accept", "application/json");
+        if (token != null && !token.isEmpty()) {
+            rb.header("Authorization", "Bearer " + token);
+        }
+        if ("POST".equals(method)) {
+            rb.header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body == null ? "{}" : body.toJson()));
+        } else {
+            rb.GET();
+        }
+        HttpResponse<String> resp;
+        try {
+            resp = http.send(rb.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new AgentCallException(node, "unreachable: " + describe(e), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AgentCallException(node, "interrupted", e);
+        } catch (IllegalArgumentException e) {
+            throw new AgentCallException(node, "bad agent URL " + baseUrl + ": " + e.getMessage(), e);
+        }
+        int status = resp.statusCode();
+        if (status >= 200 && status < 300) {
+            return resp.body();
+        }
+        String message;
+        try {
+            message = ApiResult.fromJson(resp.body()).message();
+            if (acceptRefusal && status == 409) {
+                return resp.body();
+            }
+        } catch (JsonException | IllegalArgumentException e) {
+            message = "HTTP " + status;
+        }
+        throw new AgentCallException(node, status, message == null ? "HTTP " + status : message);
+    }
+
+    private static String describe(IOException e) {
+        String m = e.getMessage();
+        if (m == null || m.isBlank()) {
+            return e.getClass().getSimpleName();
+        }
+        return e.getClass().getSimpleName() + ": " + m;
+    }
+}
