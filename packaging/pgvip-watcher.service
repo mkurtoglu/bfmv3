@@ -1,0 +1,18 @@
+[Unit]
+Description=pgVIP watcher (failover decisions, console and API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pgvip
+Group=pgvip
+EnvironmentFile=-/etc/pgvip/watcher.env
+ExecStart=/usr/bin/java -Xmx512m -jar /opt/pgvip/pgvip-watcher.jar --spring.config.additional-location=file:/etc/pgvip/watcher.yml
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/pgvip-watcher
+
+[Install]
+WantedBy=multi-user.target

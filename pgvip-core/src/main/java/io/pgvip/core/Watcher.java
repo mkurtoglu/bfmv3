@@ -668,6 +668,17 @@ public class Watcher implements AutoCloseable {
             if (nodeOperationRunning(n.name()) || !dueForRepair(n.name())) {
                 continue;
             }
+            if (n.reachable() && !n.status().pgRunning() && n.status().controlClusterState() == null) {
+                // No (readable) data directory: only pg_basebackup can bring it back.
+                if (st.autoReinit()) {
+                    submitNode(n.name(), new NodeRepairOperation(ctx, n.name(), NodeRepairOperation.Kind.REINIT,
+                            false, actor));
+                } else {
+                    alertOnce("nodata/" + n.name(), EventType.NODE_DOWN, n.name(), n.name() + " has no readable"
+                            + " data directory; re-initialize it (or turn on auto reinit)");
+                }
+                continue;
+            }
             // A fenced node was a primary: go straight to pg_rewind instead of starting it as it is.
             NodeRepairOperation.Kind kind = n.fenced() ? NodeRepairOperation.Kind.REJOIN
                     : NodeRepairOperation.Kind.FOLLOW;

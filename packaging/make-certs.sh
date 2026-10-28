@@ -1,0 +1,46 @@
+#!/bin/bash
+# Makes a private CA and one PKCS#12 key store per agent and watcher for mutual TLS.
+#
+#   make-certs.sh OUTDIR NAME=ADDRESS[,ADDRESS...] ...
+#   make-certs.sh /etc/pgvip/certs pg-a1=10.0.0.11 pg-a2=10.0.0.12 pg-dr1=10.20.0.11 w1=10.0.9.1,watcher1.example
+#
+# Produces ca.crt, ca.key (keep it offline), ca.p12 + ca.pass (trust store for everyone), and NAME.p12 + NAME.pass
+# for each name. Copy NAME.p12, NAME.pass, ca.p12 and ca.pass to the matching host. Needs openssl and keytool.
+set -euo pipefail
+out=${1:?output directory}
+shift
+[ $# -gt 0 ] || { echo "give at least one NAME=ADDRESS" >&2; exit 64; }
+mkdir -p "$out"
+cd "$out"
+umask 077
+
+pw() { openssl rand -base64 18 | tr -d '/+=' ; }
+
+if [ ! -f ca.key ]; then
+  openssl req -x509 -newkey rsa:3072 -sha256 -days 3650 -nodes -keyout ca.key -out ca.crt -subj "/CN=pgVIP CA"
+fi
+if [ ! -f ca.p12 ]; then
+  pw >ca.pass
+  keytool -importcert -noprompt -alias pgvip-ca -file ca.crt -keystore ca.p12 -storetype PKCS12 \
+    -storepass "$(cat ca.pass)"
+fi
+
+for spec in "$@"; do
+  name=${spec%%=*}
+  addrs=${spec#*=}
+  san=""
+  IFS=',' read -ra list <<<"$addrs"
+  for a in "${list[@]}"; do
+    if [[ $a =~ ^[0-9.]+$ || $a == *:* ]]; then san+="IP:$a,"; else san+="DNS:$a,"; fi
+  done
+  san=${san%,}
+  openssl req -newkey rsa:3072 -sha256 -nodes -keyout "$name.key" -out "$name.csr" -subj "/CN=$name"
+  printf 'subjectAltName=%s\nextendedKeyUsage=serverAuth,clientAuth\n' "$san" >"$name.ext"
+  openssl x509 -req -in "$name.csr" -CA ca.crt -CAkey ca.key -CAcreateserial -days 825 -sha256 \
+    -extfile "$name.ext" -out "$name.crt"
+  pw >"$name.pass"
+  openssl pkcs12 -export -name "$name" -inkey "$name.key" -in "$name.crt" -certfile ca.crt -out "$name.p12" \
+    -passout "file:$name.pass"
+  rm -f "$name.csr" "$name.ext" "$name.key"
+  echo "$name: $name.p12 ($san)"
+done

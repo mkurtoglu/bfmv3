@@ -381,6 +381,23 @@ class WatcherTest {
     }
 
     @Test
+    void emptyNodeIsRebuiltOnlyWithAutoReinit() {
+        threeNodes();
+        start(standalone());
+        FakeCluster.Node c = cluster.node("pg-a3");
+        c.pgRunning = false;
+        c.clusterState = null;        // no data directory
+        ticks(18);
+        assertFalse(c.pgRunning, "not touched without auto reinit");
+        assertFalse(cluster.log.stream().anyMatch(l -> l.startsWith("pg-a3:")), cluster.log.toString());
+        assertTrue(watcher.events(50).stream().anyMatch(e -> e.message().contains("no readable data directory")));
+        watcher.setControls(null, null, null, true, "admin");
+        ticks(18);
+        assertTrue(c.isStreaming());
+        assertTrue(cluster.log.contains("pg-a3: reinit from 10.0.0.1"));
+    }
+
+    @Test
     void strayVipOnReplicaIsRemoved() {
         threeNodes();
         start(standalone());

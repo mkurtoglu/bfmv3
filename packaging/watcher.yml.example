@@ -1,0 +1,91 @@
+# pgVIP watcher settings: /etc/pgvip/watcher.yml
+# Start: java -jar /opt/pgvip/pgvip-watcher.jar --spring.config.additional-location=file:/etc/pgvip/watcher.yml
+
+server:
+  port: 8443
+  ssl:
+    # The console and REST API over HTTPS. Any PKCS#12 store works; make-certs.sh can make one.
+    key-store: file:/etc/pgvip/w1.p12
+    key-store-type: PKCS12
+    key-store-password: ${PGVIP_KEYSTORE_PASSWORD}
+
+pgvip:
+  watcher-id: w1
+  data-dir: /var/lib/pgvip-watcher       # state, events, Raft log, secret.key (back it up)
+  time-zone: Europe/Istanbul             # times in the console and in mails
+
+  cluster:
+    name: prod-main                      # typed by operators to confirm a switchover; also the mail subject
+    scope: DC_LOCAL                      # DC_LOCAL: automatic failover stays in the old primary's data center; ANY
+    self-fence: false                    # true with Raft: the primary stops itself when renewals stop
+    auto-rejoin: true                    # a returning old primary rejoins as a replica (pg_rewind when needed)
+    restart-primary-first: true          # PostgreSQL down but agent up: restart in place before failing over
+    fence-rogue-primary: true            # any other node running as primary is fenced
+    confirm-with-replicas: true          # replicas must confirm they cannot reach the primary either
+    timing:
+      poll-interval: 2s
+      failure-threshold: 3               # failed polls before the primary counts as lost
+      agent-timeout: 3s
+      lease-ttl: 30s
+      lease-margin: 5s                   # at least agent-timeout
+      observation-fresh: 10s             # Raft: how old another watcher's view may be
+      max-lag: 16MB                      # replicas further behind are not promoted automatically
+      switchover-catchup: 60s
+      operation-timeout: 6h              # pg_rewind / pg_basebackup
+      failover-retry: 60s
+      repair-retry: 60s
+      replica-grace: 30s                 # a replica may be down or not streaming this long before repair
+    nodes:
+      - name: pg-a1
+        agent-url: https://10.0.0.11:8008   # certificate must carry this address (SAN)
+        pg-host: 10.0.0.11
+        pg-port: 5432
+        dc: DC1
+        priority: 100
+      - name: pg-a2
+        agent-url: https://10.0.0.12:8008
+        pg-host: 10.0.0.12
+        dc: DC1
+      - name: pg-dr1
+        agent-url: https://10.20.0.11:8008
+        pg-host: 10.20.0.11
+        dc: DR
+        no-failover: false                 # true: never promoted automatically, switchover still allowed
+
+  agent:
+    tls:
+      enabled: true
+      keystore: /etc/pgvip/w1.p12
+      keystore-password-file: /etc/pgvip/w1.pass
+      truststore: /etc/pgvip/ca.p12
+      truststore-password-file: /etc/pgvip/ca.pass
+    # token-file: /etc/pgvip/agent.token    # optional; required when TLS is off
+
+  # Optional: three watchers in an Apache Ratis group. The same file on every watcher, only watcher-id differs.
+  # Copy secret.key from the first watcher to the others so they can read the stored SMTP password.
+  raft:
+    enabled: false
+    tls: true                            # watchers talk to each other with the agent TLS stores
+    peers:
+      - id: w1
+        host: 10.0.9.1
+        port: 9870
+        url: https://10.0.9.1:8443         # shown on followers as a link to the leader
+      - id: w2
+        host: 10.0.9.2
+        port: 9870
+        url: https://10.0.9.2:8443
+      - id: w3
+        host: 10.0.9.3
+        port: 9870
+        url: https://10.0.9.3:8443
+
+  # Console and API users. Hash: echo 'the password' | java -jar pgvip-watcher.jar hash-password
+  # ADMIN operates (switchover, rejoin, reinit, settings), VIEWER only looks.
+  users:
+    - name: admin
+      password-hash: "{bcrypt}$2a$10$REPLACE_WITH_A_REAL_HASH"
+      role: ADMIN
+    - name: ops
+      password-hash: "{bcrypt}$2a$10$REPLACE_WITH_A_REAL_HASH"
+      role: VIEWER

@@ -1,0 +1,17 @@
+[Unit]
+Description=pgVIP agent (PostgreSQL role changes and VIP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=postgres
+Group=postgres
+ExecStart=/usr/bin/java -Xmx128m -jar /opt/pgvip/pgvip-agent.jar /etc/pgvip/agent.properties
+Restart=always
+RestartSec=2
+# The agent starts and stops PostgreSQL itself; disable the PostgreSQL unit (systemctl disable postgresql-16).
+KillMode=process
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
