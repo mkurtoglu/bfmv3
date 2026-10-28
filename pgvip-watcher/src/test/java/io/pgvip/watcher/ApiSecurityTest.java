@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** The REST API on a fake three-node cluster: who may read, who may act, and what lands in the event log. */
 @SpringBootTest(properties = {
         "pgvip.watcher-id=w1",
-        "pgvip.data-dir=${java.io.tmpdir}/pgvip-api-test",
+        "pgvip.data-dir=${java.io.tmpdir}/pgvip-api-test-${random.uuid}",
         "pgvip.cluster.name=prod-main",
         "pgvip.cluster.nodes[0].name=pg-a1",
         "pgvip.cluster.nodes[0].agent-url=https://10.0.0.1:8008",
