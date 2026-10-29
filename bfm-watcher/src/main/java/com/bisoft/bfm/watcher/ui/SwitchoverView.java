@@ -77,16 +77,16 @@ public class SwitchoverView extends Div implements BeforeEnterObserver {
         add(new Div(Ui.text("pg-eyebrow", "Planned role change"), title));
 
         String cluster = console.watcher().config().name();
-        Div step1 = Ui.card("1 · Choose target and review checks");
+        Div step1 = Ui.card("Choose the new primary and review the checks");
         Div primaryBox = new Div(Ui.text("pg-stat-label", "Current primary"), new Div(currentPrimary),
                 new Div(currentSub));
         target.setLabel("New primary");
         target.setWidthFull();
         target.addValueChangeListener(e -> renderChecks());
-        Div options = new Div(Ui.text("pg-stat-label", "Options"), checkpoint,
-                disabledOption("Promote only after the target has replayed the final LSN"), restartOld, mail);
+        restartOld.addValueChangeListener(e -> renderChanges(console.overview(), target.getValue()));
+        Div options = new Div(Ui.text("pg-stat-label", "Options"), checkpoint, restartOld, mail);
         options.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "4px");
-        Div top = Ui.div("pg-grid-auto", primaryBox, target, options);
+        Div top = Ui.div("pg-grid-auto", primaryBox, target);
 
         checks.addThemeVariants(GridVariant.LUMO_COMPACT, GridVariant.LUMO_NO_BORDER,
                 GridVariant.LUMO_WRAP_CELL_CONTENT);
@@ -110,7 +110,7 @@ public class SwitchoverView extends Div implements BeforeEnterObserver {
         confirm.setMaxWidth("420px");
         confirm.setValueChangeMode(com.vaadin.flow.data.value.ValueChangeMode.EAGER);
         confirm.addValueChangeListener(e -> confirmError.setText(""));
-        confirmError.getStyle().set("color", "#B42318").set("font-size", "13px");
+        confirmError.addClassName("pg-field-error");
         confirmError.getElement().setAttribute("role", "alert");
         start.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         start.addClickListener(e -> startSwitchover(cluster));
@@ -118,7 +118,7 @@ public class SwitchoverView extends Div implements BeforeEnterObserver {
         recheck.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
         Button cancel = new Button("Cancel", e -> UI.getCurrent().navigate(OverviewView.class));
         cancel.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
-        step1.add(top, Ui.div("pg-spread", new H2("Pre-checks"), recheck), checks, confirm, confirmError,
+        step1.add(top, options, Ui.div("pg-spread", new H2("Pre-checks"), recheck), checks, confirm, confirmError,
                 Ui.div("pg-row", start, cancel));
         if (!admin) {
             step1.add(Ui.text("pg-note", "Viewers can review the checks but cannot start a switchover."));
@@ -130,13 +130,6 @@ public class SwitchoverView extends Div implements BeforeEnterObserver {
         running.setVisible(false);
         refreshReview();
         renderChecks();
-    }
-
-    private static Checkbox disabledOption(String label) {
-        Checkbox c = new Checkbox(label, true);
-        c.setReadOnly(true);
-        c.setHelperText("Always on: nothing written before the stop is lost.");
-        return c;
     }
 
     @Override
@@ -196,6 +189,8 @@ public class SwitchoverView extends Div implements BeforeEnterObserver {
                 : sameVip ? tr.vipAddress() + " moves from " + o.primary() + " to " + t
                 : (pr == null ? "" : pr.vipAddress() + " stays down; ") + tr.vipAddress() + " comes up on " + t);
         add(kv, "Safety", "The VIP comes up first; no promote without it");
+        add(kv, "Promotion", "Only after " + t + " has replayed the final WAL position of " + o.primary()
+                + ": nothing written before the stop is lost");
         add(kv, "Old primary", restartOld.getValue() ? "Restarts as a replica; no rewind after a clean stop"
                 : "Stays stopped");
         add(kv, "Epoch", o.epoch() + " → " + (o.epoch() + 1) + "; agents reject older commands");

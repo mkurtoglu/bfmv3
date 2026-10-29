@@ -164,12 +164,22 @@ class ApiSecurityTest {
                 .andExpect(jsonPath("$.replicas[?(@.node == 'pg-a1')].peerState").value("streaming"))
                 .andExpect(jsonPath("$.replicas[?(@.node == 'pg-a1')].slotActive").value(true));
 
-        // After the switchover the new primary has a slot for every other node, and the old primary streams back.
-        mvc.perform(get("/api/v1/replication").with(httpBasic("viewer", "viewer-pw")))
+        // The switchover is kept as the last role change until an admin acknowledges it.
+        mvc.perform(get("/api/v1/role-change").with(httpBasic("viewer", "viewer-pw")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.primary").value("pg-a2"))
-                .andExpect(jsonPath("$.slots.length()").value(2))
-                .andExpect(jsonPath("$.replicas[?(@.node == 'pg-a1')].peerState").value("streaming"));
+                .andExpect(jsonPath("$.type").value("SWITCHOVER"))
+                .andExpect(jsonPath("$.from").value("pg-a1"))
+                .andExpect(jsonPath("$.to").value("pg-a2"))
+                .andExpect(jsonPath("$.lostBytes").value(0))
+                .andExpect(jsonPath("$.ackBy").doesNotExist());
+        mvc.perform(get("/api/v1/cluster").with(httpBasic("viewer", "viewer-pw")))
+                .andExpect(jsonPath("$.roleChange.to").value("pg-a2"))
+                .andExpect(jsonPath("$.healthReasons.length()").value(0));
+        mvc.perform(post("/api/v1/role-change/acknowledge").with(httpBasic("viewer", "viewer-pw")))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/role-change/acknowledge").with(httpBasic("admin", "admin-pw")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ackBy").value("admin"));
 
         mvc.perform(put("/api/v1/notifications/smtp").with(httpBasic("admin", "admin-pw"))
                         .contentType(MediaType.APPLICATION_JSON)

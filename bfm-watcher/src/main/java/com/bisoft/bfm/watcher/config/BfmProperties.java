@@ -43,8 +43,13 @@ public record BfmProperties(
         return timeZone == null || timeZone.isBlank() ? ZoneId.systemDefault() : ZoneId.of(timeZone);
     }
 
+    /**
+     * @param environment shown in the console header and on the login page so nobody mistakes one cluster's
+     *                    console for another's: production, staging, test, development or any other word
+     */
     public record Cluster(
             String name,
+            String environment,
             @DefaultValue("DC_LOCAL") FailoverScope scope,
             @DefaultValue("false") boolean selfFence,
             @DefaultValue("true") boolean autoRejoin,

@@ -102,6 +102,8 @@ public class SecurityConfig {
     @Bean
     @Order(2)
     public SecurityFilterChain console(HttpSecurity http) throws Exception {
+        // The bundled fonts are needed by the login page too; they are static files under an open licence.
+        http.authorizeHttpRequests(a -> a.requestMatchers(HttpMethod.GET, "/fonts/**").permitAll());
         http.with(VaadinSecurityConfigurer.vaadin(), v -> v.loginView(LoginView.class));
         return http.build();
     }

@@ -12,6 +12,7 @@ import com.bisoft.bfm.core.ops.PreCheck;
 import com.bisoft.bfm.core.ops.SwitchoverOperation;
 import com.bisoft.bfm.core.state.ClusterState;
 import com.bisoft.bfm.core.state.LocalStateStore;
+import com.bisoft.bfm.core.state.RoleChange;
 import com.bisoft.bfm.core.state.StateConflictException;
 import com.bisoft.bfm.core.state.StateStore;
 import org.junit.jupiter.api.AfterEach;
@@ -407,6 +408,90 @@ class WatcherTest {
         assertFalse(cluster.node("pg-a2").vipHeld());
         assertEquals("pg-a1", cluster.vipHolder(), "the primary gets its VIP back");
         assertTrue(hasEvent(EventType.VIP));
+    }
+
+    // ---------------------------------------------------------------- what the console shows afterwards
+
+    @Test
+    void aFailoverIsKeptForTheConsoleUntilSomeoneAcknowledgesIt() {
+        threeNodes();
+        cluster.node("pg-a3").lag = 4096;
+        start(standalone());
+        cluster.write(10_000);
+        ticks(2);
+        assertNull(watcher.lastRoleChange(), "nothing to show before a role change");
+        cluster.crash("pg-a1");
+        ticks(3);
+
+        RoleChange rc = watcher.lastRoleChange();
+        assertNotNull(rc);
+        assertEquals("FAILOVER", rc.type());
+        assertEquals("pg-a1", rc.from());
+        assertEquals("pg-a2", rc.to());
+        assertEquals(0L, rc.lostBytes(), "pg-a2 had received everything seen on pg-a1");
+        assertEquals(watcher.state().epoch(), rc.epoch());
+        assertTrue(rc.durationMs() >= 0);
+        assertFalse(rc.acknowledged());
+
+        RoleChange acked = watcher.acknowledgeRoleChange("admin");
+        assertTrue(acked.acknowledged());
+        assertEquals("admin", watcher.lastRoleChange().ackBy());
+        assertTrue(watcher.events(20).stream().anyMatch(e -> e.type() == EventType.CONTROL_CHANGED
+                && e.message().equals("Automatic failover pg-a1 -> pg-a2 acknowledged by admin")));
+        assertEquals("admin", watcher.acknowledgeRoleChange("ops").ackBy(), "a second acknowledgement changes nothing");
+
+        // Every step that ran carries its duration, and so does the operation.
+        OperationProgress.Snapshot op = watcher.operations().get(0);
+        assertNotNull(op.durationMs());
+        assertTrue(op.steps().stream().filter(st -> st.state() == OperationProgress.StepState.DONE)
+                .allMatch(st -> st.durationMs() != null && st.durationMs() >= 0), op.steps().toString());
+    }
+
+    @Test
+    void aSwitchoverIsKeptAsARoleChangeThatLostNothing() {
+        threeNodes();
+        start(standalone());
+        ticks(2);
+        watcher.switchover("pg-a2", SwitchoverOperation.Options.defaults(), "admin", "prod-main");
+        awaitIdle();
+        RoleChange rc = watcher.lastRoleChange();
+        assertEquals("SWITCHOVER", rc.type());
+        assertEquals("pg-a1", rc.from());
+        assertEquals("pg-a2", rc.to());
+        assertEquals(0L, rc.lostBytes());
+        assertEquals("admin", rc.by());
+    }
+
+    @Test
+    void eachNodeRemembersSinceWhenItIsInItsState() {
+        threeNodes();
+        start(standalone());
+        ticks(2);
+        Watcher.StateSince running = watcher.stateSince("pg-a1");
+        assertEquals("Running", running.label());
+        time.advance(60_000);
+        tick();
+        assertEquals(running.sinceMillis(), watcher.stateSince("pg-a1").sinceMillis(), "unchanged state, same since");
+        watcher.setControls(null, true, null, null, "admin");
+        cluster.crash("pg-a1");
+        tick();
+        Watcher.StateSince down = watcher.stateSince("pg-a1");
+        assertEquals("Agent unreachable", down.label());
+        assertTrue(down.sinceMillis() > running.sinceMillis());
+        assertTrue(watcher.failoverBlockedReason() == null || watcher.failoverBlockedReason().contains("maintenance"));
+        ticks(3);
+        assertEquals("maintenance mode is on", watcher.failoverBlockedReason());
+    }
+
+    @Test
+    void theVipDryRunCallsTheCurrentPrimaryHoldingItExpected() {
+        threeNodes();
+        start(standalone());
+        ticks(2);
+        PreCheck vip = watcher.switchoverChecks("pg-a2", true).stream()
+                .filter(c -> c.title().contains("dry run")).findFirst().orElseThrow();
+        assertEquals(PreCheck.Level.PASS, vip.level());
+        assertEquals("the VIP is on pg-a1 now, as expected; it moves to pg-a2 after pg-a1 stops", vip.detail());
     }
 
     // ---------------------------------------------------------------- switchover

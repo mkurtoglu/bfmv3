@@ -3,11 +3,9 @@ package com.bisoft.bfm.watcher.ui;
 import com.vaadin.flow.component.AttachEvent;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.DetachEvent;
-import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.checkbox.Checkbox;
-import com.vaadin.flow.component.confirmdialog.ConfirmDialog;
 import com.vaadin.flow.component.grid.ColumnTextAlign;
 import com.vaadin.flow.component.grid.Grid;
 import com.vaadin.flow.component.grid.GridVariant;
@@ -19,12 +17,7 @@ import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.html.UnorderedList;
 import com.vaadin.flow.component.icon.VaadinIcon;
-import com.vaadin.flow.component.menubar.MenuBar;
-import com.vaadin.flow.component.menubar.MenuBarVariant;
-import com.vaadin.flow.component.contextmenu.MenuItem;
-import com.vaadin.flow.component.contextmenu.SubMenu;
-import com.vaadin.flow.component.select.Select;
-import com.vaadin.flow.component.textfield.TextField;
+import com.vaadin.flow.data.renderer.ComponentRenderer;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.router.RouteAlias;
@@ -32,20 +25,29 @@ import com.vaadin.flow.shared.Registration;
 import com.vaadin.flow.spring.security.AuthenticationContext;
 import com.bisoft.bfm.common.Lsn;
 import com.bisoft.bfm.core.event.ClusterEvent;
-import com.bisoft.bfm.core.monitor.LagHistory;
-import com.bisoft.bfm.core.notify.NotificationSettings;
-import com.bisoft.bfm.core.ops.PreCheck;
+import com.bisoft.bfm.core.state.RoleChange;
 import com.bisoft.bfm.watcher.config.BfmProperties;
 import com.bisoft.bfm.watcher.service.ConsoleService;
+import com.bisoft.bfm.watcher.service.ConsoleService.ControlChange;
 import com.bisoft.bfm.watcher.service.ConsoleService.NodeRow;
 import com.bisoft.bfm.watcher.service.ConsoleService.Overview;
 import com.bisoft.bfm.watcher.service.NotificationService;
+import com.bisoft.bfm.watcher.service.Terms;
 import jakarta.annotation.security.PermitAll;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
+/**
+ * The cluster at a glance. What matters in an incident comes first: whether the cluster is healthy and why not,
+ * whether a role change just happened, and what an operator can do about it. Replication detail lives on the
+ * Replication page and the switchover form on its own page.
+ */
 @Route(value = "", layout = MainLayout.class)
 @RouteAlias(value = "overview", layout = MainLayout.class)
 @PageTitle("Overview · BFM")
@@ -60,22 +62,21 @@ public class OverviewView extends Div {
 
     private final Div banners = new Div();
     private final Span headStatus = new Span();
-    private final Div stats = Ui.div("pg-grid-auto");
+    private final Div health = new Div();
+    private final Div stats = Ui.div("pg-grid-auto pg-stats");
     private final Grid<NodeRow> grid = new Grid<>(NodeRow.class, false);
+    private final Div nodeCards = Ui.div("pg-node-cards");
+    private final Set<String> openRows = new HashSet<>();
     private final Span refreshed = Ui.text("pg-note", "");
     private final Div topology = new Div();
-    private final Div lagChart = new Div();
-    private final Select<String> lagNode = new Select<>();
     private final UnorderedList events = new UnorderedList();
-    private final Div slots = new Div();
     private final Div watchers = new Div();
     private final Checkbox autoFailover = new Checkbox("Auto failover");
     private final Checkbox mail = new Checkbox("Mail notifications");
     private final Checkbox maintenance = new Checkbox("Maintenance mode");
-    private final Checkbox autoReinit = new Checkbox("Auto reinit");
+    private final Checkbox autoReinit = new Checkbox("Auto re-initialize");
     private final Span scope = Ui.text("pg-note", "");
-    private final Select<String> target = new Select<>();
-    private final Div targetChecks = new Div();
+    private Grid.Column<NodeRow> actionsColumn;
     private Registration poll;
     private Overview last;
 
@@ -90,48 +91,38 @@ public class OverviewView extends Div {
 
         H1 title = new H1("Cluster Overview");
         title.addClassName("pg-title");
-        Div head = Ui.div("pg-spread", new Div(Ui.text("pg-eyebrow", "Welcome back, " + user), title), headStatus);
+        String env = props.cluster() == null ? null : props.cluster().environment();
+        Span eyebrow = Ui.text("pg-eyebrow", console.watcher().config().name()
+                + (env == null || env.isBlank() ? "" : " · " + Terms.capitalize(env)));
+        Div head = Ui.div("pg-spread", new Div(eyebrow, title), headStatus);
         headStatus.addClassName("pg-row");
 
         buildGrid();
         Button refresh = new Button("Refresh", VaadinIcon.REFRESH.create(), e -> refresh());
         refresh.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        grid.addClassName("pg-node-grid");
         Div nodesCard = Ui.card(null);
-        nodesCard.add(Ui.div("pg-spread", heading("Nodes"), Ui.div("pg-row", refreshed, refresh)), grid);
+        nodesCard.add(Ui.div("pg-spread", heading("Nodes"), Ui.div("pg-row", refreshed, refresh)), grid, nodeCards);
 
         Div topoCard = Ui.card("Topology");
         topoCard.add(topology);
 
-        Div lagCard = Ui.card("Replay lag");
-        lagNode.setAriaLabel("Replica");
-        lagNode.addValueChangeListener(e -> {
-            if (e.isFromClient()) {
-                renderLag(last);
-            }
-        });
-        lagCard.add(lagNode, lagChart);
-
         Div eventsCard = Ui.card(null);
-        Anchor all = new Anchor("events", "View all");
-        eventsCard.add(Ui.div("pg-spread", heading("Recent events"), all));
+        eventsCard.add(Ui.div("pg-spread", heading("Recent events"), new Anchor("events", "View all")));
         events.addClassName("pg-events");
         eventsCard.add(events);
-
-        Div slotsCard = Ui.card("Replication slots");
-        slotsCard.add(slots);
 
         Div controlsCard = Ui.card("Cluster controls");
         controlsCard.add(controlsBlock());
 
-        Div switchCard = Ui.card("Switchover / Re-initialize");
-        switchCard.add(switchBlock());
-
         Div watchersCard = Ui.card("Watchers");
         watchersCard.add(watchers);
 
-        Div left = Ui.div("pg-col", topoCard, lagCard, eventsCard, slotsCard);
-        Div right = Ui.div("pg-col", controlsCard, switchCard, watchersCard);
-        add(banners, head, stats, nodesCard, Ui.div("pg-grid-2", left, right));
+        Div left = Ui.div("pg-col", topoCard, eventsCard);
+        Div right = Ui.div("pg-col", controlsCard, watchersCard);
+        banners.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "8px");
+        health.getElement().setAttribute("aria-live", "polite");
+        add(banners, head, health, stats, nodesCard, Ui.div("pg-grid-2", left, right));
         refresh();
     }
 
@@ -141,51 +132,92 @@ public class OverviewView extends Div {
         return s;
     }
 
-    // ---------------------------------------------------------------- building
+    // ---------------------------------------------------------------- nodes
 
     private void buildGrid() {
         grid.addThemeVariants(GridVariant.LUMO_ROW_STRIPES, GridVariant.LUMO_COMPACT);
         grid.setAllRowsVisible(true);
+        grid.setDetailsVisibleOnClick(false);
+        grid.addComponentColumn(r -> Ui.chevron(openRows.contains(r.name()))).setWidth("40px").setFlexGrow(0)
+                .setHeader("");
         grid.addComponentColumn(r -> {
             Span s = new Span(r.name());
             s.getStyle().set("font-weight", "700").set("color", "var(--pg-ink)");
             return s;
         }).setHeader("Node").setAutoWidth(true).setFlexGrow(0);
-        grid.addColumn(NodeRow::address).setHeader("Server address").setAutoWidth(true);
-        grid.addColumn(NodeRow::dc).setHeader("DC").setAutoWidth(true).setFlexGrow(0);
-        grid.addComponentColumn(r -> Ui.chip(r.role() + (r.isPrimary() || !r.role().equals("Replica") ? ""
-                        : dcSuffix(r)), r.role().equals("Primary") ? Ui.Tone.OK : r.role().equals("Replica")
-                        ? Ui.Tone.INFO : Ui.Tone.CRIT))
-                .setHeader("Role").setAutoWidth(true);
-        grid.addComponentColumn(r -> Ui.chip(r.state(), stateTone(r))).setHeader("State").setAutoWidth(true);
-        grid.addComponentColumn(r -> Ui.text("pg-mono", r.lsn() == null ? "—" : r.lsn()))
+        Grid.Column<NodeRow> address = grid.addColumn(NodeRow::address).setHeader("Server address").setAutoWidth(true);
+        Grid.Column<NodeRow> dc = grid.addColumn(NodeRow::dc).setHeader("DC").setAutoWidth(true).setFlexGrow(0);
+        grid.addComponentColumn(r -> roleChip(r)).setHeader("Role").setAutoWidth(true);
+        grid.addComponentColumn(r -> Ui.div("pg-row", Ui.chip(r.state(), stateTone(r)),
+                Ui.text("pg-since", sinceText(r)))).setHeader("State").setAutoWidth(true);
+        Grid.Column<NodeRow> wal = grid.addComponentColumn(r -> Ui.text("pg-mono", r.lsn() == null ? "—" : r.lsn()))
                 .setHeader("Last WAL position").setAutoWidth(true);
-        grid.addColumn(r -> r.isPrimary() ? "—" : ConsoleService.bytes(r.lagBytes())
-                + (r.replayDelayMs() == null || r.lagBytes() == null || r.lagBytes() == 0 ? ""
-                : " · " + Ui.seconds(r.replayDelayMs())))
-                .setHeader("Replay lag").setAutoWidth(true);
-        grid.addColumn(r -> r.timeline() == null ? "—" : r.timeline().toString()).setHeader("Timeline")
-                .setAutoWidth(true).setTextAlign(ColumnTextAlign.END);
-        grid.addColumn(r -> r.sync() == null ? "—" : r.sync()).setHeader("Sync").setAutoWidth(true);
-        grid.addComponentColumn(r -> Ui.chip(r.agentOnline() ? "Online" : "Unreachable",
+        grid.addColumn(this::lagText).setHeader("Replay lag").setAutoWidth(true);
+        Grid.Column<NodeRow> tl = grid.addColumn(r -> r.timeline() == null ? "—" : r.timeline().toString())
+                .setHeader("Timeline").setAutoWidth(true).setTextAlign(ColumnTextAlign.END);
+        Grid.Column<NodeRow> sync = grid.addColumn(r -> r.sync() == null ? "—" : Terms.capitalize(r.sync()))
+                .setHeader("Sync").setAutoWidth(true);
+        Grid.Column<NodeRow> agent = grid.addComponentColumn(r -> Ui.chip(r.agentOnline() ? "Online" : "Unreachable",
                 r.agentOnline() ? Ui.Tone.OK : Ui.Tone.CRIT)).setHeader("Agent").setAutoWidth(true);
-        grid.addColumn(r -> Ui.time(r.lastCheckMillis(), zone)).setHeader("Last check").setAutoWidth(true);
-        grid.addComponentColumn(this::actions).setHeader("Actions").setAutoWidth(true).setFlexGrow(0);
-        grid.setItemDetailsRenderer(new com.vaadin.flow.data.renderer.ComponentRenderer<>(r -> {
-            Div d = new Div();
-            d.getStyle().set("padding", "4px 8px 8px");
-            if (r.error() != null) {
-                d.add(new Paragraph("Error: " + r.error()));
+        // The actions stay on screen whatever the other columns do: in an incident they are what is needed.
+        actionsColumn = grid.addComponentColumn(this::actions).setHeader("Actions").setAutoWidth(true)
+                .setFlexGrow(0).setFrozenToEnd(true);
+        Ui.hideBelow(grid, 1500, wal, tl);
+        Ui.hideBelow(grid, 980, address, sync, agent, dc);
+        grid.addItemClickListener(e -> {
+            if (e.getColumn() == actionsColumn) {
+                return;
             }
-            if (r.fenced()) {
-                d.add(new Paragraph("Fenced: " + r.fencedReason()));
-            }
-            d.add(new Paragraph("Upstream: " + (r.upstream() == null ? "—" : r.upstream()) + " · epoch " + r.epoch()
-                    + (r.vipAddress() == null ? " · no VIP managed" : " · VIP " + r.vipAddress()
-                    + (r.vipHeld() ? " up here" : " not here")) + (r.noFailover() ? " · noFailover" : "")
-                    + " · priority " + r.priority()));
-            return d;
-        }));
+            toggle(e.getItem());
+        });
+        grid.setItemDetailsRenderer(new ComponentRenderer<>(this::details));
+    }
+
+    private void toggle(NodeRow r) {
+        if (!openRows.remove(r.name())) {
+            openRows.add(r.name());
+        }
+        grid.setDetailsVisible(r, openRows.contains(r.name()));
+        grid.getDataProvider().refreshItem(r);
+    }
+
+    private Component details(NodeRow r) {
+        Div d = new Div();
+        d.getStyle().set("padding", "4px 8px 8px 48px");
+        if (r.error() != null) {
+            d.add(new Paragraph("Error: " + r.error()));
+        }
+        if (r.fenced()) {
+            d.add(new Paragraph("Fenced: " + r.fencedReason()));
+        }
+        d.add(new Paragraph("Upstream: " + (r.upstream() == null ? "—" : r.upstream()) + " · epoch " + r.epoch()
+                + (r.vipAddress() == null ? " · no VIP managed" : " · VIP " + r.vipAddress()
+                + (r.vipHeld() ? " up here" : " not here")) + (r.noFailover() ? " · never promoted automatically" : "")
+                + " · priority " + r.priority() + " · last answer " + Ui.time(r.lastCheckMillis(), zone) + " "
+                + Ui.zone(zone)));
+        return d;
+    }
+
+    private Span roleChip(NodeRow r) {
+        String label = r.role() + (r.isPrimary() || !r.role().equals("Replica") ? "" : dcSuffix(r));
+        return Ui.chip(label, r.role().equals("Primary") ? Ui.Tone.OK : r.role().equals("Replica")
+                ? Ui.Tone.INFO : Ui.Tone.CRIT);
+    }
+
+    private String lagText(NodeRow r) {
+        return r.isPrimary() ? "—" : ConsoleService.bytes(r.lagBytes())
+                + (r.replayDelayMs() == null || r.lagBytes() == null || r.lagBytes() == 0 ? ""
+                : " · " + Ui.seconds(r.replayDelayMs()));
+    }
+
+    /** "for 14 s" while a node is in a state worth watching; nothing while it runs or streams normally. */
+    private String sinceText(NodeRow r) {
+        boolean normal = r.agentOnline() && !r.fenced() && (r.isPrimary() ? "Running".equals(r.state())
+                : r.streaming());
+        if (normal || r.stateSinceMillis() <= 0 || last == null) {
+            return "";
+        }
+        return "for " + Ui.ago(r.stateSinceMillis(), last.observedAtMillis());
     }
 
     private String dcSuffix(NodeRow r) {
@@ -203,70 +235,80 @@ public class OverviewView extends Div {
     }
 
     private Component actions(NodeRow r) {
-        MenuBar mb = new MenuBar();
-        mb.addThemeVariants(MenuBarVariant.LUMO_TERTIARY_INLINE, MenuBarVariant.LUMO_SMALL);
-        MenuItem root = mb.addItem(VaadinIcon.ELLIPSIS_DOTS_H.create());
-        root.setAriaLabel("Actions for " + r.name());
-        SubMenu sub = root.getSubMenu();
-        sub.addItem("Details", e -> grid.setDetailsVisible(r, !grid.isDetailsVisible(r)));
-        if (admin && !r.isPrimary()) {
-            sub.addItem("Switch over to " + r.name(), e -> UI.getCurrent().navigate(SwitchoverView.class,
-                    new com.vaadin.flow.router.QueryParameters(java.util.Map.of("target", List.of(r.name())))));
-            sub.addItem("Rejoin (pg_rewind)", e -> confirmNode(r.name(), "Rejoin " + r.name(),
-                    r.name() + " is stopped, rewound with pg_rewind against the primary and started as a replica.",
-                    () -> console.watcher().rejoin(r.name(), user)));
-            sub.addItem("Re-initialize", e -> confirmNode(r.name(), "Re-initialize " + r.name(),
-                    "The data directory of " + r.name() + " is moved aside and rebuilt with pg_basebackup from"
-                            + " the primary. This can take a long time.",
-                    () -> console.watcher().reinit(r.name(), user)));
-        }
-        if (admin && last != null && last.nodes().stream().noneMatch(n -> "Primary".equals(n.role()))
-                && r.agentOnline() && !"Replica".equals(r.role())) {
-            sub.addItem("Start as primary", e -> confirmNode(r.name(), "Start " + r.name() + " as primary",
-                    "No node runs as primary. The VIP comes up on " + r.name() + " first, then PostgreSQL starts"
-                            + " there as primary.", () -> console.watcher().startPrimary(r.name(), user)));
-        }
-        return mb;
+        boolean noPrimaryRunning = last != null && last.nodes().stream().noneMatch(n -> "Primary".equals(n.role()));
+        return NodeActions.menu(console, user, admin, new NodeActions.Node(r.name(), r.isPrimary(), r.agentOnline(),
+                "Replica".equals(r.role()), noPrimaryRunning), () -> toggle(r), this::refresh);
     }
 
-    private void confirmNode(String node, String header, String text, Runnable action) {
-        ConfirmDialog d = new ConfirmDialog();
-        d.setHeader(header);
-        TextField confirm = new TextField("Type " + node + " to confirm");
-        confirm.setWidthFull();
-        Div body = new Div(new Paragraph(text), confirm);
-        d.setText(body);
-        d.setCancelable(true);
-        d.setConfirmText("Start");
-        d.setCloseOnEsc(true);
-        d.addConfirmListener(e -> {
-            if (!node.equals(confirm.getValue().trim())) {
-                Ui.error("Type " + node + " exactly");
-                return;
+    private void renderNodeCards(Overview o) {
+        nodeCards.removeAll();
+        for (NodeRow r : o.nodes()) {
+            Ui.Tone t = stateTone(r);
+            Div card = Ui.div("pg-node-card");
+            if (t == Ui.Tone.CRIT || t == Ui.Tone.WARN) {
+                card.addClassName(t.name().toLowerCase());
             }
-            if (Ui.attempt(action)) {
-                Ui.ok(header + " started; follow it under Operations");
+            Span name = new Span(r.name());
+            name.getStyle().set("font-weight", "800").set("color", "var(--pg-ink)").set("font-size", "16px");
+            Div head = Ui.div("pg-node-card-head", name, roleChip(r), Ui.chip(r.state(), t), actions(r));
+            String since = sinceText(r);
+            card.add(head,
+                    Ui.text("pg-note", r.address() + " · " + r.dc() + (since.isEmpty() ? "" : " · " + since)),
+                    Ui.text("pg-note", (r.isPrimary() ? "WAL " + (r.lsn() == null ? "—" : r.lsn())
+                            : "Lag " + lagText(r)) + " · timeline " + (r.timeline() == null ? "—" : r.timeline())
+                            + (r.sync() == null ? "" : " · " + Terms.capitalize(r.sync()))
+                            + (r.agentOnline() ? "" : " · agent unreachable")));
+            if (r.error() != null) {
+                card.add(Ui.text("pg-note", r.error()));
             }
-            refresh();
-        });
-        d.open();
+            nodeCards.add(card);
+        }
     }
+
+    // ---------------------------------------------------------------- controls
 
     private Component controlsBlock() {
         Div box = new Div();
         box.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "10px");
-        addToggle(box, autoFailover, "Promote a replica when the primary is lost");
-        addToggle(box, mail, "SMTP alerts to the recipients on the Notifications page");
-        addToggle(box, maintenance, "Pause failover during planned work");
-        addToggle(box, autoReinit, "Rebuild a replica when pg_rewind fails");
+        for (Checkbox cb : List.of(autoFailover, mail, maintenance, autoReinit)) {
+            cb.setReadOnly(!admin);
+            box.add(cb);
+        }
         autoFailover.addValueChangeListener(e -> {
-            if (e.isFromClient()) {
-                setControl(e.getValue(), null, null, null);
+            if (!e.isFromClient()) {
+                return;
+            }
+            boolean on = e.getValue();
+            autoFailover.setValue(!on);
+            String p = primaryName();
+            if (!on) {
+                Ui.confirm("Turn off automatic failover?", "If " + p + " fails, no replica takes over until it is"
+                        + " turned on again. The change is written to the event log with your name.",
+                        "Turn off", true, () -> setControl(false, null, null, null));
+            } else if (primaryDown()) {
+                Ui.confirm("Turn on automatic failover?", p + " is down: the watcher starts an automatic failover"
+                        + " as soon as this is on.", "Turn on and fail over", true,
+                        () -> setControl(true, null, null, null));
+            } else {
+                setControl(true, null, null, null);
             }
         });
         maintenance.addValueChangeListener(e -> {
-            if (e.isFromClient()) {
-                setControl(null, e.getValue(), null, null);
+            if (!e.isFromClient()) {
+                return;
+            }
+            boolean on = e.getValue();
+            maintenance.setValue(!on);
+            if (on) {
+                Ui.confirm("Turn on maintenance mode?", "Automatic failover pauses until maintenance mode is off"
+                        + " again. Manual switchover and re-initialize stay available.", "Turn on", true,
+                        () -> setControl(null, true, null, null));
+            } else if (primaryDown()) {
+                Ui.confirm("Turn off maintenance mode?", primaryName() + " is down: the watcher starts an automatic"
+                        + " failover as soon as maintenance mode is off.", "Turn off and fail over", true,
+                        () -> setControl(null, false, null, null));
+            } else {
+                setControl(null, false, null, null);
             }
         });
         mail.addValueChangeListener(e -> {
@@ -275,18 +317,29 @@ public class OverviewView extends Div {
             }
         });
         autoReinit.addValueChangeListener(e -> {
-            if (e.isFromClient()) {
-                setControl(null, null, null, e.getValue());
+            if (!e.isFromClient()) {
+                return;
+            }
+            boolean on = e.getValue();
+            autoReinit.setValue(!on);
+            if (on) {
+                Ui.confirm("Turn on auto re-initialize?", "A replica that cannot rejoin with pg_rewind will have its"
+                        + " data directory moved aside and copied again from the primary, without asking.",
+                        "Turn on", true, () -> setControl(null, null, null, true));
+            } else {
+                setControl(null, null, null, false);
             }
         });
         box.add(Ui.div("pg-row", Ui.text("pg-stat-label", "Failover scope"), scope));
         return box;
     }
 
-    private void addToggle(Div box, Checkbox cb, String help) {
-        cb.setReadOnly(!admin);
-        cb.setHelperText(help);
-        box.add(cb);
+    private String primaryName() {
+        return last == null || last.primary() == null ? "the primary" : last.primary();
+    }
+
+    private boolean primaryDown() {
+        return last != null && "Primary down".equals(last.health());
     }
 
     private void setControl(Boolean af, Boolean mm, Boolean ml, Boolean ar) {
@@ -296,38 +349,23 @@ public class OverviewView extends Div {
         refresh();
     }
 
-    private Component switchBlock() {
-        Div box = new Div();
-        box.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "10px");
-        target.setLabel("Target node");
-        target.setWidthFull();
-        target.addValueChangeListener(e -> renderTargetChecks());
-        Button sw = new Button("Switchover", e -> UI.getCurrent().navigate(SwitchoverView.class,
-                new com.vaadin.flow.router.QueryParameters(java.util.Map.of("target",
-                        target.getValue() == null ? List.of() : List.of(target.getValue())))));
-        sw.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        Button reinit = new Button("Re-initialize", e -> {
-            if (target.getValue() != null) {
-                confirmNode(target.getValue(), "Re-initialize " + target.getValue(), "The data directory of "
-                        + target.getValue() + " is rebuilt with pg_basebackup from the primary.",
-                        () -> console.watcher().reinit(target.getValue(), user));
-            }
-        });
-        Button rejoin = new Button("Rejoin (pg_rewind)", e -> {
-            if (target.getValue() != null) {
-                confirmNode(target.getValue(), "Rejoin " + target.getValue(), target.getValue() + " is stopped,"
-                        + " rewound and started as a replica of the primary.",
-                        () -> console.watcher().rejoin(target.getValue(), user));
-            }
-        });
-        sw.setEnabled(admin);
-        reinit.setEnabled(admin);
-        rejoin.setEnabled(admin);
-        box.add(target, targetChecks, Ui.div("pg-row", sw, reinit, rejoin));
-        if (!admin) {
-            box.add(Ui.text("pg-note", "Viewers cannot start operations."));
-        }
-        return box;
+    private void renderControls(Overview o) {
+        autoFailover.setValue(o.autoFailover());
+        mail.setValue(o.mailEnabled());
+        maintenance.setValue(o.maintenance());
+        autoReinit.setValue(o.autoReinit());
+        help(autoFailover, "Promote a replica when the primary is lost", o.controls().get("auto failover"));
+        help(mail, "SMTP alerts to the recipients on the Notifications page", o.controls().get("mail notifications"));
+        help(maintenance, "Pause automatic failover during planned work", o.controls().get("maintenance mode"));
+        help(autoReinit, "Copy a replica again with pg_basebackup when pg_rewind fails",
+                o.controls().get("auto reinit"));
+        scope.setText((o.scope().equals("DC_LOCAL") ? "DC-local only" : "Any data center")
+                + (o.selfFence() ? " · self-fencing on" : ""));
+    }
+
+    private void help(Checkbox cb, String text, ControlChange c) {
+        cb.setHelperText(c == null ? text : text + " · " + (c.on() ? "on" : "off") + " since "
+                + Ui.shortTime(c.atMillis(), zone) + ", by " + c.by());
     }
 
     // ---------------------------------------------------------------- refreshing
@@ -337,68 +375,60 @@ public class OverviewView extends Div {
         last = o;
         renderBanners(o);
         renderHead(o);
+        renderHealth(o);
         renderStats(o);
         grid.setItems(o.nodes());
-        refreshed.setText("Refreshed " + Ui.time(o.observedAtMillis(), zone) + " · every "
+        for (NodeRow r : o.nodes()) {
+            if (openRows.contains(r.name())) {
+                grid.setDetailsVisible(r, true);
+            }
+        }
+        renderNodeCards(o);
+        refreshed.setText("Refreshed " + Ui.time(o.observedAtMillis(), zone) + " " + Ui.zone(zone) + " · every "
                 + console.watcher().config().timing().pollIntervalMs() / 1000 + " s");
         renderTopology(o);
-        renderLag(o);
         renderEvents();
-        renderSlots(o);
         renderWatchers(o);
-        autoFailover.setValue(o.autoFailover());
-        mail.setValue(o.mailEnabled());
-        maintenance.setValue(o.maintenance());
-        autoReinit.setValue(o.autoReinit());
-        scope.setText((o.scope().equals("DC_LOCAL") ? "DC-local only" : "Any data center")
-                + (o.selfFence() ? " · self-fencing on" : ""));
-        List<String> replicas = o.nodes().stream().filter(n -> !n.isPrimary()).map(NodeRow::name).toList();
-        if (!replicas.equals(target.getListDataView().getItems().toList())) {
-            String keep = target.getValue();
-            target.setItems(replicas);
-            target.setValue(keep != null && replicas.contains(keep) ? keep : replicas.isEmpty() ? null
-                    : replicas.get(0));
-        }
-        target.setItemLabelGenerator(n -> o.nodes().stream().filter(r -> r.name().equals(n)).findFirst()
-                .map(r -> r.name() + " · " + (r.sync() == null ? "async" : r.sync()) + " · " + r.dc()).orElse(n));
-        renderTargetChecks();
+        renderControls(o);
     }
 
     private void renderBanners(Overview o) {
         banners.removeAll();
-        banners.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "8px");
         if (!o.leader()) {
             Div b = Ui.banner("This watcher (" + o.watcherId() + ") follows" + (o.leaderId() == null
                     ? " no leader right now; changes are not possible until a leader is elected."
                     : " watcher " + o.leaderId() + ". Operations run on the leader."), Ui.Tone.INFO);
             if (o.leaderUrl() != null) {
-                b.add(new Anchor(o.leaderUrl(), "Open the leader's console"));
+                b.add(Ui.div("pg-banner-actions", new Anchor(o.leaderUrl(), "Open the leader's console")));
             }
             banners.add(b);
         }
-        if (o.maintenance()) {
-            banners.add(Ui.banner("Maintenance mode is on. Automatic failover is paused. Manual switchover and"
-                    + " reinit stay available.", Ui.Tone.WARN));
+        RoleChange rc = o.unacknowledgedRoleChange();
+        if (rc != null) {
+            banners.add(roleChangeBanner(rc));
         }
         if (o.operation() != null) {
-            Div b = Ui.banner(o.operation().type() + " on " + o.operation().target() + " is running, started by "
-                    + o.operation().startedBy() + ".", Ui.Tone.INFO);
             String owner = o.operation().owner();
+            Component follow;
             if (owner == null || owner.equals(o.watcherId())) {
-                b.add(new Anchor("operations", "Follow it"));
+                follow = new Anchor("operations", "Follow it");
             } else if (o.operationConsoleUrl() != null) {
                 // The steps and log are on the watcher running it, not here.
-                b.add(new Anchor(o.operationConsoleUrl(), "Follow it on watcher " + owner));
+                follow = new Anchor(o.operationConsoleUrl(), "Follow it on watcher " + owner);
             } else {
-                b.add(Ui.text("pg-note", "Its steps are on watcher " + owner + "; set raft.peers[].url to link"
-                        + " there."));
+                follow = Ui.text("pg-note", "Its steps are on watcher " + owner + "; set raft.peers[].url to link"
+                        + " there.");
             }
-            banners.add(b);
+            banners.add(Ui.banner(Terms.operation(o.operation().type()) + (o.operation().target() == null ? ""
+                    : " on " + o.operation().target()) + " is running, started by " + o.operation().startedBy()
+                    + " " + Ui.ago(o.operation().startedAtMillis(), o.observedAtMillis()) + " ago.", Ui.Tone.INFO,
+                    follow));
         }
         if ("Primary down".equals(o.health())) {
-            banners.add(Ui.banner("The primary " + o.primary() + " is not answering as primary. "
-                    + (o.failoverActive() ? "Automatic failover is armed." : "Automatic failover is off or paused."),
-                    Ui.Tone.CRIT));
+            banners.add(primaryDownBanner(o));
+        } else if (o.maintenance()) {
+            banners.add(Ui.banner("Maintenance mode is on. Automatic failover is paused; manual switchover and"
+                    + " re-initialize stay available.", Ui.Tone.WARN));
         }
         if ("No primary".equals(o.health())) {
             banners.add(Ui.banner("No primary is recorded. Start one node as primary from its Actions menu.",
@@ -406,15 +436,79 @@ public class OverviewView extends Div {
         }
     }
 
+    private Div roleChangeBanner(RoleChange rc) {
+        boolean failover = "FAILOVER".equals(rc.type());
+        String loss = rc.lostBytes() == null ? "data loss unknown (no WAL position was seen on " + rc.from() + ")"
+                : rc.lostBytes() == 0 ? "no data lost"
+                : Lsn.bytes(rc.lostBytes()) + " of WAL from " + rc.from() + " is not on " + rc.to();
+        String text = (failover ? "Automatic failover " : "Switchover ") + (rc.from() == null ? "" : rc.from() + " → ")
+                + rc.to() + " at " + Ui.shortTime(rc.atMillis(), zone) + " " + Ui.zone(zone) + " · took "
+                + Ui.duration(rc.durationMs()) + " · " + loss + " · epoch " + rc.epoch()
+                + (failover ? "" : " · by " + rc.by());
+        Ui.Tone tone = rc.lostBytes() != null && rc.lostBytes() > 0 ? Ui.Tone.CRIT
+                : failover ? Ui.Tone.WARN : Ui.Tone.INFO;
+        Anchor details = new Anchor("events?q=" + URLEncoder.encode(rc.to(), StandardCharsets.UTF_8), "Details");
+        if (!admin) {
+            return Ui.banner(text, tone, details, Ui.text("pg-note", "An admin acknowledges it."));
+        }
+        Button ack = new Button("Acknowledge", e -> {
+            if (Ui.attempt(() -> console.watcher().acknowledgeRoleChange(user))) {
+                Ui.ok("Acknowledged");
+            }
+            refresh();
+        });
+        ack.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_PRIMARY);
+        return Ui.banner(text, tone, details, ack);
+    }
+
+    private Div primaryDownBanner(Overview o) {
+        NodeRow p = o.primaryRow();
+        String state = p == null ? "not polled yet" : p.state().toLowerCase() + (p.stateSinceMillis() > 0
+                ? " for " + Ui.ago(p.stateSinceMillis(), o.observedAtMillis()) : "");
+        String text = o.primary() + " is not answering as primary (" + state + ").";
+        if (o.operation() != null) {
+            return Ui.banner(text, Ui.Tone.CRIT);
+        }
+        if (o.maintenance()) {
+            return Ui.banner(text + " Automatic failover is paused because maintenance mode is on.", Ui.Tone.CRIT,
+                    controlButton("Turn off maintenance mode", () -> maintenanceOffNow()));
+        }
+        if (!o.autoFailover()) {
+            return Ui.banner(text + " Automatic failover is off.", Ui.Tone.CRIT,
+                    controlButton("Turn on automatic failover", () -> autoFailoverOnNow()));
+        }
+        if (o.failoverBlockedReason() != null) {
+            return Ui.banner(text + " Automatic failover did not start: " + o.failoverBlockedReason() + ".",
+                    Ui.Tone.CRIT, new Anchor("events", "Events"));
+        }
+        var t = console.watcher().config().timing();
+        return Ui.banner(text + " Automatic failover is armed: it starts after " + t.failureThreshold()
+                + " failed polls (about " + t.failureThreshold() * t.pollIntervalMs() / 1000 + " s).", Ui.Tone.CRIT);
+    }
+
+    private Component controlButton(String label, Runnable action) {
+        if (!admin) {
+            return Ui.text("pg-note", "An admin can change it.");
+        }
+        Button b = new Button(label, e -> action.run());
+        b.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_PRIMARY);
+        return b;
+    }
+
+    private void maintenanceOffNow() {
+        Ui.confirm("Turn off maintenance mode?", primaryName() + " is down: the watcher starts an automatic failover"
+                + " as soon as maintenance mode is off.", "Turn off and fail over", true,
+                () -> setControl(null, false, null, null));
+    }
+
+    private void autoFailoverOnNow() {
+        Ui.confirm("Turn on automatic failover?", primaryName() + " is down: the watcher starts an automatic failover"
+                + " as soon as this is on.", "Turn on and fail over", true, () -> setControl(true, null, null, null));
+    }
+
     private void renderHead(Overview o) {
         headStatus.removeAll();
-        Ui.Tone t = switch (o.health()) {
-            case "Healthy" -> Ui.Tone.OK;
-            case "Degraded", "Starting", "No primary" -> Ui.Tone.WARN;
-            default -> Ui.Tone.CRIT;
-        };
-        headStatus.add(Ui.chip("Cluster status: " + o.health(), t),
-                Ui.chip("Auto failover: " + (o.failoverActive() ? "Active" : "Paused"),
+        headStatus.add(Ui.chip("Auto failover: " + (o.failoverActive() ? "Active" : "Paused"),
                         o.failoverActive() ? Ui.Tone.OK : Ui.Tone.WARN),
                 plain("Epoch " + o.epoch()),
                 plain("Timeline " + (o.timeline() == null ? "—" : o.timeline())));
@@ -426,31 +520,95 @@ public class OverviewView extends Div {
         return s;
     }
 
+    /** The state of the cluster in one line, and the reasons when it is not healthy. */
+    private void renderHealth(Overview o) {
+        health.removeAll();
+        Ui.Tone t = healthTone(o.health());
+        health.setClassName("pg-health " + t.name().toLowerCase());
+        String summary;
+        if ("Healthy".equals(o.health())) {
+            long replicas = o.nodes().stream().filter(n -> !n.isPrimary()).count();
+            long streaming = o.nodes().stream().filter(n -> !n.isPrimary() && n.streaming()).count();
+            summary = o.primary() + " is primary · " + streaming + "/" + replicas + " replicas streaming"
+                    + (o.vipHolder() == null ? "" : " · VIP on " + o.vipHolder())
+                    + " · max lag " + ConsoleService.bytes(o.maxLagBytes());
+        } else if ("Primary down".equals(o.health())) {
+            NodeRow p = o.primaryRow();
+            summary = p == null || p.stateSinceMillis() <= 0 ? "" : "since " + Ui.time(p.stateSinceMillis(), zone)
+                    + " " + Ui.zone(zone) + " (" + Ui.ago(p.stateSinceMillis(), o.observedAtMillis()) + ")";
+        } else {
+            int n = o.healthReasons().size();
+            summary = n == 0 ? "" : n + (n == 1 ? " problem" : " problems");
+        }
+        health.add(Ui.text("pg-health-state", o.health()), Ui.text("pg-health-summary", summary));
+        if (!o.healthReasons().isEmpty() && !"Healthy".equals(o.health())) {
+            UnorderedList ul = new UnorderedList();
+            for (String r : o.healthReasons()) {
+                ul.add(new ListItem(r));
+            }
+            health.add(ul);
+        }
+    }
+
+    static Ui.Tone healthTone(String health) {
+        return switch (health) {
+            case "Healthy" -> Ui.Tone.OK;
+            case "Degraded", "Starting", "No primary" -> Ui.Tone.WARN;
+            default -> Ui.Tone.CRIT;
+        };
+    }
+
     private void renderStats(Overview o) {
         stats.removeAll();
-        stats.add(Ui.stat("Primary", o.primary() == null ? "—" : o.primary(),
-                (o.primaryAddress() == null ? "" : o.primaryAddress()) + (o.primaryDc() == null ? "" : " · "
-                        + o.primaryDc())));
-        stats.add(Ui.stat("Virtual IP", o.vipAddress() == null ? "not managed" : o.vipAddress(),
-                o.vipAddress() == null ? "agents run with vip.enabled=false" : o.vipHolder() == null
-                        ? "not up on any node" : "on " + o.vipHolder() + " · via sudo ip addr"));
+        NodeRow p = o.primaryRow();
+        boolean down = "Primary down".equals(o.health());
+        stats.add(Ui.stat("Primary", o.primary() == null ? "—" : o.primary(), down && p != null
+                        ? p.state().toLowerCase() + (p.stateSinceMillis() > 0 ? " for "
+                        + Ui.ago(p.stateSinceMillis(), o.observedAtMillis()) : "")
+                        : (o.primaryAddress() == null ? "" : o.primaryAddress())
+                        + (o.primaryDc() == null ? "" : " · " + o.primaryDc()),
+                down ? Ui.Tone.CRIT : o.primary() == null ? Ui.Tone.WARN : null));
+        String vipSub;
+        Ui.Tone vipTone = null;
+        if (o.vipAddress() == null) {
+            vipSub = "agents run with vip.enabled=false";
+        } else if (o.vipHolder() == null) {
+            vipSub = "not up on any node: clients on the VIP cannot connect";
+            vipTone = Ui.Tone.CRIT;
+        } else if (!o.vipHolder().equals(o.primary())) {
+            vipSub = "on " + o.vipHolder() + ", which is not the primary";
+            vipTone = Ui.Tone.WARN;
+        } else {
+            vipSub = "on " + o.vipHolder() + " · via sudo ip addr";
+        }
+        stats.add(Ui.stat("Virtual IP", o.vipAddress() == null ? "not managed" : o.vipAddress(), vipSub, vipTone));
+        long alert = notifications.current().lagAlertBytes();
+        boolean lagging = o.maxLagBytes() != null && o.maxLagBytes() > alert;
         stats.add(Ui.stat("Max replay lag", ConsoleService.bytes(o.maxLagBytes()), o.maxLagNode() == null
                 ? "no streaming replica" : o.maxLagBytes() == 0 ? "every replica has replayed everything"
                 : o.maxLagNode() + (o.maxLagDelayMs() == null ? "" : " · " + Ui.seconds(o.maxLagDelayMs())
-                + " behind")));
+                + " behind") + (lagging ? " · alert at " + Lsn.bytes(alert) : ""), lagging ? Ui.Tone.WARN : null));
         stats.add(Ui.stat("Primary lease", o.lease() == null || !o.lease().granted() ? "—"
                         : Math.round(o.lease().remainingMs() / 1000.0) + " s left",
                 "TTL " + console.watcher().config().timing().leaseTtlMs() / 1000 + " s · "
                         + (o.selfFence() ? "self-fencing on" : "self-fencing off")));
     }
 
+    /**
+     * Primary on top, replicas below. The VIP is drawn on the node that really holds it: on the primary when all is
+     * well, in red and detached when nobody holds it, in amber over the wrong node.
+     */
     private void renderTopology(Overview o) {
         topology.removeAll();
         Div t = Ui.div("pg-topo");
-        if (o.vipAddress() != null) {
-            t.add(Ui.text("pg-topo-vip", "VIP " + o.vipAddress()), Ui.div("pg-topo-link"));
+        NodeRow p = o.primaryRow();
+        String vip = o.vipAddress();
+        String holder = o.vipHolder();
+        if (vip != null && holder == null) {
+            t.add(Ui.text("pg-topo-vip crit", "VIP " + vip + " · down"));
+        } else if (vip != null && p != null && holder.equals(p.name())) {
+            t.add(Ui.text("pg-topo-vip", "VIP " + vip), Ui.div("pg-topo-link"));
         }
-        NodeRow p = o.nodes().stream().filter(NodeRow::isPrimary).findFirst().orElse(null);
         if (p != null) {
             t.add(node(p, "primary" + (p.role().equals("Primary") ? "" : " down"), "Primary · " + p.dc()));
             t.add(Ui.div("pg-topo-link"));
@@ -462,8 +620,15 @@ public class OverviewView extends Div {
             }
             boolean remote = p != null && !Objects.equals(p.dc(), r.dc());
             String cls = (remote ? "remote" : "") + (r.streaming() ? "" : " down");
-            row.add(node(r, cls, (r.sync() == null ? (r.streaming() ? "async" : r.state()) : r.sync()) + " · "
-                    + r.dc()));
+            Div n = node(r, cls, (r.streaming() ? (r.sync() == null ? "async" : r.sync()) : r.state().toLowerCase())
+                    + " · " + r.dc());
+            if (vip != null && Objects.equals(holder, r.name())) {
+                // A VIP on a replica: show it where it is, so the mismatch cannot be missed.
+                row.add(Ui.div("pg-topo-cell", Ui.text("pg-topo-vip warn", "VIP " + vip + " · not the primary"),
+                        Ui.div("pg-topo-link"), n));
+            } else {
+                row.add(n);
+            }
         }
         t.add(row);
         topology.add(t, Ui.text("pg-note", "Dashed: other data center. "
@@ -483,50 +648,6 @@ public class OverviewView extends Div {
         return d;
     }
 
-    private void renderLag(Overview o) {
-        if (o == null) {
-            return;
-        }
-        List<String> replicas = o.nodes().stream().filter(n -> !n.isPrimary()).map(NodeRow::name).toList();
-        if (!replicas.equals(lagNode.getListDataView().getItems().toList())) {
-            lagNode.setItems(replicas);
-        }
-        if (lagNode.getValue() == null || !replicas.contains(lagNode.getValue())) {
-            lagNode.setValue(o.maxLagNode() != null ? o.maxLagNode() : replicas.isEmpty() ? null : replicas.get(0));
-        }
-        lagChart.removeAll();
-        if (lagNode.getValue() == null) {
-            return;
-        }
-        NotificationSettings ns = notifications.current();
-        long now = System.currentTimeMillis();
-        List<LagHistory.Sample> samples = console.watcher().lagHistory().series(lagNode.getValue(), 30, now);
-        long alert = ns.lagAlertBytes();
-        long max = Math.max(alert * 2, samples.stream().mapToLong(LagHistory.Sample::maxLagBytes).max().orElse(0));
-        Div bars = Ui.div("pg-bars");
-        bars.getElement().setAttribute("role", "img");
-        bars.getElement().setAttribute("aria-label", "Replay lag of " + lagNode.getValue() + ", last 30 minutes");
-        for (LagHistory.Sample s : samples) {
-            Div b = Ui.div("pg-bar");
-            boolean over = s.maxLagBytes() > alert;
-            if (over) {
-                b.addClassName("over");
-            }
-            b.getStyle().set("height", Math.max(2, Math.round(s.maxLagBytes() * 140.0 / max)) + "px");
-            b.setTitle(Ui.minute(s.minuteMillis(), zone) + " · " + Lsn.bytes(s.maxLagBytes())
-                    + (over ? " (above alert)" : ""));
-            bars.add(b);
-        }
-        Div line = Ui.div("pg-threshold");
-        line.getStyle().set("bottom", Math.round(alert * 140.0 / max) + "px");
-        line.setTitle("alert at " + Lsn.bytes(alert));
-        bars.add(line);
-        Div axis = Ui.div("pg-axis", Ui.text(null, samples.isEmpty() ? "" : Ui.minute(samples.get(0).minuteMillis(),
-                zone)), Ui.text(null, "scale " + Lsn.bytes(max)), Ui.text(null, Ui.minute(now, zone)));
-        lagChart.add(Ui.text("pg-note", "Last 30 min · 1-min samples · alert at " + Lsn.bytes(alert)),
-                samples.isEmpty() ? Ui.text("pg-note", "No samples yet.") : bars, axis);
-    }
-
     private void renderEvents() {
         events.removeAll();
         List<ClusterEvent> recent = console.watcher().events(6);
@@ -540,57 +661,15 @@ public class OverviewView extends Div {
                         case CRITICAL -> "Critical";
                         case WARNING -> "Warning";
                         case INFO -> "Info";
-                    }, Ui.tone(e.severity())), Ui.text(null, e.message()));
+                    }, Ui.tone(e.severity())), Ui.text(null, Ui.arrows(e.message())));
             events.add(li);
         }
-    }
-
-    private void renderSlots(Overview o) {
-        slots.removeAll();
-        if (o.slots().isEmpty()) {
-            slots.add(Ui.text("pg-note", "No replication slots on the primary."));
-            return;
-        }
-        Grid<ConsoleService.SlotRow> g = new Grid<>();
-        g.addThemeVariants(GridVariant.LUMO_COMPACT);
-        g.setAllRowsVisible(true);
-        g.addColumn(ConsoleService.SlotRow::name).setHeader("Slot").setAutoWidth(true);
-        g.addColumn(ConsoleService.SlotRow::consumer).setHeader("Consumer").setAutoWidth(true);
-        g.addComponentColumn(s -> Ui.chip(s.active() ? "Active" : "Inactive", s.active() ? Ui.Tone.OK
-                : Ui.Tone.WARN)).setHeader("Status").setAutoWidth(true);
-        g.addColumn(s -> ConsoleService.bytes(s.retainedBytes())).setHeader("Retained WAL").setAutoWidth(true);
-        g.addComponentColumn(s -> {
-            if (!admin || s.active() || !"none".equals(s.consumer())) {
-                return new Span();
-            }
-            Button drop = new Button("Drop slot", e -> {
-                ConfirmDialog d = new ConfirmDialog("Drop slot " + s.name(), "The slot is removed from the primary"
-                        + " and stops holding WAL.", "Drop", ev -> {
-                    if (Ui.attempt(() -> console.watcher().dropSlot(s.name(), user))) {
-                        Ui.ok("Slot " + s.name() + " dropped");
-                    }
-                    refresh();
-                });
-                d.setCancelable(true);
-                d.setConfirmButtonTheme("error primary");
-                d.open();
-            });
-            drop.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_SMALL);
-            return drop;
-        }).setAutoWidth(true);
-        g.setItems(o.slots());
-        slots.add(g);
-        NotificationSettings ns = notifications.current();
-        o.slots().stream().filter(s -> !s.active() && s.retainedBytes() != null
-                && s.retainedBytes() > ns.slotAlertBytes()).findFirst().ifPresent(s -> slots.add(Ui.banner(
-                "An inactive slot is holding " + Lsn.bytes(s.retainedBytes()) + " of WAL on the primary.",
-                Ui.Tone.WARN)));
     }
 
     private void renderWatchers(Overview o) {
         watchers.removeAll();
         watchers.add(Ui.text("pg-note", "STANDALONE".equals(o.mode()) ? "Consensus: none (single watcher)"
-                : "Consensus: Raft (optional) · term " + o.term()));
+                : "Consensus: Raft · term " + o.term()));
         UnorderedList ul = new UnorderedList();
         ul.addClassName("pg-events");
         for (ConsoleService.WatcherRow w : o.watchers()) {
@@ -604,29 +683,11 @@ public class OverviewView extends Div {
             li.add(left, Ui.chip(w.leader() ? "Leader" : "Follower", w.leader() ? Ui.Tone.OK : Ui.Tone.NEUTRAL));
             ul.add(li);
         }
-        watchers.add(ul, Ui.text("pg-note", "With Raft off, one watcher runs alone and asks the replicas whether"
-                + " they still see the primary before any failover."));
-    }
-
-    private void renderTargetChecks() {
-        targetChecks.removeAll();
-        String t = target.getValue();
-        if (t == null) {
-            targetChecks.add(Ui.text("pg-note", "No replica to switch to."));
-            return;
+        watchers.add(ul);
+        if ("STANDALONE".equals(o.mode())) {
+            watchers.add(Ui.text("pg-note", "With Raft off, one watcher runs alone and asks the replicas whether"
+                    + " they still see the primary before any failover."));
         }
-        List<PreCheck> checks = console.watcher().switchoverChecks(t, false);
-        for (PreCheck c : checks) {
-            Div row = Ui.div("pg-row", Ui.chip(switch (c.level()) {
-                case PASS -> "Pass";
-                case WARN -> "Warning";
-                case FAIL -> "Blocked";
-            }, Ui.tone(c.level())), Ui.text(null, c.title() + (c.detail() == null || c.detail().equals("Pass")
-                    ? "" : ": " + c.detail())));
-            row.getStyle().set("font-size", "13px").set("flex-wrap", "nowrap").set("align-items", "baseline");
-            targetChecks.add(row);
-        }
-        targetChecks.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "6px");
     }
 
     @Override

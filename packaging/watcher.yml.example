@@ -16,6 +16,7 @@ bfm:
 
   cluster:
     name: prod-main                      # typed by operators to confirm a switchover; also the mail subject
+    environment: production              # shown in the header and on the login page; production gets a red bar
     scope: DC_LOCAL                      # DC_LOCAL: automatic failover stays in the old primary's data center; ANY
     self-fence: false                    # true with Raft: the primary stops itself when renewals stop
     auto-rejoin: true                    # a returning old primary rejoins as a replica (pg_rewind when needed)

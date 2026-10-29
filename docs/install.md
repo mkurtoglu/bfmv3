@@ -320,6 +320,7 @@ bfm:
 
   cluster:
     name: prod-main            # operators type this to confirm a switchover
+    environment: production    # shown on every page and on the login page; production gets a red bar
     scope: DC_LOCAL            # automatic failover stays in the primary's data center
     self-fence: false          # true with Raft
     timing:
@@ -371,7 +372,9 @@ systemctl enable --now bfm-watcher
 journalctl -u bfm-watcher -f
 ```
 
-Open `https://10.0.9.1:8443` (or the DNS name in the certificate) and log in.
+Open `https://10.0.9.1:8443` (or the DNS name in the certificate) and log in. The login page names the cluster
+and its environment, so nobody types a password into the wrong console. Light or dark follows the operating
+system; the half-moon button in the header overrides it per browser.
 
 ### 5.4 Back up `secret.key`
 
@@ -514,7 +517,7 @@ yourself. `/etc/bfm` and `/var/lib/minipgagent*` are kept.
 | Failover blocked: *"N MB behind the primary, limit 16 MB"* | No replica is close enough | Raise `max-lag` knowingly, or switch over manually once a replica catches up |
 | Failover blocked: *"in data center DR"* | `scope: DC_LOCAL` | Promote in the other DC with a manual switchover (a deliberate decision) |
 | `stale epoch N (agent is at M)` | Another watcher steered this cluster, or an old watcher came back | Make sure only one watcher (group) manages this cluster; the console shows an epoch conflict and pauses automatic actions |
-| `pg_rewind failed` | No `wal_log_hints` / checksums, or the rewind role cannot connect | Check §2.1 and §2.3; turn on *Auto reinit* to let BFM rebuild with `pg_basebackup` instead |
+| `pg_rewind failed` | No `wal_log_hints` / checksums, or the rewind role cannot connect | Check §2.1 and §2.3; turn on *Auto re-initialize* to let BFM rebuild with `pg_basebackup` instead |
 | Browser warns about the certificate | The CA is not trusted, or the name is not in the SAN | Add `ca.crt` to the operators' trust store; reissue the watcher certificate with the DNS name |
 | `node is fenced: …` | BFM stopped this node to keep it from acting as a second primary | Read the reason in the event log, then **Rejoin** (pg_rewind) or **Re-initialize** it from the console |
 | `busy with …` from an agent | A background operation (`pg_basebackup`, `pg_rewind`) is still running there | Watch it on the Operations page; it can take hours on a large database (`operation-timeout`) |

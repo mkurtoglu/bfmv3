@@ -33,6 +33,7 @@ import com.bisoft.bfm.core.ops.SwitchoverOperation;
 import com.bisoft.bfm.core.state.ClusterState;
 import com.bisoft.bfm.core.state.ClusterStateRepo;
 import com.bisoft.bfm.core.state.StateConflictException;
+import com.bisoft.bfm.core.state.RoleChange;
 import com.bisoft.bfm.core.state.StateStore;
 
 import java.util.ArrayDeque;
@@ -96,6 +97,7 @@ public class Watcher implements AutoCloseable {
     private boolean unreachableReported;
     private boolean restartAttempted;
     private volatile String blockedReason;
+    private final Map<String, StateSince> stateSince = new java.util.concurrent.ConcurrentHashMap<>();
     private volatile long nextFailoverNanos;
     private final Map<String, Long> vipCooldownUntil = new ConcurrentHashMap<>();
     private final Map<String, Long> nextRepairNanos = new ConcurrentHashMap<>();
@@ -195,6 +197,7 @@ public class Watcher implements AutoCloseable {
     public synchronized void tick() {
         ClusterView v = poller.poll();
         view = v;
+        trackStates(v);
         ClusterState st = readState();
         trackPrimary(v, st);
         recordLag(v, st);
@@ -243,6 +246,27 @@ public class Watcher implements AutoCloseable {
             LOG.log(Level.WARNING, "cannot read cluster state: " + e.getMessage());
             return null;
         }
+    }
+
+    /** Remembers when each node entered the state it is in, so the console can say for how long. */
+    private void trackStates(ClusterView v) {
+        long now = time.millis();
+        for (NodeView n : v.nodes()) {
+            String label = n.stateLabel();
+            StateSince prev = stateSince.get(n.name());
+            if (prev == null || !prev.label().equals(label)) {
+                stateSince.put(n.name(), new StateSince(label, now));
+            }
+        }
+    }
+
+    /** A node's state label and since when it has had it. */
+    public record StateSince(String label, long sinceMillis) {
+    }
+
+    /** When the node entered its current state as this watcher sees it; null before the first poll. */
+    public StateSince stateSince(String node) {
+        return stateSince.get(node);
     }
 
     private void trackPrimary(ClusterView v, ClusterState st) {
@@ -1000,6 +1024,48 @@ public class Watcher implements AutoCloseable {
     }
 
     /** Changes the cluster switches. Null leaves a switch as it is. */
+    /** Why the leading watcher did not start an automatic failover, or null; only known on the leader. */
+    public String failoverBlockedReason() {
+        return blockedReason;
+    }
+
+    /** The last change of primary (failover or switchover), or null when there was none. */
+    public RoleChange lastRoleChange() {
+        try {
+            StateStore.Versioned v = store.get(RoleChange.KEY);
+            return v == null ? null : RoleChange.fromJson(v.value());
+        } catch (RuntimeException e) {
+            LOG.log(Level.FINE, "cannot read the last role change", e);
+            return null;
+        }
+    }
+
+    /** Marks the last role change as seen, so the console stops showing it. Written to the event log. */
+    public RoleChange acknowledgeRoleChange(String user) {
+        requireLeader();
+        for (int attempt = 0; attempt < 5; attempt++) {
+            StateStore.Versioned v = store.get(RoleChange.KEY);
+            if (v == null) {
+                throw new StateConflictException("there is no role change to acknowledge");
+            }
+            RoleChange rc = RoleChange.fromJson(v.value());
+            if (rc.acknowledged()) {
+                return rc;
+            }
+            RoleChange acked = rc.acknowledgedBy(user, time.millis());
+            if (store.compareAndSet(RoleChange.KEY, v.version(), acked.toJson())) {
+                events.publish(EventType.CONTROL_CHANGED, rc.to(), label(rc) + " acknowledged by " + user, user);
+                return acked;
+            }
+        }
+        throw new StateConflictException("the role change was updated meanwhile; try again");
+    }
+
+    private static String label(RoleChange rc) {
+        return ("FAILOVER".equals(rc.type()) ? "Automatic failover " : "Switchover ")
+                + (rc.from() == null ? "" : rc.from() + " -> ") + rc.to();
+    }
+
     public ClusterState setControls(Boolean autoFailover, Boolean maintenance, Boolean mailEnabled, Boolean autoReinit,
                                     String user) {
         requireLeader();

@@ -151,7 +151,7 @@ watcher, acts:
 | Primary still lost | Replica confirmation (and Raft quorum), raise epoch, fence the old primary if reachable, lease wait (self-fence), VIP up on the best replica, promote, re-point the other replicas |
 | Best replica cannot bring up the VIP | Failover fails, nothing is promoted; next attempt after `failover-retry` (another eligible replica is preferred) |
 | No eligible replica (other DC with `DC_LOCAL`, too far behind, other timeline, `no-failover`) | Failover blocked, event and mail |
-| Old primary or a stopped replica comes back | Re-pointed as a replica; `pg_rewind` when it diverged; `pg_basebackup` when auto reinit is on |
+| Old primary or a stopped replica comes back | Re-pointed as a replica; `pg_rewind` when it diverged; `pg_basebackup` when auto re-initialize is on |
 | A non-primary runs as primary, or holds the VIP | Fenced / VIP removed |
 
 Operator actions (console or API, ADMIN only, written to the event log with the user name):
@@ -162,18 +162,24 @@ Operator actions (console or API, ADMIN only, written to the event log with the 
   rest. If the VIP cannot be brought up, the target stays a replica and the old primary starts again as
   primary with its VIP.
 - **Rejoin (pg_rewind)**, **Re-initialize (pg_basebackup)**, **Start as primary**, **Drop slot**.
-- **Switches**: auto failover, maintenance mode, mail notifications, auto reinit.
+- **Switches**: auto failover, maintenance mode, mail notifications, auto re-initialize. Turning failover off,
+  maintenance on or auto re-initialize on asks first, and so does the reverse while the primary is down (it starts
+  a failover at once).
 
 ### Console
 
+Every page shows the cluster's name, its environment (`bfm.cluster.environment`; production gets a red bar) and
+its health in the header. Light or dark follows the operating system, or what the operator picks in the header.
+The console works on a phone: node tables turn into cards and less important columns step aside.
+
 | Page | What it answers |
 | --- | --- |
-| Overview | Who is primary, where the VIP is, node roles and lag, topology, the switches and the operation forms |
-| Replication | Both sides of the stream: the primary's `pg_stat_replication` rows (sent / written / flushed per walsender and what a crash failover would lose) and what each replica reports about itself (recovery state, upstream, timeline, received and replayed LSN). Replication slots with the WAL they retain, the last hour of replay lag, and Rejoin / Rebuild per node |
+| Overview | Healthy or not and why, in one line at the top; the last failover or switchover (how long it took, how much was lost) until an admin acknowledges it; when the primary is down, why no failover runs and the switch that starts it; node states with how long they have been in them, topology with the VIP on the node that really holds it, the cluster switches (with who changed them last) and recent events. Node actions are in each row's menu |
+| Replication | Both sides of the stream: the primary's `pg_stat_replication` rows (sent / written / flushed per walsender and what a crash failover would lose) and what each replica reports about itself (recovery state, upstream, timeline, received and replayed LSN). Replication slots with the WAL they retain, the last hour of replay lag with its peak, and the same node menu (Rejoin, Re-initialize) |
 | Switchover | Pre-checks for a target, then the confirmed switchover |
-| Operations | Running and finished operations with their steps and log |
-| Events | The event log, filterable by severity |
-| Notifications | SMTP settings, recipients, which events send mail, test mail |
+| Operations | Running and finished operations with their steps, how long each step took, and the log |
+| Events | The event log, filterable by severity and text (`events?q=pg-a2`); a row opens to its full report |
+| Notifications | SMTP settings, recipients, alert thresholds (`512 KB`, `1 GB`), which events send mail, test mail; unsaved changes are marked |
 
 ### Raft mode
 
@@ -191,7 +197,8 @@ to the console's login page, so a monitoring script can rely on the status code.
 
 | Call | Purpose |
 | --- | --- |
-| `GET /api/v1/cluster` | Overview: state, nodes, lag, lease, slots, watchers |
+| `GET /api/v1/cluster` | Overview: state, nodes, lag, lease, slots, watchers, `healthReasons`, `roleChange` |
+| `GET /api/v1/role-change` / `POST /api/v1/role-change/acknowledge` | The last failover or switchover / mark it seen (ADMIN) |
 | `GET /api/v1/replication` | Replication: walsender rows, each replica's own view, slots, lag |
 | `GET /api/v1/events?limit=` / `GET /api/v1/operations[/{id}]` | Event log / operations with steps and log |
 | `GET /api/v1/switchover/checks?target=` | Pre-checks |
@@ -247,7 +254,7 @@ changes the node carries `epoch`.
 | `POST /v1/pg/start` / `stop` / `checkpoint` | Lifecycle (`allowPrimary`, `mode`, `releaseVip`) |
 | `POST /v1/pg/follow` | Point a replica at a new primary |
 | `POST /v1/pg/demote` | Stop, optionally pg_rewind, start as replica (background) |
-| `POST /v1/pg/reinit` | Rebuild with pg_basebackup (background) |
+| `POST /v1/pg/reinit` | Re-initialize with pg_basebackup (background) |
 | `GET /v1/operations/{id}` | Progress of a background operation |
 | `POST /v1/fence`, `/v1/fence/clear` | Self-fence / clear |
 | `POST /v1/peer-check` | Can this node reach host:port (failover confirmation) |

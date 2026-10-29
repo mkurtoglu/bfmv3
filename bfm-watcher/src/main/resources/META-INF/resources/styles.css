@@ -1,36 +1,93 @@
 /* BFM console: palette and layout from the Failover Console design. */
-html {
-  --pg-bg: #F4F7EF;
-  --pg-surface: #FFFFFF;
-  --pg-border: #E2E8DA;
-  --pg-border-strong: #D0D9C5;
-  --pg-ink: #1F2D3A;
-  --pg-body: #34424F;
-  --pg-muted: #5B6874;
-  --pg-green: #4E7D16;
-  --pg-green-dark: #355A0C;
-  --pg-ok-bg: #E5F2D3;
-  --pg-ok-fg: #355A0C;
-  --pg-warn-bg: #FDF0D5;
-  --pg-warn-fg: #6E3C04;
-  --pg-crit-bg: #FEE4E2;
-  --pg-crit-fg: #A1251B;
-  --pg-info-bg: #E4EDF7;
-  --pg-info-fg: #23466E;
-  --pg-neutral-bg: #EEF1EA;
-  --pg-neutral-fg: #34424F;
 
-  --lumo-primary-color: #4E7D16;
-  --lumo-primary-color-50pct: rgba(78, 125, 22, 0.5);
-  --lumo-primary-color-10pct: rgba(78, 125, 22, 0.1);
-  --lumo-primary-text-color: #355A0C;
-  --lumo-primary-contrast-color: #FFFFFF;
-  --lumo-error-color: #B42318;
-  --lumo-error-text-color: #B42318;
-  --lumo-success-color: #3F7A12;
-  --lumo-body-text-color: #34424F;
-  --lumo-header-text-color: #1F2D3A;
-  --lumo-secondary-text-color: #5B6874;
+/* Fonts ship with the jar (SIL Open Font License, see fonts/OFL-*.txt): database networks rarely reach the
+   internet, and the console must look the same on every operator's machine. */
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url(fonts/plus-jakarta-sans-latin-ext-wght-normal.woff2) format("woff2-variations"),
+       url(fonts/plus-jakarta-sans-latin-ext-wght-normal.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url(fonts/plus-jakarta-sans-latin-wght-normal.woff2) format("woff2-variations"),
+       url(fonts/plus-jakarta-sans-latin-wght-normal.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url(fonts/jetbrains-mono-latin-ext-400-normal.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url(fonts/jetbrains-mono-latin-400-normal.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Every colour has a light and a dark value. Which one applies follows the page's color-scheme: the operating
+   system's choice by default, or what the operator picked in the header (light, dark, system). */
+html {
+  --pg-bg: light-dark(#F4F7EF, #10151A);
+  --pg-surface: light-dark(#FFFFFF, #182027);
+  --pg-surface-2: light-dark(#F7F9F4, #1E2731);
+  --pg-border: light-dark(#E2E8DA, #2A343E);
+  --pg-border-strong: light-dark(#D0D9C5, #3A4652);
+  --pg-ink: light-dark(#1F2D3A, #EDF1F5);
+  --pg-body: light-dark(#34424F, #CBD4DC);
+  --pg-muted: light-dark(#5B6874, #98A6B3);
+  --pg-green: light-dark(#4E7D16, #7DB23A);
+  --pg-green-dark: light-dark(#355A0C, #A6D46E);
+  --pg-ok-bg: light-dark(#E5F2D3, #1E3216);
+  --pg-ok-fg: light-dark(#355A0C, #AEDB7F);
+  --pg-ok-line: light-dark(#CBE3AE, #2E4A22);
+  --pg-warn-bg: light-dark(#FDF0D5, #3A2B10);
+  --pg-warn-fg: light-dark(#6E3C04, #F6C672);
+  --pg-warn-line: light-dark(#F3D9A4, #5A4219);
+  --pg-crit-bg: light-dark(#FEE4E2, #401B18);
+  --pg-crit-fg: light-dark(#A1251B, #FFA197);
+  --pg-crit-line: light-dark(#F8C4BF, #6A2A24);
+  --pg-crit-strong: light-dark(#B42318, #FF6B5E);
+  --pg-info-bg: light-dark(#E4EDF7, #182B40);
+  --pg-info-fg: light-dark(#23466E, #A3C8F2);
+  --pg-info-line: light-dark(#C9D9EC, #284766);
+  --pg-neutral-bg: light-dark(#EEF1EA, #252E37);
+  --pg-neutral-fg: light-dark(#34424F, #CBD4DC);
+  --pg-bar: light-dark(#5E9420, #7DB23A);
+  --pg-bar-over: light-dark(#A35F00, #F0A030);
+  --pg-threshold: light-dark(#C98A2B, #E0A44A);
+  --pg-log-bg: light-dark(#1F2D3A, #0B0F13);
+  --pg-log-fg: light-dark(#E7EEDF, #DCE5D2);
+  --pg-shadow: light-dark(rgba(31, 45, 58, 0.05), rgba(0, 0, 0, 0.35));
+
+  --lumo-primary-color: var(--pg-green);
+  --lumo-primary-color-50pct: light-dark(rgba(78, 125, 22, 0.5), rgba(125, 178, 58, 0.5));
+  --lumo-primary-color-10pct: light-dark(rgba(78, 125, 22, 0.1), rgba(125, 178, 58, 0.16));
+  --lumo-primary-text-color: var(--pg-green-dark);
+  --lumo-primary-contrast-color: light-dark(#FFFFFF, #10151A);
+  --lumo-error-color: var(--pg-crit-strong);
+  --lumo-error-text-color: var(--pg-crit-strong);
+  --lumo-success-color: light-dark(#3F7A12, #7DB23A);
+  --lumo-body-text-color: var(--pg-body);
+  --lumo-header-text-color: var(--pg-ink);
+  --lumo-secondary-text-color: var(--pg-muted);
+  --lumo-base-color: var(--pg-surface);
   --lumo-border-radius-m: 10px;
   --lumo-border-radius-l: 18px;
   --lumo-font-family: "Plus Jakarta Sans", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
@@ -159,7 +216,7 @@ vaadin-app-layout::part(drawer) {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  box-shadow: 0 1px 2px rgba(31, 45, 58, 0.05);
+  box-shadow: 0 1px 2px var(--pg-shadow);
   min-width: 0;
 }
 
@@ -237,10 +294,10 @@ vaadin-app-layout::part(drawer) {
   gap: 8px;
 }
 
-.pg-banner.warn { background: var(--pg-warn-bg); color: var(--pg-warn-fg); border: 1px solid #F3D9A4; }
-.pg-banner.crit { background: var(--pg-crit-bg); color: var(--pg-crit-fg); border: 1px solid #F8C4BF; }
-.pg-banner.info { background: var(--pg-info-bg); color: var(--pg-info-fg); border: 1px solid #C9D9EC; }
-.pg-banner.ok { background: var(--pg-ok-bg); color: var(--pg-ok-fg); border: 1px solid #CBE3AE; }
+.pg-banner.warn { background: var(--pg-warn-bg); color: var(--pg-warn-fg); border: 1px solid var(--pg-warn-line); }
+.pg-banner.crit { background: var(--pg-crit-bg); color: var(--pg-crit-fg); border: 1px solid var(--pg-crit-line); }
+.pg-banner.info { background: var(--pg-info-bg); color: var(--pg-info-fg); border: 1px solid var(--pg-info-line); }
+.pg-banner.ok { background: var(--pg-ok-bg); color: var(--pg-ok-fg); border: 1px solid var(--pg-ok-line); }
 
 /* Topology */
 .pg-topo {
@@ -281,9 +338,9 @@ vaadin-app-layout::part(drawer) {
 
 .pg-topo-node b { color: var(--pg-ink); }
 .pg-topo-node span { font-size: 12px; color: var(--pg-muted); }
-.pg-topo-node.primary { border-color: var(--pg-green); background: #F7FBF1; }
+.pg-topo-node.primary { border-color: var(--pg-green); background: var(--pg-ok-bg); }
 .pg-topo-node.remote { border-style: dashed; }
-.pg-topo-node.down { border-color: #E9A6A0; background: #FFF6F5; }
+.pg-topo-node.down { border-color: var(--pg-crit-line); background: var(--pg-crit-bg); }
 .pg-topo-link { width: 2px; height: 18px; background: var(--pg-border-strong); }
 
 /* Lag chart */
@@ -301,16 +358,16 @@ vaadin-app-layout::part(drawer) {
   flex: 1 1 0;
   min-width: 4px;
   border-radius: 4px 4px 0 0;
-  background: #5E9420;
+  background: var(--pg-bar);
 }
 
-.pg-bar.over { background: #A35F00; }
+.pg-bar.over { background: var(--pg-bar-over); }
 
 .pg-threshold {
   position: absolute;
   left: 0;
   right: 0;
-  border-top: 2px dashed #C98A2B;
+  border-top: 2px dashed var(--pg-threshold);
   pointer-events: none;
 }
 
@@ -363,7 +420,7 @@ vaadin-app-layout::part(drawer) {
   border-radius: 10px;
 }
 
-.pg-steps li.RUNNING { background: #F2F7EA; }
+.pg-steps li.RUNNING { background: var(--pg-ok-bg); }
 .pg-steps li.FAILED { background: var(--pg-crit-bg); }
 .pg-step-detail { grid-column: 2 / 4; font-size: 13px; color: var(--pg-muted); }
 
@@ -378,7 +435,7 @@ vaadin-app-layout::part(drawer) {
 
 .pg-dot.DONE { background: var(--pg-green); border-color: var(--pg-green); }
 .pg-dot.RUNNING { border-color: var(--pg-green); border-top-color: transparent; animation: pg-spin 1s linear infinite; }
-.pg-dot.FAILED { background: #B42318; border-color: #B42318; }
+.pg-dot.FAILED { background: var(--pg-crit-strong); border-color: var(--pg-crit-strong); }
 .pg-dot.SKIPPED { background: var(--pg-neutral-bg); }
 
 @keyframes pg-spin { to { transform: rotate(360deg); } }
@@ -391,8 +448,8 @@ vaadin-app-layout::part(drawer) {
   margin: 0;
   max-height: 320px;
   overflow: auto;
-  background: #1F2D3A;
-  color: #E7EEDF;
+  background: var(--pg-log-bg);
+  color: var(--pg-log-fg);
   border-radius: 12px;
   padding: 12px 14px;
   white-space: pre-wrap;
@@ -427,7 +484,7 @@ vaadin-app-layout::part(drawer) {
   border: 1px solid var(--pg-border);
   border-radius: 20px;
   padding: 28px 24px 8px;
-  box-shadow: 0 2px 8px rgba(31, 45, 58, 0.06);
+  box-shadow: 0 2px 8px var(--pg-shadow);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -439,13 +496,168 @@ vaadin-grid {
   border-color: var(--pg-border);
 }
 
+/* Environment marker: production is impossible to miss, so nobody mistakes it for a test console. */
+.pg-env {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.pg-env.crit { background: light-dark(#B42318, #C2382D); color: #FFFFFF; }
+.pg-env.warn { background: var(--pg-warn-bg); color: var(--pg-warn-fg); border: 1px solid var(--pg-warn-line); }
+.pg-env.info { background: var(--pg-info-bg); color: var(--pg-info-fg); border: 1px solid var(--pg-info-line); }
+.pg-env.neutral { background: var(--pg-neutral-bg); color: var(--pg-neutral-fg); }
+vaadin-app-layout.pg-env-production::part(navbar) { border-top: 4px solid var(--pg-crit-strong); }
+
+.pg-cluster-name {
+  font-weight: 800;
+  color: var(--pg-ink);
+  white-space: nowrap;
+}
+
+/* The cluster's state in one line, at the top of the overview and in the header of every page. */
+.pg-health {
+  border-radius: 16px;
+  padding: 14px 18px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  align-items: center;
+  border: 1px solid;
+}
+.pg-health.ok { background: var(--pg-ok-bg); color: var(--pg-ok-fg); border-color: var(--pg-ok-line); }
+.pg-health.warn { background: var(--pg-warn-bg); color: var(--pg-warn-fg); border-color: var(--pg-warn-line); }
+.pg-health.crit { background: var(--pg-crit-bg); color: var(--pg-crit-fg); border-color: var(--pg-crit-line); }
+.pg-health-state {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.pg-health-summary { font-size: 15px; font-weight: 600; }
+.pg-health ul { grid-column: 1 / -1; margin: 2px 0 0; padding-left: 20px; font-size: 14px; font-weight: 600; }
+.pg-health li { margin: 2px 0; }
+
+.pg-health-chip { text-decoration: none; }
+
+/* Banner actions sit at the end of the text. */
+.pg-banner-actions { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.pg-banner vaadin-button { margin: 0; }
+
+/* A stat tile that is in trouble says so in colour, not only in words. */
+.pg-card.pg-stat-crit { border-color: var(--pg-crit-line); background: var(--pg-crit-bg); }
+.pg-card.pg-stat-crit .pg-stat-value, .pg-card.pg-stat-crit .pg-stat-sub { color: var(--pg-crit-fg); }
+.pg-card.pg-stat-warn { border-color: var(--pg-warn-line); background: var(--pg-warn-bg); }
+.pg-card.pg-stat-warn .pg-stat-value, .pg-card.pg-stat-warn .pg-stat-sub { color: var(--pg-warn-fg); }
+
+/* Topology: the VIP hangs off the node that really holds it. */
+.pg-topo-vip.crit { background: var(--pg-crit-bg); color: var(--pg-crit-fg); }
+.pg-topo-vip.warn { background: var(--pg-warn-bg); color: var(--pg-warn-fg); }
+.pg-topo-cell { display: flex; flex-direction: column; align-items: center; gap: 0; }
+.pg-topo-cell .pg-topo-vip { margin-bottom: 0; }
+
+/* Rows that open: the chevron says so. */
+.pg-chevron { color: var(--pg-muted); transition: transform 0.15s ease; width: 14px; height: 14px; }
+.pg-chevron.open { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .pg-chevron { transition: none; } }
+
+.pg-since { font-size: 12px; color: var(--pg-muted); white-space: nowrap; }
+
+/* Lag chart with a labelled axis. */
+.pg-chart { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; }
+.pg-yaxis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  font-size: 11px;
+  color: var(--pg-muted);
+  height: 150px;
+  padding-top: 8px;
+  box-sizing: border-box;
+}
+.pg-chart .pg-axis { grid-column: 2; }
+.pg-yaxis span { line-height: 1; }
+.pg-yaxis span:first-child { transform: translateY(-50%); }
+.pg-yaxis span:last-child { transform: translateY(50%); }
+.pg-chart-summary { font-size: 14px; color: var(--pg-ink); font-weight: 600; }
+.pg-threshold-label {
+  position: absolute;
+  right: 0;
+  transform: translateY(-100%);
+  font-size: 11px;
+  color: var(--pg-threshold);
+  background: var(--pg-surface);
+  padding: 0 4px;
+}
+.pg-empty {
+  border: 1px dashed var(--pg-border-strong);
+  border-radius: 12px;
+  padding: 18px;
+  text-align: center;
+  color: var(--pg-muted);
+  font-size: 14px;
+}
+
+/* Dangerous menu entries (re-initialize wipes a data directory). */
+vaadin-menu-bar-item.pg-danger, vaadin-context-menu-item.pg-danger { color: var(--pg-crit-strong); }
+
+/* Node cards replace the node table on narrow screens. */
+.pg-node-cards { display: none; flex-direction: column; gap: 10px; }
+.pg-node-card {
+  border: 1px solid var(--pg-border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--pg-surface);
+}
+.pg-node-card.crit { border-color: var(--pg-crit-line); }
+.pg-node-card.warn { border-color: var(--pg-warn-line); }
+.pg-node-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pg-node-card-head b { color: var(--pg-ink); font-size: 16px; }
+.pg-node-card-head vaadin-menu-bar { margin-left: auto; }
+.pg-node-card .pg-note { overflow-wrap: anywhere; }
+
+/* Unsaved changes on a settings card. */
+.pg-dirty { font-size: 13px; font-weight: 700; color: var(--pg-warn-fg); }
+
+.pg-preview {
+  background: var(--pg-surface-2);
+  color: var(--pg-body);
+  border: 1px solid var(--pg-border);
+}
+
+.pg-field-error { color: var(--pg-crit-strong); font-size: 13px; }
+
+.pg-env-login { display: flex; align-items: center; gap: 8px; justify-content: center; flex-wrap: wrap; }
+
 @media (max-width: 1100px) {
   .pg-grid-2 { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 640px) {
-  .pg-page { padding: 16px 16px 40px; }
-  .pg-title { font-size: 28px; }
+  .pg-page { padding: 16px 16px 40px; gap: 14px; }
+  .pg-title { font-size: 26px; }
+  /* Four stat tiles in a 2 x 2 block instead of two and a half screens. */
+  .pg-grid-auto.pg-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .pg-stats .pg-card { padding: 12px 14px; gap: 4px; border-radius: 14px; }
+  .pg-stats .pg-stat-value { font-size: 20px; }
+  .pg-stats .pg-stat-label, .pg-stats .pg-stat-sub { font-size: 12px; }
+  .pg-health { grid-template-columns: 1fr; padding: 12px 14px; }
+  .pg-health-state { font-size: 19px; }
+  .pg-node-cards { display: flex; }
+  .pg-node-grid { display: none; }
+  .pg-card { padding: 16px; }
+  /* The header keeps what matters on a phone: which cluster, which environment, its state, and log out. */
+  vaadin-app-layout .pg-brand { display: none; }
+  .pg-health-chip .pg-chip { font-size: 0; gap: 0; padding: 6px; }
+  .pg-env { font-size: 10px; padding: 2px 6px; }
+  .pg-cluster-name { max-width: 34vw; overflow: hidden; text-overflow: ellipsis; }
 }
 
 @media (max-width: 760px) {

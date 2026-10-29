@@ -1,6 +1,7 @@
 package com.bisoft.bfm.watcher;
 
 import com.vaadin.flow.component.dependency.StyleSheet;
+import com.vaadin.flow.component.page.ColorScheme;
 import com.vaadin.flow.component.page.AppShellConfigurator;
 import com.vaadin.flow.server.AppShellSettings;
 import com.vaadin.flow.theme.lumo.Lumo;
@@ -20,6 +21,7 @@ import java.nio.charset.StandardCharsets;
  * <p>{@code java -jar bfm-watcher.jar hash-password} prints a password hash for {@code bfm.users}.
  */
 @SpringBootApplication
+@ColorScheme(ColorScheme.Value.LIGHT_DARK)
 @StyleSheet(Lumo.STYLESHEET)
 @StyleSheet("styles.css")
 public class WatcherApplication implements AppShellConfigurator {

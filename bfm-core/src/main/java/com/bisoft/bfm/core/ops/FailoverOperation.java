@@ -230,6 +230,7 @@ public final class FailoverOperation extends Operation {
                     : String.join("; ", problems));
 
             endRoleOperation(s -> s);
+            recordRoleChange(oldPrimary, t, target.behindBytes(), epoch);
             NodeStatus np = statusOrNull(t);
             String lossCheck = target.behindBytes() == null ? "Data loss check: no WAL position was seen on "
                     + oldPrimary + " before it failed"

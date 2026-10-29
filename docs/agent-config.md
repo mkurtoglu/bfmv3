@@ -288,7 +288,7 @@ And one refusal that comes later, on a start or rewind command:
 
 | Message | Cause |
 | --- | --- |
-| `demote (pg_rewind) was interrupted; the data directory may be incomplete, re-initialize this node` (or `reinit (pg_basebackup) …`) | The agent was restarted, or the command failed, while it was rewriting the data directory. It will not start or rewind what may be half written; **Re-initialize** the node from the console (automatic with *Auto reinit*). The same text shows in the node's error column. |
+| `demote (pg_rewind) was interrupted; the data directory may be incomplete, re-initialize this node` (or `reinit (pg_basebackup) …`) | The agent was restarted, or the command failed, while it was rewriting the data directory. It will not start or rewind what may be half written; **Re-initialize** the node from the console (automatic with *Auto re-initialize*). The same text shows in the node's error column. |
 
 Check after a change:
 

@@ -16,7 +16,17 @@ public final class OperationProgress {
 
     public enum StepState { PENDING, RUNNING, DONE, FAILED, SKIPPED }
 
-    public record Step(String key, String title, StepState state, String detail) {
+    /**
+     * @param startedAtMillis  when the step began running, null if it never ran
+     * @param finishedAtMillis when it ended (done, failed or skipped), null while pending or running
+     */
+    public record Step(String key, String title, StepState state, String detail, Long startedAtMillis,
+                       Long finishedAtMillis) {
+
+        /** How long the step ran, or null when it did not run to an end. */
+        public Long durationMs() {
+            return startedAtMillis == null || finishedAtMillis == null ? null : finishedAtMillis - startedAtMillis;
+        }
     }
 
     public record LogLine(long timeMillis, String source, String text) {
@@ -27,6 +37,11 @@ public final class OperationProgress {
                            List<Step> steps, List<LogLine> log) {
         public boolean running() {
             return state == State.RUNNING;
+        }
+
+        /** Total run time, or null while running. */
+        public Long durationMs() {
+            return finishedAtMillis == null ? null : finishedAtMillis - startedAtMillis;
         }
     }
 
@@ -53,7 +68,7 @@ public final class OperationProgress {
         this.time = time;
         this.startedAtMillis = time.millis();
         for (String[] s : plan) {
-            steps.add(new Step(s[0], s[1], StepState.PENDING, null));
+            steps.add(new Step(s[0], s[1], StepState.PENDING, null, null, null));
         }
     }
 
@@ -99,21 +114,25 @@ public final class OperationProgress {
         for (int i = 0; i < steps.size(); i++) {
             Step s = steps.get(i);
             if (s.key().equals(key)) {
-                steps.set(i, new Step(key, title, s.state(), s.detail()));
+                steps.set(i, new Step(key, title, s.state(), s.detail(), s.startedAtMillis(), s.finishedAtMillis()));
                 return;
             }
         }
     }
 
     private void set(String key, StepState st, String detail) {
+        long now = time.millis();
         for (int i = 0; i < steps.size(); i++) {
             Step s = steps.get(i);
             if (s.key().equals(key)) {
-                steps.set(i, new Step(key, s.title(), st, detail == null ? s.detail() : detail));
+                Long started = st == StepState.RUNNING ? Long.valueOf(now) : s.startedAtMillis();
+                Long finished = st == StepState.RUNNING || st == StepState.PENDING ? null : Long.valueOf(now);
+                steps.set(i, new Step(key, s.title(), st, detail == null ? s.detail() : detail, started, finished));
                 return;
             }
         }
-        steps.add(new Step(key, key, st, detail));
+        steps.add(new Step(key, key, st, detail, st == StepState.RUNNING ? now : null,
+                st == StepState.RUNNING || st == StepState.PENDING ? null : now));
     }
 
     public synchronized void log(String source, String text) {
@@ -143,7 +162,8 @@ public final class OperationProgress {
             if (step.state() == StepState.PENDING || step.state() == StepState.RUNNING) {
                 steps.set(i, new Step(step.key(), step.title(),
                         step.state() == StepState.RUNNING && s == State.FAILED ? StepState.FAILED : StepState.SKIPPED,
-                        step.detail()));
+                        step.detail(), step.startedAtMillis(),
+                        step.state() == StepState.RUNNING ? finishedAtMillis : null));
             }
         }
     }

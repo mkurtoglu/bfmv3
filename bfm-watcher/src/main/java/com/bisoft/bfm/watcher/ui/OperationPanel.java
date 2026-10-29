@@ -7,6 +7,7 @@ import com.vaadin.flow.component.html.Pre;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.html.UnorderedList;
 import com.bisoft.bfm.core.ops.OperationProgress;
+import com.bisoft.bfm.watcher.service.Terms;
 
 import java.time.ZoneId;
 
@@ -32,11 +33,14 @@ class OperationPanel extends Div {
             case SUCCEEDED -> "Succeeded";
             case FAILED -> "Failed";
         }, Ui.tone(s.state()))));
-        add(Ui.text("pg-note", "Started " + Ui.full(s.startedAtMillis(), zone) + " by " + s.startedBy()
-                + (s.epochTo() > 0 ? " · epoch " + s.epochFrom() + " → " + s.epochTo() : "")
-                + (s.finishedAtMillis() == null ? "" : " · finished " + Ui.time(s.finishedAtMillis(), zone))));
+        add(Ui.text("pg-note", "Started " + Ui.full(s.startedAtMillis(), zone) + " " + Ui.zone(zone) + " by "
+                + s.startedBy() + (s.epochTo() > 0 ? " · epoch " + s.epochFrom() + " → " + s.epochTo() : "")
+                + (s.finishedAtMillis() == null ? " · running for " + Ui.ago(s.startedAtMillis(),
+                System.currentTimeMillis()) : " · finished " + Ui.time(s.finishedAtMillis(), zone) + ", took "
+                + Ui.duration(s.durationMs()))));
         if (s.result() != null && !s.running()) {
-            add(Ui.banner(s.result(), s.state() == OperationProgress.State.SUCCEEDED ? Ui.Tone.OK : Ui.Tone.CRIT));
+            add(Ui.banner(Ui.arrows(s.result()), s.state() == OperationProgress.State.SUCCEEDED ? Ui.Tone.OK
+                    : Ui.Tone.CRIT));
         }
         UnorderedList steps = new UnorderedList();
         steps.addClassName("pg-steps");
@@ -49,13 +53,17 @@ class OperationPanel extends Div {
             Span name = new Span(st.title());
             name.getStyle().set("color", "var(--pg-ink)").set("font-weight", st.state()
                     == OperationProgress.StepState.RUNNING ? "700" : "500");
+            String took = st.durationMs() != null && st.state() != OperationProgress.StepState.SKIPPED
+                    ? " · " + Ui.duration(st.durationMs())
+                    : st.state() == OperationProgress.StepState.RUNNING && st.startedAtMillis() != null
+                    ? " · " + Ui.ago(st.startedAtMillis(), System.currentTimeMillis()) : "";
             li.add(dot, name, Ui.text("pg-note", switch (st.state()) {
                 case PENDING -> "Pending";
                 case RUNNING -> "Running";
                 case DONE -> "Done";
                 case FAILED -> "Failed";
                 case SKIPPED -> "Skipped";
-            }));
+            } + took));
             if (st.detail() != null && !st.detail().isBlank()) {
                 li.add(Ui.text("pg-step-detail", st.detail()));
             }
@@ -75,14 +83,6 @@ class OperationPanel extends Div {
     }
 
     static String label(String type) {
-        return switch (type) {
-            case "FAILOVER" -> "Automatic failover";
-            case "SWITCHOVER" -> "Switchover";
-            case "START_PRIMARY" -> "Start as primary";
-            case "REJOIN" -> "Rejoin";
-            case "REINIT" -> "Re-initialize";
-            case "FOLLOW" -> "Restart replica";
-            default -> type;
-        };
+        return Terms.operation(type);
     }
 }

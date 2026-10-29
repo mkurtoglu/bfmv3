@@ -10,7 +10,8 @@
 #   scripts/local-lab.sh status      cluster state through the REST API
 #   scripts/local-lab.sh down        stop everything
 #
-# Settings: PGBIN (PostgreSQL 14+ bin directory), LAB (lab directory, default /tmp/bfm-lab).
+# Settings: PGBIN (PostgreSQL 14+ bin directory), LAB (lab directory, default /tmp/bfm-lab), LAB_ENVIRONMENT
+# (label shown in the console, default lab; try production to see its marker).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -76,6 +77,7 @@ bfm:
   data-dir: $LAB/watcher
   cluster:
     name: prod-main
+    environment: ${LAB_ENVIRONMENT:-lab}
     scope: DC_LOCAL
     timing:
       poll-interval: 2s

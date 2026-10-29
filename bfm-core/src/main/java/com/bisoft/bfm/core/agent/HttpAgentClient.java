@@ -204,7 +204,7 @@ public class HttpAgentClient implements AgentClient {
         try {
             resp = http.send(rb.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         } catch (IOException e) {
-            throw new AgentCallException(node, "unreachable: " + describe(e), e);
+            throw new AgentCallException(node, "unreachable: " + describe(e, baseUrl, callTimeout), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new AgentCallException(node, "interrupted", e);
@@ -227,11 +227,36 @@ public class HttpAgentClient implements AgentClient {
         throw new AgentCallException(node, status, message == null ? "HTTP " + status : message);
     }
 
-    private static String describe(IOException e) {
-        String m = e.getMessage();
-        if (m == null || m.isBlank()) {
-            return e.getClass().getSimpleName();
+    /** What went wrong, in the words an operator needs; never a bare Java class name. */
+    static String describe(IOException e, String baseUrl, Duration timeout) {
+        String where = baseUrl.replaceFirst("^https?://", "");
+        Throwable root = e;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
         }
-        return e.getClass().getSimpleName() + ": " + m;
+        if (e instanceof java.net.http.HttpConnectTimeoutException || root instanceof java.net.SocketTimeoutException
+                && String.valueOf(root.getMessage()).contains("connect")) {
+            return "no answer from " + where + " within " + timeout.toMillis() / 1000.0 + " s (host down or"
+                    + " firewalled)";
+        }
+        if (e instanceof java.net.http.HttpTimeoutException) {
+            return "the agent at " + where + " did not reply within " + timeout.toMillis() / 1000.0 + " s";
+        }
+        if (root instanceof java.net.ConnectException || e instanceof java.net.ConnectException) {
+            return "connection refused by " + where + " (agent not running, or wrong port)";
+        }
+        if (root instanceof java.net.UnknownHostException) {
+            return "unknown host in " + where;
+        }
+        if (root instanceof java.net.NoRouteToHostException) {
+            return "no route to " + where;
+        }
+        if (root instanceof javax.net.ssl.SSLException || e instanceof javax.net.ssl.SSLException) {
+            String m = root.getMessage() == null ? "" : ": " + root.getMessage();
+            return "TLS handshake with " + where + " failed (check the certificates and the CA)" + m;
+        }
+        String m = e.getMessage() == null || e.getMessage().isBlank()
+                ? (root.getMessage() == null ? "" : root.getMessage()) : e.getMessage();
+        return m.isBlank() ? "connection to " + where + " failed" : "connection to " + where + " failed: " + m;
     }
 }

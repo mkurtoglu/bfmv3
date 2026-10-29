@@ -11,13 +11,18 @@ import com.bisoft.bfm.core.decision.PrimaryHealth;
 import com.bisoft.bfm.core.monitor.ClusterView;
 import com.bisoft.bfm.core.monitor.NodeView;
 import com.bisoft.bfm.core.monitor.Observation;
+import com.bisoft.bfm.core.event.ClusterEvent;
+import com.bisoft.bfm.core.event.EventType;
+import com.bisoft.bfm.core.notify.NotificationSettings;
 import com.bisoft.bfm.core.state.ClusterState;
+import com.bisoft.bfm.core.state.RoleChange;
 import com.bisoft.bfm.core.state.StateStore;
 import com.bisoft.bfm.watcher.config.BfmProperties;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -42,7 +47,11 @@ public class ConsoleService {
                           Long lagBytes, Long replayDelayMs, Integer timeline, String sync, boolean agentOnline,
                           long lastCheckMillis, boolean fenced, String fencedReason, boolean vipHeld, String vipAddress,
                           long epoch, String error, String busy, boolean noFailover, int priority,
-                          boolean isPrimary, boolean streaming, String upstream) {
+                          boolean isPrimary, boolean streaming, String upstream, long stateSinceMillis) {
+    }
+
+    /** The last change of one cluster switch, from the event log. */
+    public record ControlChange(boolean on, String by, long atMillis) {
     }
 
     public record SlotRow(String name, String consumer, boolean active, Long retainedBytes) {
@@ -62,7 +71,8 @@ public class ConsoleService {
                            boolean selfFence, String vipAddress, String vipHolder, Long maxLagBytes,
                            String maxLagNode, Long maxLagDelayMs, Lease lease, ClusterState.OperationRef operation,
                            List<NodeRow> nodes, List<SlotRow> slots, List<WatcherRow> watchers,
-                           long observedAtMillis) {
+                           long observedAtMillis, String environment, List<String> healthReasons,
+                           String failoverBlockedReason, RoleChange roleChange, Map<String, ControlChange> controls) {
         /**
          * Where the running operation's steps and log can be followed. They live in the memory of the watcher
          * that runs it, so on any other watcher this is that watcher's console (from {@code raft.peers[].url}),
@@ -83,6 +93,16 @@ public class ConsoleService {
 
         public boolean failoverActive() {
             return autoFailover && !maintenance;
+        }
+
+        /** The row of the recorded primary, or null. */
+        public NodeRow primaryRow() {
+            return nodes.stream().filter(NodeRow::isPrimary).findFirst().orElse(null);
+        }
+
+        /** The last role change while nobody has acknowledged it; null otherwise. */
+        public RoleChange unacknowledgedRoleChange() {
+            return roleChange == null || roleChange.acknowledged() ? null : roleChange;
         }
     }
 
@@ -135,7 +155,8 @@ public class ConsoleService {
                     s == null ? 0 : s.epoch(), v == null ? null : v.error() != null ? v.error() : s == null ? null
                     : s.error(), s == null ? null : s.busyOperation(), nc.noFailover(), nc.priority(),
                     nc.name().equals(primary), s != null && s.streaming(),
-                    s == null || s.upstreamHost() == null ? null : s.upstreamHost() + ":" + s.upstreamPort()));
+                    s == null || s.upstreamHost() == null ? null : s.upstreamHost() + ":" + s.upstreamPort(),
+                    since(nc.name())));
         }
 
         List<SlotRow> slots = new ArrayList<>();
@@ -169,6 +190,7 @@ public class ConsoleService {
             lease = new Lease(l.granted(), l.remainingMs(), cfg.timing().leaseTtlMs(), l.fenceOnExpiry());
         }
         PrimaryHealth h = primary == null ? null : PrimaryHealth.of(pv);
+        List<String> reasons = healthReasons(st, primary, h, rows, slots, vipAddress, vipHolder);
         String health;
         if (st == null) {
             health = "Starting";
@@ -176,7 +198,7 @@ public class ConsoleService {
             health = "No primary";
         } else if (h != PrimaryHealth.OK) {
             health = "Primary down";
-        } else if (rows.stream().allMatch(r -> r.isPrimary() || (r.streaming() && !r.fenced()))) {
+        } else if (reasons.isEmpty()) {
             health = "Healthy";
         } else {
             health = "Degraded";
@@ -190,7 +212,93 @@ public class ConsoleService {
                 st != null && st.autoFailover(), st != null && st.maintenance(), st != null && st.mailEnabled(),
                 st != null && st.autoReinit(), cfg.scope().name(), cfg.selfFence(), vipAddress, vipHolder, maxLag,
                 maxLagNode, maxDelay, lease, st == null ? null : st.operation(), rows, slots, watchers,
-                view.observedAtMillis());
+                view.observedAtMillis(), props.cluster().environment(), reasons,
+                lead.leader() ? watcher.failoverBlockedReason() : null, watcher.lastRoleChange(), controls());
+    }
+
+    private long since(String node) {
+        Watcher.StateSince s = watcher.stateSince(node);
+        return s == null ? 0 : s.sinceMillis();
+    }
+
+    /**
+     * Why the cluster is not healthy, one short line per problem, worst first. Empty when it is healthy: the primary
+     * runs and holds the VIP, every replica streams, no lag or idle slot is over its alert threshold.
+     */
+    List<String> healthReasons(ClusterState st, String primary, PrimaryHealth h, List<NodeRow> rows,
+                               List<SlotRow> slots, String vipAddress, String vipHolder) {
+        List<String> out = new ArrayList<>();
+        if (st == null) {
+            out.add("the watcher has not read the cluster state yet");
+            return out;
+        }
+        if (primary == null) {
+            out.add("no node is recorded as primary");
+            return out;
+        }
+        NodeRow p = rows.stream().filter(NodeRow::isPrimary).findFirst().orElse(null);
+        if (h != PrimaryHealth.OK) {
+            out.add(primary + ": " + (p == null ? "not polled yet" : lower(p.state())));
+        } else if (vipAddress != null && vipHolder == null) {
+            out.add("VIP " + vipAddress + " is not up on " + primary);
+        }
+        if (vipHolder != null && !vipHolder.equals(primary)) {
+            out.add("VIP " + vipAddress + " is on " + vipHolder + ", not on the primary");
+        }
+        NotificationSettings ns = watcher.notificationSettings().current();
+        for (NodeRow r : rows) {
+            if (r.isPrimary()) {
+                continue;
+            }
+            if (!r.agentOnline()) {
+                out.add(r.name() + ": agent unreachable");
+            } else if (r.fenced()) {
+                out.add(r.name() + ": fenced");
+            } else if (r.busy() != null) {
+                out.add(r.name() + ": " + lower(Terms.operation(r.busy())) + " running");
+            } else if (!r.streaming()) {
+                out.add(r.name() + ": " + lower(r.state()));
+            } else if (r.lagBytes() != null && r.lagBytes() > ns.lagAlertBytes()) {
+                out.add(r.name() + ": " + Lsn.bytes(r.lagBytes()) + " behind (alert at " + Lsn.bytes(ns.lagAlertBytes())
+                        + ")");
+            }
+        }
+        for (SlotRow sl : slots) {
+            if (!sl.active() && sl.retainedBytes() != null && sl.retainedBytes() > ns.slotAlertBytes()) {
+                out.add("inactive slot " + sl.name() + " holds " + Lsn.bytes(sl.retainedBytes()) + " of WAL");
+            }
+        }
+        return out;
+    }
+
+    private static String lower(String s) {
+        return s == null || s.isEmpty() ? "" : Character.toLowerCase(s.charAt(0)) + s.substring(1);
+    }
+
+    /** When each switch was last turned on or off, and by whom, from the shared event log. */
+    Map<String, ControlChange> controls() {
+        Map<String, ControlChange> out = new LinkedHashMap<>();
+        String[] names = {"auto failover", "maintenance mode", "mail notifications", "auto reinit"};
+        // The switches change rarely; the latest few hundred events are enough and keep each refresh cheap.
+        for (ClusterEvent e : watcher.events(200)) {
+            if (e.type() != EventType.CONTROL_CHANGED || e.message() == null) {
+                continue;
+            }
+            for (String n : names) {
+                if (out.containsKey(n)) {
+                    continue;
+                }
+                if (e.message().contains(n + " on")) {
+                    out.put(n, new ControlChange(true, e.actor(), e.timeMillis()));
+                } else if (e.message().contains(n + " off")) {
+                    out.put(n, new ControlChange(false, e.actor(), e.timeMillis()));
+                }
+            }
+            if (out.size() == names.length) {
+                break;
+            }
+        }
+        return out;
     }
 
     // ---------------------------------------------------------------- replication

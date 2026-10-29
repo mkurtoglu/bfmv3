@@ -175,8 +175,32 @@ public final class SwitchoverOperation extends Operation {
             String msg = vc.message() == null ? "" : vc.message();
             boolean held = vc.data() != null && vc.data().bool("held", false);
             boolean free = vc.data() != null && vc.data().bool("free", false);
-            if (vc.ok() || held || free || msg.contains("answers from another host") || msg.contains("disabled")) {
-                return PreCheck.pass(title, free ? "VIP free" : msg.isEmpty() ? "Pass" : msg);
+            if (msg.contains("disabled")) {
+                return PreCheck.pass(title, "VIP management is off on " + target);
+            }
+            if (held) {
+                return PreCheck.pass(title, "the VIP is already up on " + target);
+            }
+            if (free || vc.ok()) {
+                return PreCheck.pass(title, "the VIP is free; " + target + " can bring it up");
+            }
+            if (msg.contains("answers from another host")) {
+                // arping ran through sudo, so the rule works. Someone answers for the address: during a switchover
+                // that is normally the current primary, which gives it up at the stop step.
+                String primary = ctx.repo().current() == null ? null : ctx.repo().current().primary();
+                boolean onPrimary = false;
+                if (primary != null && !primary.equals(target)) {
+                    try {
+                        onPrimary = ctx.agent(primary).status().vipHeld();
+                    } catch (AgentCallException ignored) {
+                        // unknown: fall through to the warning
+                    }
+                }
+                return onPrimary
+                        ? PreCheck.pass(title, "the VIP is on " + primary + " now, as expected; it moves to " + target
+                        + " after " + primary + " stops")
+                        : PreCheck.warn(title, "the VIP answers from a host that is not " + (primary == null
+                        ? "the primary" : primary) + "; the switchover stops at the VIP check unless it goes away");
             }
             return PreCheck.fail(title, msg);
         } catch (AgentCallException ex) {
@@ -346,6 +370,8 @@ public final class SwitchoverOperation extends Operation {
             progress.running("resume");
             endRoleOperation(c -> c);
             progress.done("resume", "automatic failover resumed");
+            // The target replayed past the shutdown checkpoint before promotion: nothing written was lost.
+            recordRoleChange(oldPrimary, target, 0L, epoch);
             NodeStatus np = statusOrNull(target);
             String summary = "New primary: " + target + " (" + tc.pgHost() + ")"
                     + (np != null && np.timeline() != null ? ", timeline " + np.timeline() : "") + ", epoch " + epoch

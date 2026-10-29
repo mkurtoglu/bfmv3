@@ -11,6 +11,8 @@ import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.data.renderer.ComponentRenderer;
 import com.vaadin.flow.data.value.ValueChangeMode;
+import com.vaadin.flow.router.BeforeEnterEvent;
+import com.vaadin.flow.router.BeforeEnterObserver;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.shared.Registration;
@@ -21,19 +23,22 @@ import com.bisoft.bfm.watcher.service.ConsoleService;
 import jakarta.annotation.security.PermitAll;
 
 import java.time.ZoneId;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.Locale;
 
 /** The event and audit log shared by every watcher. */
 @Route(value = "events", layout = MainLayout.class)
 @PageTitle("Events · BFM")
 @PermitAll
-public class EventsView extends Div {
+public class EventsView extends Div implements BeforeEnterObserver {
 
     private final ConsoleService console;
     private final Grid<ClusterEvent> grid = new Grid<>();
     private final Select<String> severity = new Select<>();
     private final TextField search = new TextField();
+    private final Set<String> open = new HashSet<>();
     private Registration poll;
 
     public EventsView(ConsoleService console, BfmProperties props) {
@@ -55,16 +60,37 @@ public class EventsView extends Div {
         search.addValueChangeListener(e -> refresh());
 
         grid.addThemeVariants(GridVariant.LUMO_ROW_STRIPES, GridVariant.LUMO_WRAP_CELL_CONTENT);
-        grid.setHeight("70vh");
-        grid.addColumn(e -> Ui.full(e.timeMillis(), zone)).setHeader("Time").setAutoWidth(true).setFlexGrow(0);
-        grid.addComponentColumn(e -> Ui.chip(switch (e.severity()) {
-            case CRITICAL -> "Critical";
-            case WARNING -> "Warning";
-            case INFO -> "Info";
-        }, Ui.tone(e.severity()))).setHeader("Severity").setAutoWidth(true).setFlexGrow(0);
-        grid.addColumn(e -> e.node() == null ? "—" : e.node()).setHeader("Node").setAutoWidth(true).setFlexGrow(0);
-        grid.addColumn(ClusterEvent::message).setHeader("Event").setFlexGrow(1);
-        grid.addColumn(ClusterEvent::actor).setHeader("By").setAutoWidth(true).setFlexGrow(0);
+        grid.setDetailsVisibleOnClick(false);
+        grid.addComponentColumn(e -> Ui.chevron(open.contains(e.id()))).setWidth("56px").setFlexGrow(0)
+                .setHeader("");
+        Grid.Column<ClusterEvent> time = grid.addColumn(e -> Ui.full(e.timeMillis(), zone))
+                .setHeader("Time (" + Ui.zone(zone) + ")").setAutoWidth(true).setFlexGrow(0);
+        Grid.Column<ClusterEvent> sev = grid.addComponentColumn(e -> severityChip(e)).setHeader("Severity")
+                .setAutoWidth(true).setFlexGrow(0);
+        // On a phone one column carries it all, stacked: time and severity on top, the event below.
+        Grid.Column<ClusterEvent> stacked = grid.addComponentColumn(e -> {
+            Div d = new Div(Ui.div("pg-row", Ui.text("pg-note", Ui.shortTime(e.timeMillis(), zone)),
+                    severityChip(e), Ui.text("pg-note", e.node() == null ? "" : e.node())),
+                    Ui.text(null, Ui.arrows(e.message())));
+            d.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "4px")
+                    .set("white-space", "normal");
+            return d;
+        }).setHeader("Event (" + Ui.zone(zone) + ")").setFlexGrow(1);
+        Grid.Column<ClusterEvent> node = grid.addColumn(e -> e.node() == null ? "—" : e.node()).setHeader("Node")
+                .setAutoWidth(true).setFlexGrow(0);
+        Grid.Column<ClusterEvent> message = grid.addColumn(e -> Ui.arrows(e.message())).setHeader("Event")
+                .setFlexGrow(1);
+        Grid.Column<ClusterEvent> by = grid.addColumn(ClusterEvent::actor).setHeader("By").setAutoWidth(true)
+                .setFlexGrow(0);
+        Ui.switchAt(grid, 760, List.of(time, sev, node, message, by), List.of(stacked));
+        grid.addItemClickListener(e -> {
+            if (!open.remove(e.getItem().id())) {
+                open.add(e.getItem().id());
+            }
+            grid.setDetailsVisible(e.getItem(), open.contains(e.getItem().id()));
+            grid.getDataProvider().refreshItem(e.getItem());
+        });
+        grid.setEmptyStateText("No events match.");
         grid.setItemDetailsRenderer(new ComponentRenderer<>(e -> {
             Pre p = new Pre(e.type() + (e.detail() == null ? "" : "\n\n" + e.detail()));
             p.addClassName("pg-log");
@@ -76,6 +102,14 @@ public class EventsView extends Div {
         refresh();
     }
 
+    private static com.vaadin.flow.component.html.Span severityChip(ClusterEvent e) {
+        return Ui.chip(switch (e.severity()) {
+            case CRITICAL -> "Critical";
+            case WARNING -> "Warning";
+            case INFO -> "Info";
+        }, Ui.tone(e.severity()));
+    }
+
     private void refresh() {
         String sev = severity.getValue();
         String q = search.getValue() == null ? "" : search.getValue().toLowerCase(Locale.ROOT).trim();
@@ -85,6 +119,27 @@ public class EventsView extends Div {
                         .toLowerCase(Locale.ROOT).contains(q))
                 .toList();
         grid.setItems(list);
+        // A short list is shown whole; a long one scrolls inside the card instead of stretching the page.
+        if (list.size() <= 12) {
+            grid.setAllRowsVisible(true);
+        } else {
+            grid.setAllRowsVisible(false);
+            grid.setHeight("70vh");
+        }
+        for (ClusterEvent e : list) {
+            if (open.contains(e.id())) {
+                grid.setDetailsVisible(e, true);
+            }
+        }
+    }
+
+    /** {@code events?q=pg-a2} opens the log filtered, as the role-change banner's Details link does. */
+    @Override
+    public void beforeEnter(BeforeEnterEvent event) {
+        List<String> q = event.getLocation().getQueryParameters().getParameters().get("q");
+        if (q != null && !q.isEmpty()) {
+            search.setValue(q.get(0));
+        }
     }
 
     @Override

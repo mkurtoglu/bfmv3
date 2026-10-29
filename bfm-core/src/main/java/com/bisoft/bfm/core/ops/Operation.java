@@ -9,6 +9,7 @@ import com.bisoft.bfm.core.config.NodeConfig;
 import com.bisoft.bfm.core.event.EventType;
 import com.bisoft.bfm.core.monitor.ClusterView;
 import com.bisoft.bfm.core.state.ClusterState;
+import com.bisoft.bfm.core.state.RoleChange;
 import com.bisoft.bfm.core.state.StateConflictException;
 
 import java.util.ArrayList;
@@ -365,6 +366,21 @@ public abstract class Operation implements Runnable {
 
     protected ClusterView pollNow() {
         return ctx.pollNow().get();
+    }
+
+    /**
+     * Keeps the change of primary for the console until someone acknowledges it. A failure here never fails the
+     * operation: the new primary runs either way and the event log has the same facts.
+     */
+    protected void recordRoleChange(String from, String to, Long lostBytes, long epoch) {
+        long now = ctx.time().millis();
+        RoleChange rc = new RoleChange(progress.type(), from, to, now, now - progress.snapshot().startedAtMillis(),
+                lostBytes, epoch, actor, null, 0);
+        try {
+            ctx.store().put(RoleChange.KEY, rc.toJson());
+        } catch (RuntimeException e) {
+            log("watcher", "could not keep the role change for the console: " + e.getMessage());
+        }
     }
 
     protected void event(EventType type, String node, String message) {

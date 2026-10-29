@@ -11,6 +11,7 @@ import com.bisoft.bfm.core.ops.OperationProgress;
 import com.bisoft.bfm.core.ops.PreCheck;
 import com.bisoft.bfm.core.ops.SwitchoverOperation;
 import com.bisoft.bfm.core.state.ClusterState;
+import com.bisoft.bfm.core.state.RoleChange;
 import com.bisoft.bfm.core.state.StateConflictException;
 import com.bisoft.bfm.core.state.StateUnavailableException;
 import com.bisoft.bfm.watcher.service.ConsoleService;
@@ -122,6 +123,18 @@ public class ApiController {
     @PostMapping("/nodes/{node}/start-primary")
     public ResponseEntity<OperationProgress.Snapshot> startPrimary(@PathVariable String node, Authentication a) {
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(watcher.startPrimary(node, a.getName()));
+    }
+
+    /** The last failover or switchover; the console shows it until someone acknowledges it. 204 when none. */
+    @GetMapping("/role-change")
+    public ResponseEntity<RoleChange> roleChange() {
+        RoleChange rc = watcher.lastRoleChange();
+        return rc == null ? ResponseEntity.noContent().build() : ResponseEntity.ok(rc);
+    }
+
+    @PostMapping("/role-change/acknowledge")
+    public RoleChange acknowledgeRoleChange(Authentication a) {
+        return watcher.acknowledgeRoleChange(a.getName());
     }
 
     public record Controls(Boolean autoFailover, Boolean maintenance, Boolean mailEnabled, Boolean autoReinit) {

@@ -16,7 +16,8 @@ class OverviewLinksTest {
     private static Overview overview(String self, ClusterState.OperationRef op, List<WatcherRow> watchers) {
         return new Overview("prod-main", self, "RAFT", false, "w1", "https://10.0.9.1:8443", 3, 7, "pg-a1",
                 "10.0.0.11:5432", "DC1", 1, "Healthy", true, false, true, false, "DC_LOCAL", true,
-                "192.168.0.50", "pg-a1", 0L, null, null, null, op, List.of(), List.of(), watchers, 0);
+                "192.168.0.50", "pg-a1", 0L, null, null, null, op, List.of(), List.of(), watchers, 0,
+                "production", List.of(), null, null, java.util.Map.of());
     }
 
     private static WatcherRow row(String id, String url) {
