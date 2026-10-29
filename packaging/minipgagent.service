@@ -1,5 +1,5 @@
 [Unit]
-Description=BFM agent (PostgreSQL role changes and VIP)
+Description=MiniPG agent (PostgreSQL role changes and VIP)
 Documentation=https://github.com/mkurtoglu/bfmv3
 After=network-online.target
 Wants=network-online.target
@@ -7,8 +7,8 @@ Wants=network-online.target
 [Service]
 User=postgres
 Group=postgres
-EnvironmentFile=-/etc/bfm/agent.env
-ExecStart=/usr/bin/bfm-agent
+EnvironmentFile=-/etc/bfm/minipgagent/agent.env
+ExecStart=/usr/bin/minipgagent
 Restart=always
 RestartSec=2
 # The agent starts and stops PostgreSQL itself; disable the PostgreSQL unit (systemctl disable postgresql-16).

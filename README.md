@@ -1,7 +1,8 @@
 # BFM: PostgreSQL failover manager
 
 Automatic failover for PostgreSQL streaming replication clusters, with a virtual IP that follows the primary.
-An **agent** runs next to every PostgreSQL server; one or three **watchers** decide and serve the web console.
+A **MiniPG agent** (`minipgagent`) runs next to every PostgreSQL server; one or three **watchers** decide and
+serve the web console.
 Three watchers form an Apache Ratis (Raft) group; Raft is optional and a single watcher works on its own.
 
 ```
@@ -9,7 +10,7 @@ Three watchers form an Apache Ratis (Raft) group; Raft is optional and a single 
                                │
    ┌───────────────┐   ┌───────┴───────┐   ┌───────────────┐
    │ pg-a1 primary │──►│ pg-a2 replica │   │ pg-dr1 replica│   PostgreSQL 13+ streaming replication
-   │ bfm-agent     │   │ bfm-agent     │   │ bfm-agent     │   agents: HTTPS + mutual TLS, port 8008
+   │ minipgagent   │   │ minipgagent   │   │ minipgagent   │   agents: HTTPS + mutual TLS, port 8008
    └───────▲───────┘   └───────▲───────┘   └───────▲───────┘
            └─────────── poll, lease, commands ─────┘
                    ┌───────────────────────────┐
@@ -53,7 +54,7 @@ PostgreSQL 13 or newer (the agent reloads `primary_conninfo` without a restart);
 | Module | What it is | Dependencies |
 | --- | --- | --- |
 | `bfm-common` | Agent API model, JSON codec, LSN and TLS helpers | JDK only |
-| `bfm-agent` | Agent: status probe, start/stop/promote/follow/demote/rewind/reinit, VIP, lease, mTLS API | JDK only |
+| `bfm-agent` | The MiniPG agent (`minipgagent.jar`): status probe, start/stop/promote/follow/demote/rewind/reinit, VIP, lease, mTLS API | JDK only |
 | `bfm-core` | Watcher logic: polling, failover and switchover decisions, operations, alerts, mail rules | JDK only |
 | `bfm-raft` | Shared watcher state replicated across three watchers | Apache Ratis 3.3 |
 | `bfm-watcher` | Spring Boot 4 service: Vaadin 25 console, REST API, users, SMTP | Spring, Vaadin |
@@ -106,23 +107,23 @@ The packages are noarch and need `java-21-openjdk-headless` (Rocky 8.9+ / 9.3+),
 
 | Package | What it installs |
 | --- | --- |
-| `bfm-agent` | `/usr/share/bfm/bfm-agent.jar`, `/usr/bin/bfm-agent`, `/etc/bfm/agent.properties` (mode 600, owner postgres), `/etc/sudoers.d/bfm`, `/var/lib/bfm`, `bfm-agent.service`; creates the `postgres` user if PostgreSQL is not installed yet |
+| `minipgagent` | `/usr/share/bfm/minipgagent.jar`, `/usr/bin/minipgagent`, `/etc/bfm/minipgagent/agent.properties` (mode 600, owner postgres), `/etc/sudoers.d/minipgagent`, `/var/lib/minipgagent`, `minipgagent.service`; creates the `postgres` user if PostgreSQL is not installed yet |
 | `bfm-watcher` | `/usr/share/bfm/bfm-watcher.jar`, `/usr/bin/bfm-watcher`, `/usr/bin/bfm-make-certs`, `/etc/bfm/watcher.yml` (mode 640, group bfm), `/var/lib/bfm-watcher`, `bfm-watcher.service`; creates the `bfm` user |
 
 Configuration files are `%config(noreplace)`: an upgrade never overwrites them. An upgrade does not restart the
 services either, because a restart would interrupt a running `pg_basebackup`, `pg_rewind` or switchover; restart
-them when the cluster is idle. JVM options go into `/etc/bfm/agent.env` (`BFM_AGENT_JAVA_OPTS`) and
-`/etc/bfm/watcher.env` (`BFM_WATCHER_JAVA_OPTS`).
+them when the cluster is idle. JVM options go into `/etc/bfm/minipgagent/agent.env`
+(`MINIPGAGENT_JAVA_OPTS`) and `/etc/bfm/watcher.env` (`BFM_WATCHER_JAVA_OPTS`).
 
 The short version:
 
 1. **Certificates**: `bfm-make-certs /etc/bfm/certs pg-a1=10.0.0.11 pg-a2=10.0.0.12 w1=10.0.9.1,bfm.example.com`
    makes a private CA and one PKCS#12 store per agent and watcher. The addresses go into the certificates' SAN
    and must match the `agent-url` the watcher uses. Keep `ca.key` offline.
-2. **Agents** (every PostgreSQL server): install the RPM, edit `/etc/bfm/agent.properties` and
-   `/etc/sudoers.d/bfm` (the node's VIP and interface), copy the certificates, set `wal_log_hints = on` for
-   `pg_rewind`, then `systemctl disable postgresql-16` (the agent starts PostgreSQL) and
-   `systemctl enable --now bfm-agent`.
+2. **Agents** (`minipgagent`, on every PostgreSQL server): install the RPM, edit
+   `/etc/bfm/minipgagent/agent.properties` and `/etc/sudoers.d/minipgagent` (the node's VIP and interface),
+   copy the certificates, set `wal_log_hints = on` for `pg_rewind`, then `systemctl disable postgresql-16`
+   (the agent starts PostgreSQL) and `systemctl enable --now minipgagent`.
 3. **Watcher** (one, or three for Raft): install the RPM, edit `/etc/bfm/watcher.yml`, create users with
    `echo 'pw' | bfm-watcher hash-password`, point `server.ssl` at the watcher's own PKCS#12 store so the
    console is HTTPS, then `systemctl enable --now bfm-watcher`. Back up
@@ -215,10 +216,10 @@ BFM_WATCHER_JAVA_OPTS="-Xmx512m -Djavax.net.ssl.trustStore=/etc/bfm/smtp-ca.p12 
 This affects mail only: the agent calls and the Raft traffic use their own stores from `bfm.agent.tls`.
 *Send test mail* on the Notifications page shows the SMTP server's own error when something is wrong.
 
-## Agent
+## Agent (`minipgagent`)
 
 ```
-java -jar bfm-agent.jar /etc/bfm/agent.properties
+minipgagent            # or: java -jar minipgagent.jar /etc/bfm/minipgagent/agent.properties
 ```
 
 Runs as the `postgres` OS user and talks to PostgreSQL through `psql` over the Unix socket (peer

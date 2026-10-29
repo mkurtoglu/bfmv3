@@ -1,10 +1,10 @@
-# BFM agent settings: /etc/bfm/agent.properties, readable by the postgres user only (chmod 600).
-# Start: bfm-agent (installed by the RPM with bfm-agent.service; runs java -jar /usr/share/bfm/bfm-agent.jar)
+# MiniPG agent settings: /etc/bfm/minipgagent/agent.properties, readable by the postgres user only (600).
+# Start: minipgagent (installed by the RPM with minipgagent.service; runs /usr/share/bfm/minipgagent.jar)
 # Every setting with its default and what it does: docs/agent-config.md
 #
-# Passwords and the token can also come from the environment (/etc/bfm/agent.env, read by the unit):
-# BFM_KEYSTORE_PASSWORD, BFM_TRUSTSTORE_PASSWORD, BFM_API_TOKEN. The environment wins over the property,
-# and the property over its .file form.
+# Passwords and the token can also come from the environment (/etc/bfm/minipgagent/agent.env, read by the
+# unit): MINIPGAGENT_KEYSTORE_PASSWORD, MINIPGAGENT_TRUSTSTORE_PASSWORD, MINIPGAGENT_API_TOKEN. The
+# environment wins over the property, and the property over its .file form.
 
 # Must equal the node name in the watcher configuration.
 node.name=pg-a1
@@ -13,15 +13,15 @@ listen.port=8008
 
 # Mutual TLS: only holders of a certificate signed by the BFM CA may call the agent (see bfm-make-certs).
 tls.enabled=true
-tls.keystore=/etc/bfm/pg-a1.p12
-tls.keystore.password.file=/etc/bfm/pg-a1.pass
-tls.truststore=/etc/bfm/ca.p12
-tls.truststore.password.file=/etc/bfm/ca.pass
-# Optional second check; required when TLS is off (lab only). Also read from BFM_API_TOKEN.
-#api.token.file=/etc/bfm/agent.token
+tls.keystore=/etc/bfm/minipgagent/pg-a1.p12
+tls.keystore.password.file=/etc/bfm/minipgagent/pg-a1.pass
+tls.truststore=/etc/bfm/minipgagent/ca.p12
+tls.truststore.password.file=/etc/bfm/minipgagent/ca.pass
+# Optional second check; required when TLS is off (lab only). Also read from MINIPGAGENT_API_TOKEN.
+#api.token.file=/etc/bfm/minipgagent/agent.token
 
 # Epoch, fence flag and logs of background operations.
-state.dir=/var/lib/bfm
+state.dir=/var/lib/minipgagent
 
 # PostgreSQL. The agent talks to it with psql over the Unix socket (peer authentication, no password).
 pg.bin=/usr/pgsql-16/bin
@@ -47,7 +47,7 @@ replication.conninfo.extra=sslmode=prefer
 reinit.keep.old=true
 
 # The virtual IP that follows the primary. The agent brings it up with sudo ip addr add and refuses to promote
-# while it is not up on this node. See sudoers-bfm.
+# while it is not up on this node. See sudoers-minipgagent.
 vip.enabled=true
 vip.address=192.168.0.50
 vip.prefix=24

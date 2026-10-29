@@ -10,9 +10,9 @@ Example cluster used throughout:
 
 | Node | Role at install | Address | DC | What runs there |
 | --- | --- | --- | --- | --- |
-| `pg-a1` | primary | 10.0.0.11 | DC1 | PostgreSQL 16, `bfm-agent` |
-| `pg-a2` | replica | 10.0.0.12 | DC1 | PostgreSQL 16, `bfm-agent` |
-| `pg-dr1` | replica | 10.20.0.11 | DR | PostgreSQL 16, `bfm-agent` |
+| `pg-a1` | primary | 10.0.0.11 | DC1 | PostgreSQL 16, `minipgagent` |
+| `pg-a2` | replica | 10.0.0.12 | DC1 | PostgreSQL 16, `minipgagent` |
+| `pg-dr1` | replica | 10.20.0.11 | DR | PostgreSQL 16, `minipgagent` |
 | `w1` | — | 10.0.9.1 | DC1 | `bfm-watcher` (console on 8443) |
 | VIP | — | 192.168.0.50/24 in DC1, 10.20.0.50/24 in DR | | moves with the primary |
 
@@ -162,16 +162,16 @@ This writes `ca.crt`, `ca.key`, `ca.p12` + `ca.pass`, and `NAME.p12` + `NAME.pas
   reached as `https://10.0.0.11:8008` needs `10.0.0.11` in its certificate.
 - Add the DNS name operators type in the address bar to the watcher's certificate (`bfm.example.com` above),
   so browsers accept the console.
-- Copy to each host, as that host's service user, mode 600:
-  `NAME.p12`, `NAME.pass`, `ca.p12`, `ca.pass` → `/etc/bfm/`.
+- Copy `NAME.p12`, `NAME.pass`, `ca.p12` and `ca.pass` to the matching host, owned by the service user,
+  mode 600: a database node reads them from `/etc/bfm/minipgagent/`, the watcher from `/etc/bfm/`.
 - **Keep `ca.key` offline.** It is only needed to issue more certificates. Certificates are valid 825 days;
   the CA 10 years.
-- `/etc/bfm` is created by the packages, so copy the certificates after §4 and §5, or create the directory
-  yourself.
+- Those directories are created by the packages, so copy the certificates after §4 and §5, or create the
+  directories yourself.
 
 ```bash
-scp /etc/bfm/certs/{pg-a1.p12,pg-a1.pass,ca.p12,ca.pass} root@10.0.0.11:/etc/bfm/
-ssh root@10.0.0.11 'chown postgres:postgres /etc/bfm/pg-a1.p12 /etc/bfm/pg-a1.pass /etc/bfm/ca.p12 /etc/bfm/ca.pass && chmod 600 /etc/bfm/*.p12 /etc/bfm/*.pass'
+scp /etc/bfm/certs/{pg-a1.p12,pg-a1.pass,ca.p12,ca.pass} root@10.0.0.11:/etc/bfm/minipgagent/
+ssh root@10.0.0.11 'cd /etc/bfm/minipgagent && chown postgres:postgres *.p12 *.pass && chmod 600 *.p12 *.pass'
 ```
 
 Operators' browsers trust the console once `ca.crt` is in their trust store.
@@ -180,19 +180,22 @@ Operators' browsers trust the console once `ca.crt` is in their trust store.
 
 ## 4. Install the agent on every database node
 
+The agent is packaged as **`minipgagent`**:
+
 ```bash
-dnf install ./bfm-agent-0.1.0-*.el9.noarch.rpm
+dnf install ./minipgagent-0.1.0-*.el9.noarch.rpm
 ```
 
 | Path | What it is |
 | --- | --- |
-| `/etc/bfm/agent.properties` | settings, mode 600, owner `postgres` |
-| `/etc/sudoers.d/bfm` | the one sudo rule the agent needs |
-| `/usr/share/bfm/bfm-agent.jar`, `/usr/bin/bfm-agent` | the agent |
-| `/var/lib/bfm` | epoch, fence flag, lease, operation logs |
-| `bfm-agent.service` | runs as `postgres`, `KillMode=process` so PostgreSQL survives an agent restart |
+| `/etc/bfm/minipgagent/` | everything the agent reads: settings, certificates, `agent.env`; mode 750, group `postgres` |
+| `/etc/bfm/minipgagent/agent.properties` | settings, mode 600, owner `postgres` |
+| `/etc/sudoers.d/minipgagent` | the one sudo rule the agent needs |
+| `/usr/share/bfm/minipgagent.jar`, `/usr/bin/minipgagent` | the agent |
+| `/var/lib/minipgagent` | epoch, fence flag, lease, operation logs |
+| `minipgagent.service` | runs as `postgres`, `KillMode=process` so PostgreSQL survives an agent restart |
 
-### 4.1 `/etc/bfm/agent.properties`
+### 4.1 `/etc/bfm/minipgagent/agent.properties`
 
 Every setting with its default and what it does: **[agent-config.md](agent-config.md)**; the file to copy is
 `packaging/agent.properties.example`. What you must set on each node:
@@ -203,10 +206,10 @@ listen.address=0.0.0.0
 listen.port=8008
 
 tls.enabled=true
-tls.keystore=/etc/bfm/pg-a1.p12
-tls.keystore.password.file=/etc/bfm/pg-a1.pass
-tls.truststore=/etc/bfm/ca.p12
-tls.truststore.password.file=/etc/bfm/ca.pass
+tls.keystore=/etc/bfm/minipgagent/pg-a1.p12
+tls.keystore.password.file=/etc/bfm/minipgagent/pg-a1.pass
+tls.truststore=/etc/bfm/minipgagent/ca.p12
+tls.truststore.password.file=/etc/bfm/minipgagent/ca.pass
 
 pg.bin=/usr/pgsql-16/bin              # where pg_ctl, pg_rewind, pg_basebackup live
 pg.data=/var/lib/pgsql/16/data
@@ -230,7 +233,7 @@ site does things differently. Templates are split on whitespace and filled in; n
 ### 4.2 The sudo rule
 
 The agent runs as `postgres` and may change exactly one address on exactly one interface. Edit
-`/etc/sudoers.d/bfm` on each node to match that node's VIP and interface:
+`/etc/sudoers.d/minipgagent` on each node to match that node's VIP and interface:
 
 ```
 postgres ALL=(root) NOPASSWD: /usr/sbin/ip addr add 192.168.0.50/24 dev eth0, \
@@ -240,7 +243,7 @@ postgres ALL=(root) NOPASSWD: /usr/sbin/ip addr add 192.168.0.50/24 dev eth0, \
 ```
 
 ```bash
-visudo -cf /etc/sudoers.d/bfm        # must print "parsed OK"
+visudo -cf /etc/sudoers.d/minipgagent        # must print "parsed OK"
 sudo -u postgres sudo -n -l          # shows exactly these four commands for postgres
 sudo -u postgres sudo -n /usr/sbin/arping -D -q -c 2 -w 3 -I eth0 192.168.0.50; echo "exit $?"
 ```
@@ -255,9 +258,9 @@ If this rule is wrong, failover to that node refuses to promote — by design.
 ### 4.3 Start it
 
 ```bash
-systemctl enable --now bfm-agent
-systemctl status bfm-agent
-journalctl -u bfm-agent -f
+systemctl enable --now minipgagent
+systemctl status minipgagent
+journalctl -u minipgagent -f
 ```
 
 Check the agent from the watcher host once its certificate is in place:
@@ -402,11 +405,11 @@ Before you trust it, in a maintenance window:
    replica reporting itself streaming from the primary's address, "Behind the primary" near 0, slots *Active*.
 3. **Switchover** to `pg-a2`: pre-checks pass, type the cluster name, watch the steps. Clients on the VIP see
    a short interruption; the old primary comes back as a replica. Switch back.
-4. **Crash test:** power off the primary (or `systemctl stop bfm-agent; pg_ctl stop -m immediate`). After
+4. **Crash test:** power off the primary (or `systemctl stop minipgagent; pg_ctl stop -m immediate`). After
    `failure-threshold` polls the watcher confirms with the replicas, raises the epoch, brings the VIP up on
    the best replica and promotes it. Bring the node back: it rejoins as a replica (`pg_rewind`).
 5. **The safety rule:** break the sudo rule on the replica that would be chosen (with `scope: DC_LOCAL` and
-   this example cluster, `pg-a2`: change the interface name in `/etc/sudoers.d/bfm`), then crash the primary.
+   this example cluster, `pg-a2`: change the interface name in `/etc/sudoers.d/minipgagent`), then crash the primary.
    The failover refuses to promote it — *"VIP could not be brought up on pg-a2 … stays a replica (no VIP, no
    promote)"* — and retries every `failover-retry`. Put the rule back and watch the next attempt succeed.
 
@@ -463,12 +466,12 @@ which is what makes a split brain impossible when the watchers cannot reach it.
 
 ## 10. Day-2
 
-**Upgrades.** `dnf upgrade ./bfm-*.rpm` replaces the jars, keeps `/etc/bfm/*` (`%config(noreplace)`) and
+**Upgrades.** `dnf upgrade ./minipgagent-*.rpm ./bfm-watcher-*.rpm` replaces the jars, keeps `/etc/bfm/*` (`%config(noreplace)`) and
 **does not restart the services** — a restart would interrupt a running `pg_basebackup`, `pg_rewind` or
 switchover. Restart them when the cluster is idle:
 
 ```bash
-systemctl restart bfm-agent          # one node at a time; PostgreSQL keeps running
+systemctl restart minipgagent          # one node at a time; PostgreSQL keeps running
 systemctl restart bfm-watcher        # when no operation is running
 ```
 
@@ -487,9 +490,9 @@ restart the watchers, then uninstall its agent.
 **Removing a node from automatic failover:** `no-failover: true` in its `nodes[]` entry — it is never promoted
 automatically, manual switchover still works.
 
-**Uninstall.** `dnf remove bfm-agent` stops and disables the agent; `KillMode=process` leaves PostgreSQL
+**Uninstall.** `dnf remove minipgagent` stops and disables the agent; `KillMode=process` leaves PostgreSQL
 running. Re-enable the PostgreSQL unit (`systemctl enable postgresql-16`) if you are going back to running it
-yourself. `/etc/bfm` and `/var/lib/bfm*` are kept.
+yourself. `/etc/bfm` and `/var/lib/minipgagent*` are kept.
 
 ---
 
@@ -497,10 +500,10 @@ yourself. `/etc/bfm` and `/var/lib/bfm*` are kept.
 
 | What you see | What it means | What to do |
 | --- | --- | --- |
-| Agent *Offline* in the console | TLS, firewall or the agent is down | `journalctl -u bfm-agent`; check that the certificate's SAN matches `agent-url`; `curl` the agent from the watcher host |
+| Agent *Offline* in the console | TLS, firewall or the agent is down | `journalctl -u minipgagent`; check that the certificate's SAN matches `agent-url`; `curl` the agent from the watcher host |
 | `refusing to start without standby.signal: this would start a primary` | The agent was asked to start a node that has no `standby.signal` | Intentional. Use *Start as primary* if it really should be the primary, or *Re-initialize* to rebuild it as a replica |
 | `VIP 192.168.0.50 is not up on this node; refusing to promote` | "No VIP, no promote" | Check the sudo rule and the interface name on that node; the Operations log says why the VIP could not come up |
-| `ip addr add failed: … Operation not permitted` | The sudo rule does not match the command | `visudo -cf /etc/sudoers.d/bfm`; the address, prefix and interface must match `agent.properties` exactly |
+| `ip addr add failed: … Operation not permitted` | The sudo rule does not match the command | `visudo -cf /etc/sudoers.d/minipgagent`; the address, prefix and interface must match `agent.properties` exactly |
 | Failover blocked: *"still reach pg-a1"* | Replicas can still reach the primary, so it is not down from their side | Expected for a watcher-side network problem. Investigate the watcher's path to the primary |
 | Failover blocked: *"N MB behind the primary, limit 16 MB"* | No replica is close enough | Raise `max-lag` knowingly, or switch over manually once a replica catches up |
 | Failover blocked: *"in data center DR"* | `scope: DC_LOCAL` | Promote in the other DC with a manual switchover (a deliberate decision) |
@@ -518,18 +521,18 @@ yourself. `/etc/bfm` and `/var/lib/bfm*` are kept.
 The RPMs only place files; nothing in BFM is Rocky-specific.
 
 ```
-/usr/share/bfm/bfm-agent.jar          bfm-agent/target/bfm-agent.jar
-/usr/share/bfm/bfm-watcher.jar        bfm-watcher/target/bfm-watcher.jar
-/usr/bin/bfm-agent                    packaging/bin/bfm-agent
-/usr/bin/bfm-watcher                  packaging/bin/bfm-watcher
-/usr/bin/bfm-make-certs               packaging/bin/bfm-make-certs
-/etc/systemd/system/bfm-agent.service packaging/bfm-agent.service
+/usr/share/bfm/minipgagent.jar          bfm-agent/target/minipgagent.jar
+/usr/share/bfm/bfm-watcher.jar          bfm-watcher/target/bfm-watcher.jar
+/usr/bin/minipgagent                    packaging/bin/minipgagent
+/usr/bin/bfm-watcher                    packaging/bin/bfm-watcher
+/usr/bin/bfm-make-certs                 packaging/bin/bfm-make-certs
+/etc/systemd/system/minipgagent.service packaging/minipgagent.service
 /etc/systemd/system/bfm-watcher.service packaging/bfm-watcher.service
-/etc/bfm/agent.properties             packaging/agent.properties.example   (0600 postgres)
-/etc/bfm/watcher.yml                  packaging/watcher.yml.example        (0640 root:bfm)
-/etc/sudoers.d/bfm                    packaging/sudoers-bfm                (0440 root)
-/var/lib/bfm                          agent state   (0700 postgres)
-/var/lib/bfm-watcher                  watcher state (0700 bfm)
+/etc/bfm/minipgagent/agent.properties   packaging/agent.properties.example   (0600 postgres)
+/etc/bfm/watcher.yml                    packaging/watcher.yml.example        (0640 root:bfm)
+/etc/sudoers.d/minipgagent              packaging/sudoers-minipgagent        (0440 root)
+/var/lib/minipgagent                    agent state   (0700 postgres)
+/var/lib/bfm-watcher                    watcher state (0700 bfm)
 ```
 
 Create the `bfm` system user for the watcher (`groupadd -r bfm && useradd -r -N -g bfm -d /var/lib/bfm-watcher -s /sbin/nologin bfm`),

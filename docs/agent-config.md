@@ -1,14 +1,18 @@
-# `agent.properties` reference
+# MiniPG agent: `agent.properties` reference
 
-Every setting the BFM agent reads, with its default. The file is a Java properties file, one
-`key=value` per line, `#` for comments; the RPM installs it as `/etc/bfm/agent.properties`, mode 600, owner
-`postgres`. The agent reads it once at startup — restart the agent after a change
-(`systemctl restart bfm-agent`; PostgreSQL keeps running, the unit uses `KillMode=process`).
+Every setting the MiniPG agent (`minipgagent`) reads, with its default. The file is a Java properties file,
+one `key=value` per line, `#` for comments; the RPM installs it as `/etc/bfm/minipgagent/agent.properties`,
+mode 600, owner `postgres`. The agent reads it once at startup — restart the agent after a change
+(`systemctl restart minipgagent`; PostgreSQL keeps running, the unit uses `KillMode=process`).
 
 ```bash
-bfm-agent                      # reads /etc/bfm/agent.properties
-bfm-agent /path/to/other.properties
+minipgagent                    # reads /etc/bfm/minipgagent/agent.properties
+minipgagent /path/to/other.properties
 ```
+
+Everything the agent reads lives in `/etc/bfm/minipgagent/`: this file, the certificates, and `agent.env` for
+the environment (`MINIPGAGENT_JAVA_OPTS` for JVM options, and the secrets below). Its state — epoch, fence
+flag, lease, operation logs — is in `/var/lib/minipgagent`.
 
 ---
 
@@ -27,16 +31,16 @@ listen.port=8008
 # ---------------------------------------------------------------- mutual TLS
 # Only a caller holding a certificate from the BFM CA may call this agent.
 tls.enabled=true
-tls.keystore=/etc/bfm/pg-a1.p12
-tls.keystore.password.file=/etc/bfm/pg-a1.pass
-tls.truststore=/etc/bfm/ca.p12
-tls.truststore.password.file=/etc/bfm/ca.pass
+tls.keystore=/etc/bfm/minipgagent/pg-a1.p12
+tls.keystore.password.file=/etc/bfm/minipgagent/pg-a1.pass
+tls.truststore=/etc/bfm/minipgagent/ca.p12
+tls.truststore.password.file=/etc/bfm/minipgagent/ca.pass
 # Optional second check on top of TLS; required when tls.enabled=false (lab only).
-#api.token.file=/etc/bfm/agent.token
+#api.token.file=/etc/bfm/minipgagent/agent.token
 
 # ---------------------------------------------------------------- agent state
 # Epoch, fence flag, the primary lease and the logs of background operations. Survives a restart.
-state.dir=/var/lib/bfm
+state.dir=/var/lib/minipgagent
 
 # ---------------------------------------------------------------- PostgreSQL
 pg.bin=/usr/pgsql-16/bin
@@ -66,7 +70,7 @@ vip.address=192.168.0.50
 vip.prefix=24
 vip.interface=eth0
 vip.dad.enabled=true
-# Defaults; they must match /etc/sudoers.d/bfm word for word.
+# Defaults; they must match /etc/sudoers.d/minipgagent word for word.
 #vip.add.command=sudo -n /usr/sbin/ip addr add {vip}/{prefix} dev {iface}
 #vip.del.command=sudo -n /usr/sbin/ip addr del {vip}/{prefix} dev {iface}
 #vip.show.command=/usr/sbin/ip -o -4 addr show dev {iface}
@@ -96,13 +100,13 @@ carry the DC1 address:
 
 ```properties
 node.name=pg-dr1
-tls.keystore=/etc/bfm/pg-dr1.p12
-tls.keystore.password.file=/etc/bfm/pg-dr1.pass
+tls.keystore=/etc/bfm/minipgagent/pg-dr1.p12
+tls.keystore.password.file=/etc/bfm/minipgagent/pg-dr1.pass
 vip.address=10.20.0.50
 vip.interface=eth0
 ```
 
-Its `/etc/sudoers.d/bfm` names `10.20.0.50/24` instead of `192.168.0.50/24`.
+Its `/etc/sudoers.d/minipgagent` names `10.20.0.50/24` instead of `192.168.0.50/24`.
 
 ### A node without a VIP
 
@@ -152,18 +156,18 @@ Required settings have no default; the agent refuses to start without them.
 
 Each secret can be given three ways, and the first one found wins:
 
-1. an environment variable — `BFM_KEYSTORE_PASSWORD`, `BFM_TRUSTSTORE_PASSWORD`, `BFM_API_TOKEN`
-   (put them in `/etc/bfm/agent.env`, which the unit reads);
+1. an environment variable — `MINIPGAGENT_KEYSTORE_PASSWORD`, `MINIPGAGENT_TRUSTSTORE_PASSWORD`, `MINIPGAGENT_API_TOKEN`
+   (put them in `/etc/bfm/minipgagent/agent.env`, which the unit reads);
 2. the property itself (`tls.keystore.password=…`);
-3. the `.file` form (`tls.keystore.password.file=/etc/bfm/pg-a1.pass`).
+3. the `.file` form (`tls.keystore.password.file=/etc/bfm/minipgagent/pg-a1.pass`).
 
-The `.p12` and `.pass` files belong to `postgres`, mode 600.
+The `.p12` and `.pass` files live in `/etc/bfm/minipgagent/`, belong to `postgres`, mode 600.
 
 ### Agent state
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `state.dir` | `/var/lib/bfm` | Cluster epoch, fence flag, the persisted primary lease and background-operation logs. Deleting it makes the node forget that it was fenced, so leave it alone. |
+| `state.dir` | `/var/lib/minipgagent` | Cluster epoch, fence flag, the persisted primary lease and background-operation logs. Deleting it makes the node forget that it was fenced, so leave it alone. |
 
 ### PostgreSQL
 
@@ -206,7 +210,7 @@ The `.p12` and `.pass` files belong to `postgres`, mode 600.
 | `vip.dad.command` | `sudo -n /usr/sbin/arping -D -q -c 2 -w 3 -I {iface} {vip}` | The duplicate check. |
 | `vip.garp.command` | `sudo -n /usr/sbin/arping -U -q -c 3 -I {iface} {vip}` | Gratuitous ARP after the VIP comes up, so switches and clients learn the new MAC. |
 
-Whatever you put here must be allowed verbatim in `/etc/sudoers.d/bfm`. Sudo matches the full command line:
+Whatever you put here must be allowed verbatim in `/etc/sudoers.d/minipgagent`. Sudo matches the full command line:
 change the interface in one place and you must change it in the other.
 
 ### Self-fencing
@@ -280,6 +284,6 @@ pg.start.command=/usr/local/sbin/pgstart.sh {data} {port} {timeout}
 Check after a change:
 
 ```bash
-systemctl restart bfm-agent && systemctl status bfm-agent
-journalctl -u bfm-agent -n 50
+systemctl restart minipgagent && systemctl status minipgagent
+journalctl -u minipgagent -n 50
 ```

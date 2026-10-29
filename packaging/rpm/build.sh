@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds the bfm-agent and bfm-watcher RPMs for Rocky / RHEL 8 and 9.
+# Builds the minipgagent and bfm-watcher RPMs for Rocky / RHEL 8 and 9.
 #
 #   packaging/rpm/build.sh [--skip-maven] [--dist "el8 el9"]
 #
@@ -24,7 +24,7 @@ cd "$ROOT"
 if [ "$MAVEN" = 1 ]; then
   mvn -B -q -DskipTests package
 fi
-AGENT_JAR=bfm-agent/target/bfm-agent.jar
+AGENT_JAR=bfm-agent/target/minipgagent.jar
 WATCHER_JAR=bfm-watcher/target/bfm-watcher.jar
 [ -f "$AGENT_JAR" ] && [ -f "$WATCHER_JAR" ] || { echo "jars missing; run without --skip-maven" >&2; exit 1; }
 
@@ -40,9 +40,9 @@ TOP="$ROOT/target/rpm"
 rm -rf "$TOP"
 mkdir -p "$TOP"/{SOURCES,SPECS,BUILD,RPMS,SRPMS}
 cp "$AGENT_JAR" "$WATCHER_JAR" "$TOP/SOURCES/"
-cp packaging/bin/bfm-agent packaging/bin/bfm-watcher packaging/bin/bfm-make-certs "$TOP/SOURCES/"
-cp packaging/bfm-agent.service packaging/bfm-watcher.service "$TOP/SOURCES/"
-cp packaging/agent.properties.example packaging/watcher.yml.example packaging/sudoers-bfm "$TOP/SOURCES/"
+cp packaging/bin/minipgagent packaging/bin/bfm-watcher packaging/bin/bfm-make-certs "$TOP/SOURCES/"
+cp packaging/minipgagent.service packaging/bfm-watcher.service "$TOP/SOURCES/"
+cp packaging/agent.properties.example packaging/watcher.yml.example packaging/sudoers-minipgagent "$TOP/SOURCES/"
 cp README.md "$TOP/SOURCES/"
 cp packaging/rpm/bfm.spec "$TOP/SPECS/"
 

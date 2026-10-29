@@ -74,10 +74,10 @@ public final class AgentConfig {
 
         tlsEnabled = Boolean.parseBoolean(p.getProperty("tls.enabled", "true"));
         keyStore = path(p, "tls.keystore");
-        keyStorePassword = secret(p, "tls.keystore.password", "BFM_KEYSTORE_PASSWORD");
+        keyStorePassword = secret(p, "tls.keystore.password", "MINIPGAGENT_KEYSTORE_PASSWORD");
         trustStore = path(p, "tls.truststore");
-        trustStorePassword = secret(p, "tls.truststore.password", "BFM_TRUSTSTORE_PASSWORD");
-        char[] token = secret(p, "api.token", "BFM_API_TOKEN");
+        trustStorePassword = secret(p, "tls.truststore.password", "MINIPGAGENT_TRUSTSTORE_PASSWORD");
+        char[] token = secret(p, "api.token", "MINIPGAGENT_API_TOKEN");
         apiToken = token.length == 0 ? null : new String(token);
         if (tlsEnabled && (keyStore == null || trustStore == null)) {
             throw new IllegalArgumentException("tls.enabled=true needs tls.keystore and tls.truststore");
@@ -86,7 +86,7 @@ public final class AgentConfig {
             throw new IllegalArgumentException("Without TLS an api.token is required");
         }
 
-        stateDir = Path.of(p.getProperty("state.dir", "/var/lib/bfm"));
+        stateDir = Path.of(p.getProperty("state.dir", "/var/lib/minipgagent"));
 
         pgBin = Path.of(req(p, "pg.bin"));
         pgData = Path.of(req(p, "pg.data"));

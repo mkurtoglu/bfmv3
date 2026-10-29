@@ -42,7 +42,7 @@ public class AgentService {
     private final OperationManager ops;
     private final Watchdog watchdog;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(3, r -> {
-        Thread t = new Thread(r, "bfm-agent-loop");
+        Thread t = new Thread(r, "minipgagent-loop");
         t.setDaemon(true);
         return t;
     });

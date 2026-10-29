@@ -89,7 +89,7 @@ public class AgentHttpServer {
             server = HttpServer.create(addr, 64);
         }
         executor = Executors.newFixedThreadPool(8, r -> {
-            Thread t = new Thread(r, "bfm-agent-http");
+            Thread t = new Thread(r, "minipgagent-http");
             t.setDaemon(true);
             return t;
         });

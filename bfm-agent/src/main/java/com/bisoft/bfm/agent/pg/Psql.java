@@ -101,7 +101,7 @@ public class Psql {
     private static Map<String, String> env(int timeoutSec) {
         return Map.of(
                 "PGCONNECT_TIMEOUT", "5",
-                "PGAPPNAME", "bfm-agent",
+                "PGAPPNAME", "minipgagent",
                 "PGOPTIONS", "-c statement_timeout=" + (timeoutSec * 1000L),
                 "LC_ALL", "C");
     }

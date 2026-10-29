@@ -1,0 +1,5 @@
+#!/bin/bash
+# Starts the MiniPG agent. Settings: /etc/bfm/minipgagent/agent.properties (or the file given as the first
+# argument). JVM options can be set in MINIPGAGENT_JAVA_OPTS, for example in /etc/bfm/minipgagent/agent.env.
+exec java ${MINIPGAGENT_JAVA_OPTS:--Xmx128m} -jar /usr/share/bfm/minipgagent.jar \
+    "${1:-/etc/bfm/minipgagent/agent.properties}"

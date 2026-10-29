@@ -1,4 +1,4 @@
-# /etc/sudoers.d/bfm (mode 0440, check with: visudo -cf /etc/sudoers.d/bfm)
+# /etc/sudoers.d/minipgagent (mode 0440, check with: visudo -cf /etc/sudoers.d/minipgagent)
 # The agent runs as postgres and may change exactly this address on exactly this interface.
 # Adjust the address, prefix and interface on every node; a DR node uses its own VIP.
 postgres ALL=(root) NOPASSWD: /usr/sbin/ip addr add 192.168.0.50/24 dev eth0, \

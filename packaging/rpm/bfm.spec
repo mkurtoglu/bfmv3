@@ -15,16 +15,16 @@ License:        Proprietary
 URL:            https://github.com/mkurtoglu/bfmv3
 BuildArch:      noarch
 
-Source0:        bfm-agent.jar
+Source0:        minipgagent.jar
 Source1:        bfm-watcher.jar
-Source2:        bfm-agent
+Source2:        minipgagent
 Source3:        bfm-watcher
 Source4:        bfm-make-certs
-Source5:        bfm-agent.service
+Source5:        minipgagent.service
 Source6:        bfm-watcher.service
 Source7:        agent.properties.example
 Source8:        watcher.yml.example
-Source9:        sudoers-bfm
+Source9:        sudoers-minipgagent
 Source10:       README.md
 
 %description
@@ -33,8 +33,8 @@ An agent runs next to every PostgreSQL server; one or three watchers decide and 
 
 # ----------------------------------------------------------------------------------------------------- agent
 
-%package agent
-Summary:        BFM agent: PostgreSQL role changes and the virtual IP on one node
+%package -n minipgagent
+Summary:        MiniPG agent: PostgreSQL role changes and the virtual IP on one node
 Requires:       java-21-headless
 Requires:       iproute
 Requires:       iputils
@@ -42,13 +42,13 @@ Requires:       sudo
 Requires:       systemd
 Requires(pre):  shadow-utils
 
-%description agent
+%description -n minipgagent
 Runs as the postgres user next to one PostgreSQL server. It reports the node's state to the watchers, brings the
 virtual IP up and down with sudo ip addr, promotes only while the VIP is up on this node, and fences itself when
 the primary lease from the watchers runs out.
 
-Settings: /etc/bfm/agent.properties. Sudo rule for the VIP: /etc/sudoers.d/bfm (set the address and the
-interface). Disable the PostgreSQL unit and let the agent start PostgreSQL.
+Settings: /etc/bfm/minipgagent/agent.properties. Sudo rule for the VIP: /etc/sudoers.d/minipgagent (set the
+address and the interface). Disable the PostgreSQL unit and let the agent start PostgreSQL.
 
 # --------------------------------------------------------------------------------------------------- watcher
 
@@ -78,26 +78,27 @@ Certificates for mutual TLS: bfm-make-certs.
 install -d -m 0755 %{buildroot}%{bfm_home}
 install -d -m 0755 %{buildroot}%{_bindir}
 install -d -m 0755 %{buildroot}%{_sysconfdir}/bfm
+install -d -m 0750 %{buildroot}%{_sysconfdir}/bfm/minipgagent
 install -d -m 0750 %{buildroot}%{_sysconfdir}/sudoers.d
 install -d -m 0755 %{buildroot}%{_unitdir}
-install -d -m 0700 %{buildroot}/var/lib/bfm
+install -d -m 0700 %{buildroot}/var/lib/minipgagent
 install -d -m 0700 %{buildroot}/var/lib/bfm-watcher
 
-install -p -m 0644 %{SOURCE0} %{buildroot}%{bfm_home}/bfm-agent.jar
+install -p -m 0644 %{SOURCE0} %{buildroot}%{bfm_home}/minipgagent.jar
 install -p -m 0644 %{SOURCE1} %{buildroot}%{bfm_home}/bfm-watcher.jar
-install -p -m 0755 %{SOURCE2} %{buildroot}%{_bindir}/bfm-agent
+install -p -m 0755 %{SOURCE2} %{buildroot}%{_bindir}/minipgagent
 install -p -m 0755 %{SOURCE3} %{buildroot}%{_bindir}/bfm-watcher
 install -p -m 0755 %{SOURCE4} %{buildroot}%{_bindir}/bfm-make-certs
-install -p -m 0644 %{SOURCE5} %{buildroot}%{_unitdir}/bfm-agent.service
+install -p -m 0644 %{SOURCE5} %{buildroot}%{_unitdir}/minipgagent.service
 install -p -m 0644 %{SOURCE6} %{buildroot}%{_unitdir}/bfm-watcher.service
-install -p -m 0600 %{SOURCE7} %{buildroot}%{_sysconfdir}/bfm/agent.properties
+install -p -m 0600 %{SOURCE7} %{buildroot}%{_sysconfdir}/bfm/minipgagent/agent.properties
 install -p -m 0640 %{SOURCE8} %{buildroot}%{_sysconfdir}/bfm/watcher.yml
-install -p -m 0440 %{SOURCE9} %{buildroot}%{_sysconfdir}/sudoers.d/bfm
+install -p -m 0440 %{SOURCE9} %{buildroot}%{_sysconfdir}/sudoers.d/minipgagent
 install -p -m 0644 %{SOURCE10} %{buildroot}%{bfm_home}/README.md
 
 # ----------------------------------------------------------------------------------------------- scriptlets
 
-%pre agent
+%pre -n minipgagent
 # The postgres user normally exists already (PostgreSQL packages create it with uid 26); create it the same way
 # when the agent is installed first.
 if ! getent group postgres >/dev/null; then
@@ -109,22 +110,22 @@ if ! getent passwd postgres >/dev/null; then
 fi
 exit 0
 
-%post agent
+%post -n minipgagent
 systemctl daemon-reload >/dev/null 2>&1 || :
 if [ $1 -eq 1 ]; then
     # first installation: apply the preset policy (disabled unless the site enables it)
-    systemctl --no-reload preset bfm-agent.service >/dev/null 2>&1 || :
+    systemctl --no-reload preset minipgagent.service >/dev/null 2>&1 || :
 fi
 # An upgrade does not restart the agent: a restart would interrupt a running pg_basebackup or pg_rewind.
-# Restart it when the node is idle: systemctl restart bfm-agent
+# Restart it when the node is idle: systemctl restart minipgagent
 
-%preun agent
+%preun -n minipgagent
 if [ $1 -eq 0 ]; then
     # removal, not upgrade. KillMode=process keeps PostgreSQL running.
-    systemctl --no-reload disable --now bfm-agent.service >/dev/null 2>&1 || :
+    systemctl --no-reload disable --now minipgagent.service >/dev/null 2>&1 || :
 fi
 
-%postun agent
+%postun -n minipgagent
 systemctl daemon-reload >/dev/null 2>&1 || :
 
 %pre watcher
@@ -153,16 +154,17 @@ systemctl daemon-reload >/dev/null 2>&1 || :
 
 # ---------------------------------------------------------------------------------------------------- files
 
-%files agent
+%files -n minipgagent
 %doc %{bfm_home}/README.md
 %dir %{bfm_home}
-%{bfm_home}/bfm-agent.jar
-%{_bindir}/bfm-agent
+%{bfm_home}/minipgagent.jar
+%{_bindir}/minipgagent
 %dir %{_sysconfdir}/bfm
-%config(noreplace) %attr(0600,postgres,postgres) %{_sysconfdir}/bfm/agent.properties
-%config(noreplace) %attr(0440,root,root) %{_sysconfdir}/sudoers.d/bfm
-%attr(0700,postgres,postgres) %dir /var/lib/bfm
-%{_unitdir}/bfm-agent.service
+%attr(0750,root,postgres) %dir %{_sysconfdir}/bfm/minipgagent
+%config(noreplace) %attr(0600,postgres,postgres) %{_sysconfdir}/bfm/minipgagent/agent.properties
+%config(noreplace) %attr(0440,root,root) %{_sysconfdir}/sudoers.d/minipgagent
+%attr(0700,postgres,postgres) %dir /var/lib/minipgagent
+%{_unitdir}/minipgagent.service
 
 %files watcher
 %doc %{bfm_home}/README.md
