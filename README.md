@@ -123,6 +123,22 @@ them when the cluster is idle. JVM options go into `/etc/pgvip/agent.env` (`PGVI
 3. **Watcher** (one, or three for Raft): `dnf install pgvip-watcher-*.rpm`, edit `/etc/pgvip/watcher.yml`, create
    users with `echo 'pw' | pgvip-watcher hash-password`, then `systemctl enable --now pgvip-watcher`. Back up
    `/var/lib/pgvip-watcher/secret.key`; with Raft copy it to all watchers.
+   The console and the API carry passwords and session cookies, so serve them over HTTPS: point `server.ssl` at
+   the watcher's own PKCS#12 store from step 1 and put its password in `/etc/pgvip/watcher.env`.
+
+   ```yaml
+   server:
+     port: 8443
+     ssl:
+       key-store: file:/etc/pgvip/w1.p12
+       key-store-type: PKCS12
+       key-store-password: ${PGVIP_KEYSTORE_PASSWORD}
+   ```
+
+   Browsers trust the console once the CA from `pgvip-make-certs` (`ca.crt`) is in the operators' trust store;
+   the certificate must carry the name they type in the address bar, so pass that name to `pgvip-make-certs`
+   (`w1=10.0.9.1,pgvip.example.com`). With Raft, `pgvip.raft.peers[].url` should use the same addresses, since a
+   follower links to the leader's console.
 4. **First start.** If one node already runs as primary, the watcher records it. Otherwise use
    *Start as primary* on one node in the console, then *Re-initialize* the others.
 
@@ -164,7 +180,11 @@ use the agent TLS stores between themselves (`raft.tls: true`). Self-fencing is 
 
 ### REST API
 
-HTTP Basic with the console users; reads need any user, changes need ADMIN.
+HTTP Basic with the console users; reads need any user, changes need ADMIN. Answers are always JSON, errors
+included: 401 with a `WWW-Authenticate` header when credentials are missing or wrong, 403 when a viewer tries
+to change something, 409 when the cluster state does not allow it (`{"error":"..."}`, with `leader` when
+another watcher leads), 400 for a bad request and 502 when an agent cannot be reached. The API never redirects
+to the console's login page, so a monitoring script can rely on the status code.
 
 | Call | Purpose |
 | --- | --- |

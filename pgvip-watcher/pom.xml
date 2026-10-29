@@ -70,6 +70,9 @@
         <artifactId>vaadin-maven-plugin</artifactId>
         <executions>
           <execution>
+            <!-- Before the tests, not at prepare-package: a test that starts the servlet container needs the
+                 production bundle, and without it Vaadin falls back to dev mode and asks for vaadin-dev-server. -->
+            <phase>process-classes</phase>
             <goals>
               <goal>prepare-frontend</goal>
               <goal>build-frontend</goal>

@@ -3,13 +3,15 @@ package io.pgvip.watcher.security;
 import com.vaadin.flow.spring.security.VaadinSecurityConfigurer;
 import io.pgvip.watcher.config.PgvipProperties;
 import io.pgvip.watcher.ui.LoginView;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
-import org.springframework.security.config.Customizer;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -19,8 +21,12 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.AccessDeniedHandler;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -65,14 +71,32 @@ public class SecurityConfig {
     @Bean
     @Order(1)
     public SecurityFilterChain api(HttpSecurity http) throws Exception {
+        // The API answers with a status and a JSON body, written here rather than through sendError: an error
+        // dispatch would go to /error, which belongs to the console chain and redirects to the login page, so a
+        // script calling the API without credentials would get a 302 and an HTML page instead of 401.
+        AuthenticationEntryPoint unauthenticated = (request, response, ex) -> {
+            response.setHeader("WWW-Authenticate", "Basic realm=\"pgVIP\", charset=\"UTF-8\"");
+            writeError(response, HttpStatus.UNAUTHORIZED, "authentication required");
+        };
+        AccessDeniedHandler forbidden = (request, response, ex) ->
+                writeError(response, HttpStatus.FORBIDDEN, "this user may only read the cluster");
         http.securityMatcher("/api/**")
                 .authorizeHttpRequests(a -> a
                         .requestMatchers(HttpMethod.GET, "/api/**").hasAnyRole("ADMIN", "VIEWER")
                         .anyRequest().hasRole("ADMIN"))
-                .httpBasic(Customizer.withDefaults())
+                .httpBasic(b -> b.authenticationEntryPoint(unauthenticated))
+                .exceptionHandling(e -> e.authenticationEntryPoint(unauthenticated).accessDeniedHandler(forbidden))
                 .csrf(c -> c.disable())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
         return http.build();
+    }
+
+    private static void writeError(HttpServletResponse response, HttpStatus status, String message)
+            throws IOException {
+        response.setStatus(status.value());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.getWriter().write("{\"error\":\"" + message + "\"}");
     }
 
     @Bean
