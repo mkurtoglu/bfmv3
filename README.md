@@ -9,11 +9,11 @@ Three watchers form an Apache Ratis (Raft) group; Raft is optional and a single 
                                │
    ┌───────────────┐   ┌───────┴───────┐   ┌───────────────┐
    │ pg-a1 primary │──►│ pg-a2 replica │   │ pg-dr1 replica│   PostgreSQL 13+ streaming replication
-   │ bfm-agent   │   │ bfm-agent   │   │ bfm-agent   │   agents: HTTPS + mutual TLS, port 8008
+   │ bfm-agent     │   │ bfm-agent     │   │ bfm-agent     │   agents: HTTPS + mutual TLS, port 8008
    └───────▲───────┘   └───────▲───────┘   └───────▲───────┘
            └─────────── poll, lease, commands ─────┘
                    ┌───────────────────────────┐
-                   │ bfm-watcher (1 or 3)    │   console + REST API, port 8443
+                   │ bfm-watcher (1 or 3)      │   console + REST API, port 8443
                    │ Raft between 3 (optional) │   Raft port 9870
                    └───────────────────────────┘
 ```
@@ -93,6 +93,9 @@ scripts/local-lab.sh down
 
 ## Installation
 
+Step by step from a running replication cluster to BFM managing it, including PostgreSQL preparation,
+certificates, the first failover test, Raft and troubleshooting: **[docs/install.md](docs/install.md)**.
+
 ### Rocky Linux / RHEL 8 and 9 (RPM)
 
 ```
@@ -111,42 +114,27 @@ services either, because a restart would interrupt a running `pg_basebackup`, `p
 them when the cluster is idle. JVM options go into `/etc/bfm/agent.env` (`BFM_AGENT_JAVA_OPTS`) and
 `/etc/bfm/watcher.env` (`BFM_WATCHER_JAVA_OPTS`).
 
-1. **Certificates.** On one machine: `bfm-make-certs /etc/bfm/certs pg-a1=10.0.0.11 pg-a2=10.0.0.12 w1=10.0.9.1`
+The short version:
+
+1. **Certificates**: `bfm-make-certs /etc/bfm/certs pg-a1=10.0.0.11 pg-a2=10.0.0.12 w1=10.0.9.1,bfm.example.com`
    makes a private CA and one PKCS#12 store per agent and watcher. The addresses go into the certificates' SAN
    and must match the `agent-url` the watcher uses. Keep `ca.key` offline.
-2. **Agents** (every PostgreSQL server): `dnf install bfm-agent-*.rpm`, then
-   - edit `/etc/bfm/agent.properties` and copy the node's `.p12`/`.pass` plus `ca.p12`/`ca.pass` to `/etc/bfm/`;
-   - set the node's VIP and interface in `/etc/sudoers.d/bfm`;
-   - set `wal_log_hints = on` (or use data checksums) so `pg_rewind` works, and give replicas a `replicator`
-     role and `.pgpass`;
-   - `systemctl disable postgresql-16` (the agent starts PostgreSQL), `systemctl enable --now bfm-agent`.
-3. **Watcher** (one, or three for Raft): `dnf install bfm-watcher-*.rpm`, edit `/etc/bfm/watcher.yml`, create
-   users with `echo 'pw' | bfm-watcher hash-password`, then `systemctl enable --now bfm-watcher`. Back up
+2. **Agents** (every PostgreSQL server): install the RPM, edit `/etc/bfm/agent.properties` and
+   `/etc/sudoers.d/bfm` (the node's VIP and interface), copy the certificates, set `wal_log_hints = on` for
+   `pg_rewind`, then `systemctl disable postgresql-16` (the agent starts PostgreSQL) and
+   `systemctl enable --now bfm-agent`.
+3. **Watcher** (one, or three for Raft): install the RPM, edit `/etc/bfm/watcher.yml`, create users with
+   `echo 'pw' | bfm-watcher hash-password`, point `server.ssl` at the watcher's own PKCS#12 store so the
+   console is HTTPS, then `systemctl enable --now bfm-watcher`. Back up
    `/var/lib/bfm-watcher/secret.key`; with Raft copy it to all watchers.
-   The console and the API carry passwords and session cookies, so serve them over HTTPS: point `server.ssl` at
-   the watcher's own PKCS#12 store from step 1 and put its password in `/etc/bfm/watcher.env`.
-
-   ```yaml
-   server:
-     port: 8443
-     ssl:
-       key-store: file:/etc/bfm/w1.p12
-       key-store-type: PKCS12
-       key-store-password: ${BFM_KEYSTORE_PASSWORD}
-   ```
-
-   Browsers trust the console once the CA from `bfm-make-certs` (`ca.crt`) is in the operators' trust store;
-   the certificate must carry the name they type in the address bar, so pass that name to `bfm-make-certs`
-   (`w1=10.0.9.1,bfm.example.com`). With Raft, `bfm.raft.peers[].url` should use the same addresses, since a
-   follower links to the leader's console.
-4. **First start.** If one node already runs as primary, the watcher records it. Otherwise use
-   *Start as primary* on one node in the console, then *Re-initialize* the others.
+4. **First start**: if one node already runs as primary, the watcher records it. Otherwise use *Start as
+   primary* on one node in the console, then *Re-initialize* the others.
 
 ### Other distributions
 
 Copy the jars to `/usr/share/bfm/`, the scripts from `packaging/bin/` to `/usr/bin/`, the units from
 `packaging/` to `/etc/systemd/system/`, and the example settings to `/etc/bfm/`; create the `bfm` user for
-the watcher. Then follow the steps above.
+the watcher. Then follow [docs/install.md](docs/install.md) from the certificates onwards.
 
 ## Watcher
 
