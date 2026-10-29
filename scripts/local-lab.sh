@@ -15,7 +15,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LAB=${LAB:-/tmp/bfm-lab}
-PGBIN=${PGBIN:-$(ls -d /usr/lib/postgresql/*/bin /usr/pgsql-*/bin 2>/dev/null | sort -V | tail -1)}
+# ls fails when one of the two patterns matches nothing, which is the normal case; under set -e that
+# failure would end the script before it did anything.
+PGBIN=${PGBIN:-$({ ls -d /usr/lib/postgresql/*/bin /usr/pgsql-*/bin 2>/dev/null || true; } | sort -V | tail -1)}
 AGENT_JAR="$ROOT/bfm-agent/target/bfm-agent.jar"
 WATCHER_JAR="$ROOT/bfm-watcher/target/bfm-watcher.jar"
 TOKEN=lab-token
