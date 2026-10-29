@@ -4,18 +4,18 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>io.pgvip</groupId>
-  <artifactId>pgvip-parent</artifactId>
+  <groupId>com.bisoft.bfm</groupId>
+  <artifactId>bfm-parent</artifactId>
   <version>0.1.0-SNAPSHOT</version>
   <packaging>pom</packaging>
-  <name>pgVIP - PostgreSQL VIP failover manager</name>
+  <name>BFM - PostgreSQL failover manager</name>
 
   <modules>
-    <module>pgvip-common</module>
-    <module>pgvip-agent</module>
-    <module>pgvip-core</module>
-    <module>pgvip-raft</module>
-    <module>pgvip-watcher</module>
+    <module>bfm-common</module>
+    <module>bfm-agent</module>
+    <module>bfm-core</module>
+    <module>bfm-raft</module>
+    <module>bfm-watcher</module>
   </modules>
 
   <properties>
@@ -43,18 +43,18 @@
         <scope>import</scope>
       </dependency>
       <dependency>
-        <groupId>io.pgvip</groupId>
-        <artifactId>pgvip-common</artifactId>
+        <groupId>com.bisoft.bfm</groupId>
+        <artifactId>bfm-common</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>io.pgvip</groupId>
-        <artifactId>pgvip-core</artifactId>
+        <groupId>com.bisoft.bfm</groupId>
+        <artifactId>bfm-core</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>io.pgvip</groupId>
-        <artifactId>pgvip-raft</artifactId>
+        <groupId>com.bisoft.bfm</groupId>
+        <artifactId>bfm-raft</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

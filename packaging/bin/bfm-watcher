@@ -1,0 +1,14 @@
+#!/bin/bash
+# Starts the BFM watcher with /etc/bfm/watcher.yml, or runs one of its commands:
+#   bfm-watcher hash-password     prints a password hash for bfm.users (reads the password from stdin or a tty)
+# JVM options can be set in BFM_WATCHER_JAVA_OPTS, for example in /etc/bfm/watcher.env.
+JAR=/usr/share/bfm/bfm-watcher.jar
+case "${1:-}" in
+  hash-password)
+    exec java -Xmx256m -jar "$JAR" "$@"
+    ;;
+  *)
+    exec java ${BFM_WATCHER_JAVA_OPTS:--Xmx512m} -jar "$JAR" \
+      --spring.config.additional-location=file:/etc/bfm/watcher.yml "$@"
+    ;;
+esac

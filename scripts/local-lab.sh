@@ -1,5 +1,5 @@
 #!/bin/bash
-# A three-node pgVIP lab on one machine: real PostgreSQL, real agents, a standalone watcher, and a fake VIP
+# A three-node BFM lab on one machine: real PostgreSQL, real agents, a standalone watcher, and a fake VIP
 # (lab-fake-ip.sh) so nothing needs root. Run as a normal user; PostgreSQL refuses to run as root.
 #
 #   scripts/local-lab.sh up          init pg-a1, start three agents and the watcher (http://localhost:8080)
@@ -10,14 +10,14 @@
 #   scripts/local-lab.sh status      cluster state through the REST API
 #   scripts/local-lab.sh down        stop everything
 #
-# Settings: PGBIN (PostgreSQL 14+ bin directory), LAB (lab directory, default /tmp/pgvip-lab).
+# Settings: PGBIN (PostgreSQL 14+ bin directory), LAB (lab directory, default /tmp/bfm-lab).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-LAB=${LAB:-/tmp/pgvip-lab}
+LAB=${LAB:-/tmp/bfm-lab}
 PGBIN=${PGBIN:-$(ls -d /usr/lib/postgresql/*/bin /usr/pgsql-*/bin 2>/dev/null | sort -V | tail -1)}
-AGENT_JAR="$ROOT/pgvip-agent/target/pgvip-agent.jar"
-WATCHER_JAR="$ROOT/pgvip-watcher/target/pgvip-watcher.jar"
+AGENT_JAR="$ROOT/bfm-agent/target/bfm-agent.jar"
+WATCHER_JAR="$ROOT/bfm-watcher/target/bfm-watcher.jar"
 TOKEN=lab-token
 ADMIN_PW=lab-admin-pw
 NODES=(pg-a1 pg-a2 pg-dr1)
@@ -69,7 +69,7 @@ watcher_yml() {
   cat <<EOF
 server:
   port: 8080
-pgvip:
+bfm:
   watcher-id: w1
   data-dir: $LAB/watcher
   cluster:

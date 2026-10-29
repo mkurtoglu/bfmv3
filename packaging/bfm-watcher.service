@@ -1,0 +1,19 @@
+[Unit]
+Description=BFM watcher (failover decisions, console and API)
+Documentation=https://github.com/mkurtoglu/bfmv3
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=bfm
+Group=bfm
+EnvironmentFile=-/etc/bfm/watcher.env
+ExecStart=/usr/bin/bfm-watcher
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/bfm-watcher
+
+[Install]
+WantedBy=multi-user.target

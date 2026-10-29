@@ -1,17 +1,17 @@
-# pgVIP watcher settings: /etc/pgvip/watcher.yml
-# Start: pgvip-watcher (installed by the RPM with pgvip-watcher.service)
+# BFM watcher settings: /etc/bfm/watcher.yml
+# Start: bfm-watcher (installed by the RPM with bfm-watcher.service)
 
 server:
   port: 8443
   ssl:
-    # The console and REST API over HTTPS. Any PKCS#12 store works; pgvip-make-certs can make one.
-    key-store: file:/etc/pgvip/w1.p12
+    # The console and REST API over HTTPS. Any PKCS#12 store works; bfm-make-certs can make one.
+    key-store: file:/etc/bfm/w1.p12
     key-store-type: PKCS12
-    key-store-password: ${PGVIP_KEYSTORE_PASSWORD}
+    key-store-password: ${BFM_KEYSTORE_PASSWORD}
 
-pgvip:
+bfm:
   watcher-id: w1
-  data-dir: /var/lib/pgvip-watcher       # state, events, Raft log, secret.key (back it up)
+  data-dir: /var/lib/bfm-watcher       # state, events, Raft log, secret.key (back it up)
   time-zone: Europe/Istanbul             # times in the console and in mails
 
   cluster:
@@ -55,11 +55,11 @@ pgvip:
   agent:
     tls:
       enabled: true
-      keystore: /etc/pgvip/w1.p12
-      keystore-password-file: /etc/pgvip/w1.pass
-      truststore: /etc/pgvip/ca.p12
-      truststore-password-file: /etc/pgvip/ca.pass
-    # token-file: /etc/pgvip/agent.token    # optional; required when TLS is off
+      keystore: /etc/bfm/w1.p12
+      keystore-password-file: /etc/bfm/w1.pass
+      truststore: /etc/bfm/ca.p12
+      truststore-password-file: /etc/bfm/ca.pass
+    # token-file: /etc/bfm/agent.token    # optional; required when TLS is off
     command-timeout: 180s                # promote / stop / start / CHECKPOINT / VIP; above pg.start.timeout + 15 s
 
   # Optional: three watchers in an Apache Ratis group. The same file on every watcher, only watcher-id differs.
@@ -81,7 +81,7 @@ pgvip:
         port: 9870
         url: https://10.0.9.3:8443
 
-  # Console and API users. Hash: echo 'the password' | java -jar pgvip-watcher.jar hash-password
+  # Console and API users. Hash: echo 'the password' | java -jar bfm-watcher.jar hash-password
   # ADMIN operates (switchover, rejoin, reinit, settings), VIEWER only looks.
   users:
     - name: admin

@@ -1,0 +1,30 @@
+# Settings for ApiHttpStatusTest, which runs the watcher in a real servlet container. Written as YAML on
+# purpose: it also checks that bfm.* binds from a file the way /etc/bfm/watcher.yml does.
+bfm:
+  watcher-id: w1
+  data-dir: ${java.io.tmpdir}/bfm-apitest-${random.uuid}
+  cluster:
+    name: prod-main
+    timing:
+      poll-interval: 2s
+      agent-timeout: 1s
+    nodes:
+      - name: pg-a1
+        agent-url: http://127.0.0.1:1
+        pg-host: 10.0.0.1
+        dc: DC1
+      - name: pg-a2
+        agent-url: http://127.0.0.1:1
+        pg-host: 10.0.0.2
+        dc: DC1
+  agent:
+    tls:
+      enabled: false
+    token-file: ${java.io.tmpdir}/bfm-apitest-token
+  users:
+    - name: admin
+      password-hash: "{noop}admin-pw"
+      role: ADMIN
+    - name: viewer
+      password-hash: "{noop}viewer-pw"
+      role: VIEWER

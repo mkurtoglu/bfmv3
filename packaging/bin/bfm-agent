@@ -1,0 +1,4 @@
+#!/bin/bash
+# Starts the BFM agent. Settings: /etc/bfm/agent.properties (or the file given as the first argument).
+# JVM options can be set in BFM_AGENT_JAVA_OPTS, for example in /etc/bfm/agent.env.
+exec java ${BFM_AGENT_JAVA_OPTS:--Xmx128m} -jar /usr/share/bfm/bfm-agent.jar "${1:-/etc/bfm/agent.properties}"

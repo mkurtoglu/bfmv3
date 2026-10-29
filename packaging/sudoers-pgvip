@@ -1,7 +1,0 @@
-# /etc/sudoers.d/pgvip (mode 0440, check with: visudo -cf /etc/sudoers.d/pgvip)
-# The agent runs as postgres and may change exactly this address on exactly this interface.
-# Adjust the address, prefix and interface on every node; a DR node uses its own VIP.
-postgres ALL=(root) NOPASSWD: /usr/sbin/ip addr add 192.168.0.50/24 dev eth0, \
-                              /usr/sbin/ip addr del 192.168.0.50/24 dev eth0, \
-                              /usr/sbin/arping -D -q -c 2 -w 3 -I eth0 192.168.0.50, \
-                              /usr/sbin/arping -U -q -c 3 -I eth0 192.168.0.50

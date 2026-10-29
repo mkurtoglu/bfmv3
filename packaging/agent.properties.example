@@ -1,22 +1,22 @@
-# pgVIP agent settings: /etc/pgvip/agent.properties, readable by the postgres user only (chmod 600).
-# Start: pgvip-agent (installed by the RPM with pgvip-agent.service; runs java -jar /usr/share/pgvip/pgvip-agent.jar)
+# BFM agent settings: /etc/bfm/agent.properties, readable by the postgres user only (chmod 600).
+# Start: bfm-agent (installed by the RPM with bfm-agent.service; runs java -jar /usr/share/bfm/bfm-agent.jar)
 
 # Must equal the node name in the watcher configuration.
 node.name=pg-a1
 listen.address=0.0.0.0
 listen.port=8008
 
-# Mutual TLS: only holders of a certificate signed by the pgVIP CA may call the agent (see pgvip-make-certs).
+# Mutual TLS: only holders of a certificate signed by the BFM CA may call the agent (see bfm-make-certs).
 tls.enabled=true
-tls.keystore=/etc/pgvip/pg-a1.p12
-tls.keystore.password.file=/etc/pgvip/pg-a1.pass
-tls.truststore=/etc/pgvip/ca.p12
-tls.truststore.password.file=/etc/pgvip/ca.pass
-# Optional second check; required when TLS is off (lab only). Also read from PGVIP_API_TOKEN.
-#api.token.file=/etc/pgvip/agent.token
+tls.keystore=/etc/bfm/pg-a1.p12
+tls.keystore.password.file=/etc/bfm/pg-a1.pass
+tls.truststore=/etc/bfm/ca.p12
+tls.truststore.password.file=/etc/bfm/ca.pass
+# Optional second check; required when TLS is off (lab only). Also read from BFM_API_TOKEN.
+#api.token.file=/etc/bfm/agent.token
 
 # Epoch, fence flag and logs of background operations.
-state.dir=/var/lib/pgvip
+state.dir=/var/lib/bfm
 
 # PostgreSQL. The agent talks to it with psql over the Unix socket (peer authentication, no password).
 pg.bin=/usr/pgsql-16/bin
@@ -41,7 +41,7 @@ replication.conninfo.extra=sslmode=prefer
 reinit.keep.old=true
 
 # The virtual IP that follows the primary. The agent brings it up with sudo ip addr add and refuses to promote
-# while it is not up on this node. See sudoers-pgvip.
+# while it is not up on this node. See sudoers-bfm.
 vip.enabled=true
 vip.address=192.168.0.50
 vip.prefix=24
