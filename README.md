@@ -183,6 +183,18 @@ SMTP server, recipient groups (all events / critical only / role changes), alert
 rules with throttle windows are set on the *Notifications* page and shared by all watchers. The SMTP password
 is stored AES-GCM encrypted with `secret.key` and never shown again. Only the leading watcher sends mail.
 
+With the default STARTTLS setting the session is encrypted before the credentials are sent, and a server that
+does not offer STARTTLS is refused rather than talked to in clear. The server's certificate is checked against
+the JVM's trust store; an SMTP server with an internal CA needs that CA added, for example in
+`/etc/pgvip/watcher.env`:
+
+```
+PGVIP_WATCHER_JAVA_OPTS="-Xmx512m -Djavax.net.ssl.trustStore=/etc/pgvip/smtp-ca.p12 -Djavax.net.ssl.trustStoreType=PKCS12 -Djavax.net.ssl.trustStorePassword=..."
+```
+
+This affects mail only: the agent calls and the Raft traffic use their own stores from `pgvip.agent.tls`.
+*Send test mail* on the Notifications page shows the SMTP server's own error when something is wrong.
+
 ## Agent
 
 ```
