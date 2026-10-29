@@ -194,7 +194,8 @@ dnf install ./bfm-agent-0.1.0-*.el9.noarch.rpm
 
 ### 4.1 `/etc/bfm/agent.properties`
 
-Full list with defaults: `packaging/agent.properties.example`. What you must set on each node:
+Every setting with its default and what it does: **[agent-config.md](agent-config.md)**; the file to copy is
+`packaging/agent.properties.example`. What you must set on each node:
 
 ```properties
 node.name=pg-a1                       # same name as in watcher.yml

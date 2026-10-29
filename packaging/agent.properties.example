@@ -1,5 +1,10 @@
 # BFM agent settings: /etc/bfm/agent.properties, readable by the postgres user only (chmod 600).
 # Start: bfm-agent (installed by the RPM with bfm-agent.service; runs java -jar /usr/share/bfm/bfm-agent.jar)
+# Every setting with its default and what it does: docs/agent-config.md
+#
+# Passwords and the token can also come from the environment (/etc/bfm/agent.env, read by the unit):
+# BFM_KEYSTORE_PASSWORD, BFM_TRUSTSTORE_PASSWORD, BFM_API_TOKEN. The environment wins over the property,
+# and the property over its .file form.
 
 # Must equal the node name in the watcher configuration.
 node.name=pg-a1
@@ -27,7 +32,8 @@ pg.user=postgres
 pg.database=postgres
 pg.start.timeout.seconds=120
 pg.promote.timeout.seconds=60
-# Commands are templates split on whitespace before {bin} {data} {port} {state} {mode} {timeout} are filled.
+# Commands are templates split on whitespace before {bin} {data} {port} {state} {node} {mode} {timeout}
+# are filled. No shell is involved.
 #pg.start.command={bin}/pg_ctl -D {data} -l {state}/postgres-start.log -w -t {timeout} start
 #pg.stop.command={bin}/pg_ctl -D {data} -m {mode} -w -t {timeout} stop
 #pg.status.command={bin}/pg_ctl -D {data} status

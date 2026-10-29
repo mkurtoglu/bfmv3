@@ -222,7 +222,8 @@ java -jar bfm-agent.jar /etc/bfm/agent.properties
 ```
 
 Runs as the `postgres` OS user and talks to PostgreSQL through `psql` over the Unix socket (peer
-authentication, no stored password). All settings with defaults: `packaging/agent.properties.example`.
+authentication, no stored password). Every setting with its default and what it does:
+[docs/agent-config.md](docs/agent-config.md); the file to copy is `packaging/agent.properties.example`.
 
 Every external command is a template and can be overridden (`pg.start.command`, `pg.stop.command`,
 `vip.add.command`, `vip.del.command`, `vip.show.command`, `vip.dad.command`, `vip.garp.command`). Templates are
