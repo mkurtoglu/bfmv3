@@ -176,5 +176,5 @@ systemctl daemon-reload >/dev/null 2>&1 || :
 %{_unitdir}/bfm-watcher.service
 
 %changelog
-* Tue Oct 28 2026 BFM <bfm@localhost> - 0.1.0-1
+* Wed Oct 28 2026 BFM <bfm@localhost> - 0.1.0-1
 - First packages: agent and watcher for Rocky / RHEL 8 and 9

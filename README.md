@@ -172,6 +172,17 @@ Operator actions (console or API, ADMIN only, written to the event log with the 
 - **Rejoin (pg_rewind)**, **Re-initialize (pg_basebackup)**, **Start as primary**, **Drop slot**.
 - **Switches**: auto failover, maintenance mode, mail notifications, auto reinit.
 
+### Console
+
+| Page | What it answers |
+| --- | --- |
+| Overview | Who is primary, where the VIP is, node roles and lag, topology, the switches and the operation forms |
+| Replication | Both sides of the stream: the primary's `pg_stat_replication` rows (sent / written / flushed per walsender and what a crash failover would lose) and what each replica reports about itself (recovery state, upstream, timeline, received and replayed LSN). Replication slots with the WAL they retain, the last hour of replay lag, and Rejoin / Rebuild per node |
+| Switchover | Pre-checks for a target, then the confirmed switchover |
+| Operations | Running and finished operations with their steps and log |
+| Events | The event log, filterable by severity |
+| Notifications | SMTP settings, recipients, which events send mail, test mail |
+
 ### Raft mode
 
 Set `bfm.raft.enabled: true` and list the three (or five) watchers in `peers`. The Raft leader is the acting
@@ -189,6 +200,7 @@ to the console's login page, so a monitoring script can rely on the status code.
 | Call | Purpose |
 | --- | --- |
 | `GET /api/v1/cluster` | Overview: state, nodes, lag, lease, slots, watchers |
+| `GET /api/v1/replication` | Replication: walsender rows, each replica's own view, slots, lag |
 | `GET /api/v1/events?limit=` / `GET /api/v1/operations[/{id}]` | Event log / operations with steps and log |
 | `GET /api/v1/switchover/checks?target=` | Pre-checks |
 | `POST /api/v1/switchover` | `{"target":"pg-a2","confirm":"prod-main"}` |
