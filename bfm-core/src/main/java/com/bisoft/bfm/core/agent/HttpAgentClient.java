@@ -102,7 +102,7 @@ public class HttpAgentClient implements AgentClient {
 
     @Override
     public ApiResult promote(long epoch, long leaseTtlMs, boolean fenceOnExpiry) {
-        return command("/v1/pg/promote", body(epoch).put("requireVip", true).put("leaseTtlMs", leaseTtlMs)
+        return command("/v1/pg/promote", body(epoch).put("leaseTtlMs", leaseTtlMs)
                 .put("fenceOnExpiry", fenceOnExpiry));
     }
 
@@ -144,8 +144,8 @@ public class HttpAgentClient implements AgentClient {
     }
 
     @Override
-    public ApiResult fence(String reason) {
-        return command("/v1/fence", JsonMap.create().put("reason", reason));
+    public ApiResult fence(long epoch, String reason) {
+        return command("/v1/fence", body(epoch).put("reason", reason));
     }
 
     @Override

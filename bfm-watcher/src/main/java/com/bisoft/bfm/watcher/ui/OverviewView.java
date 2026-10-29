@@ -383,7 +383,16 @@ public class OverviewView extends Div {
         if (o.operation() != null) {
             Div b = Ui.banner(o.operation().type() + " on " + o.operation().target() + " is running, started by "
                     + o.operation().startedBy() + ".", Ui.Tone.INFO);
-            b.add(new Anchor("operations", "Follow it"));
+            String owner = o.operation().owner();
+            if (owner == null || owner.equals(o.watcherId())) {
+                b.add(new Anchor("operations", "Follow it"));
+            } else if (o.operationConsoleUrl() != null) {
+                // The steps and log are on the watcher running it, not here.
+                b.add(new Anchor(o.operationConsoleUrl(), "Follow it on watcher " + owner));
+            } else {
+                b.add(Ui.text("pg-note", "Its steps are on watcher " + owner + "; set raft.peers[].url to link"
+                        + " there."));
+            }
             banners.add(b);
         }
         if ("Primary down".equals(o.health())) {

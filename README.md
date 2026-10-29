@@ -29,9 +29,12 @@ PostgreSQL 13 or newer (the agent reloads `primary_conninfo` without a restart);
   local interface.
 - **A node never starts as primary on its own.** Without `standby.signal`, the agent starts PostgreSQL only
   when the watcher explicitly allows it. Disable the PostgreSQL systemd unit and let the agent start it.
+  (With `pg.autostart.replica=true` the agent starts a stopped *replica* when it comes up, so a rebooted
+  replica is back without a watcher; it still never starts a primary, a fenced node, or a data directory
+  whose rewind or rebuild was interrupted.)
 - **Epochs.** Every role change raises the cluster epoch in the shared state with a compare-and-set, so only
   one watcher can win it, and the new epoch is announced to every agent. Agents refuse commands from older
-  epochs, so a watcher that has been superseded cannot steer a node.
+  epochs, fencing included, so a watcher that has been superseded cannot steer or stop a node.
 - **Lease and self-fencing.** The leading watcher renews a lease on the primary every poll. With
   `self-fence: true`, a primary that stops getting renewals releases the VIP and stops PostgreSQL, and the
   watcher waits until any lease it or a previous leader granted has run out (TTL + margin) before promoting.

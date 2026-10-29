@@ -483,9 +483,17 @@ public final class FakeCluster implements AgentClientFactory {
         }
 
         @Override
-        public ApiResult fence(String reason) {
+        public ApiResult fence(long e, String reason) {
             synchronized (FakeCluster.this) {
                 reachable();
+                epoch(e);
+            }
+            return fence(reason);
+        }
+
+        /** The node fencing itself (lease expiry), which carries no epoch. */
+        public ApiResult fence(String reason) {
+            synchronized (FakeCluster.this) {
                 vipHolder.remove(vip, name);
                 if (pgRunning && !fenceKeepsRunning) {
                     pgRunning = false;

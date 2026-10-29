@@ -93,7 +93,6 @@ class SupportTest {
             assertTrue(e.detail().contains("refusing to promote"));
             JsonMap sent = Json.parseObject(body.get());
             assertEquals(15L, sent.lng("epoch", 0));
-            assertTrue(sent.bool("requireVip", false));
 
             ApiResult vc = c.vipCheck();
             assertFalse(vc.ok(), "a taken VIP is an answer, not an error");

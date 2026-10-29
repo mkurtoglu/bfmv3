@@ -700,7 +700,7 @@ public class Watcher implements AutoCloseable {
             String reason = n.name() + " runs as primary but " + st.primary() + " is the primary (epoch "
                     + st.epoch() + ")";
             try {
-                ApiResult r = agents.get(n.name()).fence(reason);
+                ApiResult r = agents.get(n.name()).fence(st.epoch(), reason);
                 events.publish(EventType.ROGUE_PRIMARY_FENCED, n.name(), "Fenced " + n.name() + ": " + reason, actor,
                         r.message());
             } catch (AgentCallException e) {

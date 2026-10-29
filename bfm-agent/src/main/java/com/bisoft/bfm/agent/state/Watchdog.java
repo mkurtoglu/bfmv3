@@ -9,7 +9,8 @@ import java.util.logging.Logger;
 /**
  * Optional Linux watchdog: armed while this node is primary. If the agent stops petting it (the JVM hangs or
  * is killed), the kernel resets the machine, which takes the primary down with it. Disarmed with the magic
- * close character when the node is no longer primary.
+ * close character when the node is no longer primary, and on a clean agent stop: an operator stopping the
+ * agent for maintenance must not lose a healthy primary to the timer a few seconds later.
  */
 public class Watchdog {
 
@@ -31,15 +32,31 @@ public class Watchdog {
                 }
                 out.write('1');
                 out.flush();
-            } else if (out != null) {
-                out.write('V');
-                out.close();
-                out = null;
-                LOG.info("watchdog disarmed");
+            } else {
+                disarm();
             }
         } catch (IOException e) {
             LOG.log(Level.WARNING, "watchdog " + device + ": " + e.getMessage());
             out = null;
         }
+    }
+
+    /** Magic close: tells the kernel to stop the timer before the descriptor goes away. No-op when not armed. */
+    public synchronized void disarm() throws IOException {
+        if (out == null) {
+            return;
+        }
+        try {
+            out.write('V');
+            out.flush();
+        } finally {
+            out.close();
+            out = null;
+        }
+        LOG.info("watchdog disarmed");
+    }
+
+    public synchronized boolean armed() {
+        return out != null;
     }
 }

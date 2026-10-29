@@ -478,6 +478,12 @@ systemctl restart bfm-watcher        # when no operation is running
 **Back up:** `/etc/bfm/` (settings and certificates), `/var/lib/bfm-watcher/secret.key`, and the CA from
 `bfm-make-certs` — `ca.key` offline.
 
+**If every watcher is down.** The cluster keeps serving: agents never touch PostgreSQL or the VIP on their
+own (unless `self-fence: true`, where the primary stops itself after `lease-ttl`). What stops is repair: a
+node that reboots meanwhile is not started by anyone. `pg.autostart.replica=true` in `agent.properties` makes a
+rebooted *replica* start itself; a primary, a fenced node or a half-rewritten data directory is still left for
+the watcher.
+
 **Planned maintenance.** Turn *Maintenance mode* on in the console: the watcher keeps watching and alerting but
 starts no automatic failover. Turn it off afterwards.
 

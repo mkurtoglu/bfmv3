@@ -63,6 +63,24 @@ public class ConsoleService {
                            String maxLagNode, Long maxLagDelayMs, Lease lease, ClusterState.OperationRef operation,
                            List<NodeRow> nodes, List<SlotRow> slots, List<WatcherRow> watchers,
                            long observedAtMillis) {
+        /**
+         * Where the running operation's steps and log can be followed. They live in the memory of the watcher
+         * that runs it, so on any other watcher this is that watcher's console (from {@code raft.peers[].url}),
+         * or null when its address is not configured.
+         */
+        public String operationConsoleUrl() {
+            if (operation == null || operation.owner() == null || operation.owner().equals(watcherId)) {
+                return null;
+            }
+            for (WatcherRow w : watchers) {
+                if (w.id().equals(operation.owner()) && w.url() != null && !w.url().isBlank()) {
+                    String base = w.url().endsWith("/") ? w.url().substring(0, w.url().length() - 1) : w.url();
+                    return base + "/operations";
+                }
+            }
+            return null;
+        }
+
         public boolean failoverActive() {
             return autoFailover && !maintenance;
         }

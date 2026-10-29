@@ -39,6 +39,7 @@ public final class AgentConfig {
     public final String pgStatusCommand;
     public final int pgStartTimeoutSec;
     public final int promoteTimeoutSec;
+    public final boolean pgAutostartReplica;
 
     public final String replicationUser;
     public final String replicationPassfile;
@@ -101,6 +102,7 @@ public final class AgentConfig {
         pgStatusCommand = p.getProperty("pg.status.command", "{bin}/pg_ctl -D {data} status");
         pgStartTimeoutSec = Integer.parseInt(p.getProperty("pg.start.timeout.seconds", "120"));
         promoteTimeoutSec = Integer.parseInt(p.getProperty("pg.promote.timeout.seconds", "60"));
+        pgAutostartReplica = Boolean.parseBoolean(p.getProperty("pg.autostart.replica", "false"));
 
         replicationUser = p.getProperty("replication.user", "replicator");
         replicationPassfile = blankToNull(p.getProperty("replication.passfile"));

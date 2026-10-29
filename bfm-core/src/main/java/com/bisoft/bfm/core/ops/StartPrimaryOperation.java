@@ -82,7 +82,7 @@ public final class StartPrimaryOperation extends Operation {
             if (rv == null) {
                 progress.skipped("old", recorded == null ? "no primary recorded" : node + " is the recorded primary");
             } else if (rv.reachable()) {
-                logResult(recorded, "fence", agent(recorded).fence("starting " + node + " as primary (epoch "
+                logResult(recorded, "fence", agent(recorded).fence(epoch, "starting " + node + " as primary (epoch "
                         + epoch + ")"));
                 progress.done("old", recorded + " fenced");
             } else {

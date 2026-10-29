@@ -46,7 +46,7 @@ public interface AgentClient {
 
     OperationStatus operation(String id);
 
-    ApiResult fence(String reason);
+    ApiResult fence(long epoch, String reason);
 
     ApiResult clearFence(long epoch);
 

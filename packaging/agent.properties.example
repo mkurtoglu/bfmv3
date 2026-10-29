@@ -32,6 +32,9 @@ pg.user=postgres
 pg.database=postgres
 pg.start.timeout.seconds=120
 pg.promote.timeout.seconds=60
+# Start a stopped replica when the agent comes up (needs standby.signal; never a primary). Off: the watcher
+# starts it. Useful when a node reboots while no watcher is up.
+pg.autostart.replica=false
 # Commands are templates split on whitespace before {bin} {data} {port} {state} {node} {mode} {timeout}
 # are filled. No shell is involved.
 #pg.start.command={bin}/pg_ctl -D {data} -l {state}/postgres-start.log -w -t {timeout} start

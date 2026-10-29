@@ -51,6 +51,8 @@ pg.user=postgres
 pg.database=postgres
 pg.start.timeout.seconds=120
 pg.promote.timeout.seconds=60
+# Start a stopped replica when the agent comes up (never a primary). Off: the watcher starts it.
+pg.autostart.replica=false
 # Defaults; override only if your site starts PostgreSQL differently.
 #pg.start.command={bin}/pg_ctl -D {data} -l {state}/postgres-start.log -w -t {timeout} start
 #pg.stop.command={bin}/pg_ctl -D {data} -m {mode} -w -t {timeout} stop
@@ -167,7 +169,7 @@ The `.p12` and `.pass` files live in `/etc/bfm/minipgagent/`, belong to `postgre
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `state.dir` | `/var/lib/minipgagent` | Cluster epoch, fence flag, the persisted primary lease and background-operation logs. Deleting it makes the node forget that it was fenced, so leave it alone. |
+| `state.dir` | `/var/lib/minipgagent` | Cluster epoch, fence flag, the persisted primary lease, and the mark of a rewind or rebuild that did not finish (`operation`). Deleting it makes the node forget that it was fenced or half rewritten, so leave it alone. |
 
 ### PostgreSQL
 
@@ -181,6 +183,7 @@ The `.p12` and `.pass` files live in `/etc/bfm/minipgagent/`, belong to `postgre
 | `pg.database` | `postgres` | Database it connects to. |
 | `pg.start.timeout.seconds` | `120` | Passed to `pg_ctl -t` for start and stop; the agent kills the command 15 s later. Raise it for a database with long crash recovery, and keep the watcher's `bfm.agent.command-timeout` above it. |
 | `pg.promote.timeout.seconds` | `60` | `pg_promote(true, N)`: how long the agent waits for the server to leave recovery. |
+| `pg.autostart.replica` | `false` | When the agent starts and finds PostgreSQL stopped, start it as a replica — only with `standby.signal` present, the node not fenced and no interrupted rewind or rebuild. A rebooted replica is then back without waiting for a watcher. A primary is never started this way. |
 | `pg.start.command` | `{bin}/pg_ctl -D {data} -l {state}/postgres-start.log -w -t {timeout} start` | How PostgreSQL is started. |
 | `pg.stop.command` | `{bin}/pg_ctl -D {data} -m {mode} -w -t {timeout} stop` | How it is stopped. |
 | `pg.status.command` | `{bin}/pg_ctl -D {data} status` | How "is it running" is answered. |
@@ -280,6 +283,12 @@ pg.start.command=/usr/local/sbin/pgstart.sh {data} {port} {timeout}
 | `fence.action must be 'stop' or 'vip-only'` | Typo in `fence.action`. |
 | `Missing required setting vip.address` / `vip.interface` | `vip.enabled=true` without them. Set `vip.enabled=false` if the cluster has no VIP. |
 | `Cannot read tls.keystore.password.file: …` | The `.pass` file is missing or `postgres` cannot read it. |
+
+And one refusal that comes later, on a start or rewind command:
+
+| Message | Cause |
+| --- | --- |
+| `demote (pg_rewind) was interrupted; the data directory may be incomplete, re-initialize this node` (or `reinit (pg_basebackup) …`) | The agent was restarted, or the command failed, while it was rewriting the data directory. It will not start or rewind what may be half written; **Re-initialize** the node from the console (automatic with *Auto reinit*). The same text shows in the node's error column. |
 
 Check after a change:
 

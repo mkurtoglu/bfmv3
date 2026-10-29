@@ -140,7 +140,7 @@ public final class FailoverOperation extends Operation {
         try {
             // 4. Fence the old primary when its agent answers.
             progress.running("fence");
-            fenceOld(old, "automatic failover to " + t + " (epoch " + epoch + ")");
+            fenceOld(old, epoch, "automatic failover to " + t + " (epoch " + epoch + ")");
 
             // 5. Lease.
             progress.running("lease");
@@ -159,7 +159,7 @@ public final class FailoverOperation extends Operation {
             // stop, or fence.action=vip-only): never promote next to a running primary.
             NodeStatus again = statusOrNull(oldPrimary);
             if (again != null && again.isPrimary()) {
-                fenceOld(old, "automatic failover to " + t + " (epoch " + epoch + ")");
+                fenceOld(old, epoch, "automatic failover to " + t + " (epoch " + epoch + ")");
                 again = statusOrNull(oldPrimary);
                 if (again != null && again.isPrimary()) {
                     throw new Abort(oldPrimary + " still runs as primary" + (again.fenced() ? " (fenced)" : "")
@@ -302,9 +302,9 @@ public final class FailoverOperation extends Operation {
         return null;
     }
 
-    private void fenceOld(NodeConfig old, String reason) {
+    private void fenceOld(NodeConfig old, long epoch, String reason) {
         try {
-            ApiResult r = agent(old.name()).fence(reason);
+            ApiResult r = agent(old.name()).fence(epoch, reason);
             logResult(old.name(), "fence", r);
             progress.done("fence", r.message());
         } catch (AgentCallException e) {

@@ -5,6 +5,7 @@ import com.bisoft.bfm.agent.AgentException;
 import com.bisoft.bfm.agent.exec.CommandTemplate;
 import com.bisoft.bfm.agent.exec.ProcessResult;
 import com.bisoft.bfm.agent.exec.ProcessRunner;
+import com.bisoft.bfm.agent.state.InterruptedOperation;
 import com.bisoft.bfm.agent.ops.OpLog;
 
 import java.io.IOException;
@@ -34,12 +35,20 @@ public class PgController {
     private final ProcessRunner runner;
     private final Psql psql;
     private final PgProbe probe;
+    private final InterruptedOperation interrupted;
 
-    public PgController(AgentConfig cfg, ProcessRunner runner, Psql psql, PgProbe probe) {
+    public PgController(AgentConfig cfg, ProcessRunner runner, Psql psql, PgProbe probe,
+                        InterruptedOperation interrupted) {
         this.cfg = cfg;
         this.runner = runner;
         this.psql = psql;
         this.probe = probe;
+        this.interrupted = interrupted;
+    }
+
+    /** The rewind or rebuild that did not finish rewriting the data directory, if any. */
+    public InterruptedOperation interrupted() {
+        return interrupted;
     }
 
     public Path standbySignal() {
@@ -56,6 +65,9 @@ public class PgController {
         }
         if (!allowPrimary && !Files.exists(standbySignal())) {
             throw AgentException.conflict("refusing to start without standby.signal: this would start a primary");
+        }
+        if (interrupted.present()) {
+            throw AgentException.conflict(interrupted.refusal());
         }
         Map<String, String> v = placeholders();
         v.put("timeout", Integer.toString(cfg.pgStartTimeoutSec));
@@ -190,16 +202,22 @@ public class PgController {
         if (probe.isRunning()) {
             throw AgentException.conflict("stop the server before pg_rewind");
         }
+        if (interrupted.present()) {
+            throw AgentException.conflict(interrupted.refusal());
+        }
         List<String> argv = List.of(cfg.pgBin.resolve("pg_rewind").toString(),
                 "-D", cfg.pgData.toString(),
                 "--source-server=" + conninfo(host, port, cfg.rewindUser, false),
                 "--progress");
         log.line("pg_rewind from " + host + ":" + port);
+        // Until pg_rewind reports success the directory is a mix of old and new blocks.
+        interrupted.begin("demote (pg_rewind)");
         ProcessResult r = runner.run(argv, Duration.ofHours(6), Map.of("LC_ALL", "C"));
         tail(r, log);
         if (!r.ok()) {
             throw new AgentException("pg_rewind failed: " + r.summary());
         }
+        interrupted.end();
     }
 
     /** Rebuilds the data directory with pg_basebackup. The old directory is kept or removed per config. */
@@ -209,6 +227,7 @@ public class PgController {
             log.line(stop("immediate"));
         }
         Path data = cfg.pgData;
+        interrupted.begin("reinit (pg_basebackup)");
         try {
             if (Files.exists(data)) {
                 if (cfg.reinitKeepOld) {
@@ -239,6 +258,7 @@ public class PgController {
         if (!r.ok()) {
             throw new AgentException("pg_basebackup failed: " + r.summary());
         }
+        interrupted.end();
         configureStandbyStopped(host, port, slot);
         log.line(start(false));
     }

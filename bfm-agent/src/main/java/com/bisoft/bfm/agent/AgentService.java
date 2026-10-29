@@ -9,6 +9,7 @@ import com.bisoft.bfm.agent.pg.PgSnapshot;
 import com.bisoft.bfm.agent.pg.Psql;
 import com.bisoft.bfm.agent.state.EpochStore;
 import com.bisoft.bfm.agent.state.FenceState;
+import com.bisoft.bfm.agent.state.InterruptedOperation;
 import com.bisoft.bfm.agent.state.LeaseGuard;
 import com.bisoft.bfm.agent.state.Watchdog;
 import com.bisoft.bfm.agent.vip.VipManager;
@@ -20,6 +21,7 @@ import com.bisoft.bfm.common.model.PgRole;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.file.Files;
 import java.net.Socket;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -39,6 +41,7 @@ public class AgentService {
     private final EpochStore epoch;
     private final LeaseGuard lease;
     private final FenceState fence;
+    private final InterruptedOperation interrupted;
     private final OperationManager ops;
     private final Watchdog watchdog;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(3, r -> {
@@ -60,7 +63,8 @@ public class AgentService {
         this.cfg = cfg;
         Psql psql = new Psql(cfg, runner);
         this.probe = new PgProbe(cfg, runner, psql);
-        this.pg = new PgController(cfg, runner, psql, probe);
+        this.interrupted = new InterruptedOperation(cfg.stateDir);
+        this.pg = new PgController(cfg, runner, psql, probe, interrupted);
         this.vip = new VipManager(cfg, runner);
         this.epoch = new EpochStore(cfg.stateDir);
         this.lease = lease;
@@ -71,6 +75,12 @@ public class AgentService {
 
     public void start() {
         refresh();
+        if (interrupted.present()) {
+            LOG.warning(interrupted.refusal());
+        }
+        if (cfg.pgAutostartReplica) {
+            scheduler.schedule(this::autostartReplica, 0, TimeUnit.MILLISECONDS);
+        }
         scheduler.scheduleWithFixedDelay(this::safeRefresh, cfg.probeIntervalMs, cfg.probeIntervalMs, TimeUnit.MILLISECONDS);
         scheduler.scheduleWithFixedDelay(this::leaseTick, 500, 500, TimeUnit.MILLISECONDS);
         if (watchdog != null) {
@@ -80,9 +90,47 @@ public class AgentService {
         }
     }
 
+    /**
+     * Optional: starts PostgreSQL as a replica when the agent comes up and finds it stopped, so a rebooted replica
+     * is back before any watcher tells it to be. Never a primary: without standby.signal nothing is started, and a
+     * fenced node or an interrupted rewind/rebuild is left to the watcher.
+     */
+    void autostartReplica() {
+        try {
+            if (snapshot.running()) {
+                return;
+            }
+            String why = fence.fenced() ? "node is fenced" : interrupted.refusal() != null ? interrupted.refusal()
+                    : !Files.exists(pg.standbySignal()) ? "no standby.signal (it would start a primary)"
+                    : null;
+            if (why != null) {
+                LOG.info("autostart: not starting PostgreSQL: " + why);
+                return;
+            }
+            String msg = ops.exclusive("autostart", () -> pg.start(false));
+            refresh();
+            LOG.info("autostart: " + msg + " as a replica");
+        } catch (RuntimeException e) {
+            LOG.warning("autostart: PostgreSQL not started: " + e.getMessage());
+        }
+    }
+
+    /** The watchdog, or null when disabled. */
+    Watchdog watchdog() {
+        return watchdog;
+    }
+
     public void stop() {
         scheduler.shutdownNow();
         ops.shutdown();
+        if (watchdog != null) {
+            // A clean stop is not a hang: leave the timer off, or the machine resets once it runs out.
+            try {
+                watchdog.disarm();
+            } catch (IOException e) {
+                LOG.log(Level.WARNING, "watchdog not disarmed: " + e.getMessage());
+            }
+        }
     }
 
     private void safeRefresh() {
@@ -161,6 +209,9 @@ public class AgentService {
         if (vipError != null) {
             error = error == null ? vipError : error + "; " + vipError;
         }
+        if (interrupted.present()) {
+            error = error == null ? interrupted.refusal() : error + "; " + interrupted.refusal();
+        }
         return new NodeStatus(cfg.nodeName, AgentMain.VERSION, System.currentTimeMillis(), s.running(), s.role(),
                 s.timeline(), s.systemIdentifier(), s.serverVersionNum(), s.currentLsn(), s.receiveLsn(),
                 s.replayLsn(), s.replayDelayMs(), s.walReceiverStatus(), s.upstreamHost(), s.upstreamPort(),
@@ -208,7 +259,8 @@ public class AgentService {
 
     /**
      * Promotes this replica. With the VIP enabled the agent refuses unless the VIP is already up here: the watcher
-     * brings the VIP up first and only promotes once that worked.
+     * brings the VIP up first and only promotes once that worked. There is no flag to skip the check: a caller
+     * that wants to promote without the address runs the node with vip.enabled=false.
      */
     public ApiResult promote(JsonMap body) {
         long e = body.requireLng("epoch");
@@ -216,7 +268,7 @@ public class AgentService {
         if (fence.fenced()) {
             throw AgentException.conflict("node is fenced: " + fence.reason());
         }
-        if (vip.enabled() && body.bool("requireVip", true) && !vip.isHeld()) {
+        if (vip.enabled() && !vip.isHeld()) {
             throw AgentException.conflict("VIP " + vip.address() + " is not up on this node; refusing to promote");
         }
         String msg = ops.exclusive("promote", pg::promote);
@@ -338,7 +390,9 @@ public class AgentService {
         return ApiResult.started(op.id(), "reinit started");
     }
 
+    /** Fences this node. Carries the epoch like every other command, so a superseded watcher cannot stop a node. */
     public ApiResult fence(JsonMap body) {
+        epoch.accept(body.requireLng("epoch"));
         String reason = body.str("reason", "fenced by watcher");
         ApiResult r = fenceNow(reason);
         if (!r.ok()) {
