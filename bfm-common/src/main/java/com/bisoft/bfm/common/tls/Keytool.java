@@ -48,13 +48,19 @@ public final class Keytool {
         return Files.isExecutable(p) ? p : Path.of("keytool");
     }
 
-    /** Runs keytool and returns what it printed. */
+    /**
+     * Runs keytool and returns what it printed on standard output. Its standard error stays apart (the JVM writes
+     * "Picked up JAVA_TOOL_OPTIONS ..." there, which must not end up in a certificate) and is only reported when
+     * keytool fails.
+     */
     public static String run(String... args) {
         List<String> cmd = new ArrayList<>();
         cmd.add(binary().toString());
         cmd.addAll(List.of(args));
+        Path err = null;
         try {
-            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            err = Files.createTempFile("keytool", ".err");
+            Process p = new ProcessBuilder(cmd).redirectError(err.toFile()).start();
             p.getOutputStream().close();
             String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             if (!p.waitFor(120, TimeUnit.SECONDS)) {
@@ -62,7 +68,10 @@ public final class Keytool {
                 throw new KeytoolException("keytool " + args[0] + " did not finish");
             }
             if (p.exitValue() != 0) {
-                throw new KeytoolException("keytool " + args[0] + " failed: " + out.trim());
+                String why = (out + "\n" + Files.readString(err, StandardCharsets.UTF_8)).lines()
+                        .filter(l -> !l.startsWith("Picked up ")).filter(l -> !l.isBlank())
+                        .reduce((a, b) -> a + "\n" + b).orElse("");
+                throw new KeytoolException("keytool " + args[0] + " failed: " + why);
             }
             return out;
         } catch (IOException e) {
@@ -70,6 +79,14 @@ public final class Keytool {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new KeytoolException("interrupted");
+        } finally {
+            if (err != null) {
+                try {
+                    Files.deleteIfExists(err);
+                } catch (IOException ignored) {
+                    // a temporary file left behind
+                }
+            }
         }
     }
 

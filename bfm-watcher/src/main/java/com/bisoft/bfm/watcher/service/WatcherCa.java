@@ -48,7 +48,13 @@ public class WatcherCa {
     /** The CA certificate (PEM) agents trust, or null when there is no CA here. */
     public String certificatePem() {
         StateStore.Versioned v = root.get(CERT_KEY);
-        return v == null ? null : v.value();
+        if (v == null) {
+            return null;
+        }
+        // Stores written before keytool's stderr was kept apart may carry a "Picked up ..." line before it.
+        String s = v.value();
+        int begin = s.indexOf("-----BEGIN CERTIFICATE-----");
+        return begin <= 0 ? s : s.substring(begin);
     }
 
     public X509Certificate certificate() {

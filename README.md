@@ -123,7 +123,8 @@ services either, because a restart would interrupt a running `pg_basebackup`, `p
 them when the cluster is idle. JVM options go into `/etc/bfm/minipgagent/agent.env`
 (`MINIPGAGENT_JAVA_OPTS`) and `/etc/bfm/watcher.env` (`BFM_WATCHER_JAVA_OPTS`).
 
-The short version, with the wizards:
+Step by step, with screenshots: [docs/install-rpm.md](docs/install-rpm.md) (installation) and
+[docs/user-guide.md](docs/user-guide.md) (the console). The short version, with the wizards:
 
 1. **Watcher**: install the RPM and run `bfm-watcher setup` (as root). It asks for the watcher id, the console's
    names and port, the first admin and, for three watchers, the peers; it writes `/etc/bfm/watcher.yml`, the

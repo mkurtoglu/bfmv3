@@ -77,6 +77,8 @@ class EnrollmentTest {
         assertThrows(IllegalStateException.class, () -> enrollment.issue(hub.require("crm"), "crm-a2", "admin"),
                 "no CA, no enrollment");
         ca.create("BFM CA");
+        assertTrue(ca.certificatePem().startsWith("-----BEGIN CERTIFICATE-----"),
+                "only the certificate, never what the JVM prints on stderr: " + ca.certificatePem());
         EnrollmentService.Issued t = enrollment.issue(hub.require("crm"), "crm-a2", "admin");
         assertEquals(22, t.token().length(), "128 random bits");
         assertFalse(store.getPrefix(EnrollmentService.PREFIX).values().stream()

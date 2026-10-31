@@ -1,5 +1,9 @@
 # Installing BFM
 
+The step-by-step guide for the RPM packages with the setup wizards is [install-rpm.md](install-rpm.md); the
+console is described in the [user guide](user-guide.md). This document is the reference: every setting, and the
+manual way.
+
 This guide takes a three-node PostgreSQL cluster from "streaming replication works" to "BFM runs it": the VIP
 follows the primary, a lost primary is failed over automatically, and operators work from the console.
 
@@ -93,9 +97,9 @@ The rest of this guide is the manual way, and what the wizards do under the hood
 
 ## 1. Before you start
 
-- [ ] **PostgreSQL 13 or newer** on every node, same major version, streaming replication already working
-      (one primary, the replicas streaming from it). BFM does not set replication up for you on the first
-      node; it keeps it running and rebuilds replicas afterwards.
+- [ ] **PostgreSQL 13 or newer** on every node, same major version. One node holds the data; the replicas can
+      already stream from it, or be built from it: *Build* in the console's *Add cluster*, or *Re-initialize*
+      on each replica, copies it with `pg_basebackup`.
 - [ ] **Java 21** available: `dnf install java-21-openjdk-headless` (Rocky 8.9+ / 9.3+). `dnf` pulls it in
       with the packages.
 - [ ] **The VIP is free** and lives on the same L2 segment as the nodes that may hold it. A node in another
