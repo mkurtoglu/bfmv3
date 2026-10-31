@@ -89,6 +89,19 @@ class ApiHttpStatusTest {
     }
 
     @Test
+    void aBodyTheApiCannotReadAnswers400AsJson() throws Exception {
+        HttpRequest r = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v1/controls"))
+                .method("PUT", HttpRequest.BodyPublishers.ofString("{\"maintenance\": \"not a boolean\""))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Basic " + Base64.getEncoder().encodeToString(
+                        "admin:admin-pw".getBytes(StandardCharsets.UTF_8))).build();
+        HttpResponse<String> out = http.send(r, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        assertEquals(400, out.statusCode(), "not the empty 403 of the error page: " + out.body());
+        assertTrue(out.headers().firstValue("Content-Type").orElse("").contains("json"), out.headers().toString());
+        assertTrue(out.body().contains("not what this call takes"), out.body());
+    }
+
+    @Test
     void theConsoleStillRedirectsToItsLoginPage() throws Exception {
         HttpResponse<String> r = call("GET", "/", null, null);
         assertEquals(302, r.statusCode());

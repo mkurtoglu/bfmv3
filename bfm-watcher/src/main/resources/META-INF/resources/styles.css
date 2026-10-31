@@ -670,3 +670,12 @@ vaadin-menu-bar-item.pg-danger, vaadin-context-menu-item.pg-danger { color: var(
 @media (max-width: 600px) {
   .pg-switcher { width: 150px !important; }
 }
+
+/* ---------------------------------------------------------------- wizards */
+.pg-stepper { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
+.pg-step { padding: 6px 12px; border-radius: 999px; font-size: 14px; color: var(--pg-muted);
+  border: 1px solid var(--pg-border); background: var(--pg-surface); }
+.pg-step.current { color: var(--pg-surface); background: var(--pg-green); border-color: var(--pg-green);
+  font-weight: 700; }
+.pg-step.done { color: var(--pg-ok-fg); background: var(--pg-ok-bg); border-color: transparent; }
+.pg-node-name { font-weight: 700; color: var(--pg-ink); min-width: 90px; }

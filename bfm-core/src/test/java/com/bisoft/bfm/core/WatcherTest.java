@@ -861,6 +861,27 @@ class WatcherTest {
     }
 
     @Test
+    void aNodeThatNeverHeldTheClustersDatabaseGetsItsSlotWhenReinitialized() {
+        // A new cluster built from one node: the other was initdb'ed on its own and never had a slot.
+        threeNodes();
+        FakeCluster.Node c = cluster.node("pg-a3");
+        c.pgRunning = false;
+        c.clusterState = "shut down";
+        c.systemIdentifier = OTHER_SYSID;
+        start(standalone());
+        ticks(3);
+        assertTrue(watcher.identity().foreignData().contains("pg-a3"));
+        assertFalse(cluster.node("pg-a1").slots.contains("pg_a3"), "no slot for another database's node");
+
+        OperationProgress.Snapshot reinit = watcher.reinit("pg-a3", "admin");
+        awaitIdle();
+        assertEquals(OperationProgress.State.SUCCEEDED, watcher.operation(reinit.id()).orElseThrow().state(),
+                String.join("\n", cluster.log));
+        assertTrue(cluster.node("pg-a1").slots.contains("pg_a3"), "made right before pg_basebackup");
+        assertEquals(FakeCluster.SYSID, c.systemIdentifier);
+    }
+
+    @Test
     void startingANodeWithAnotherDatabaseAsPrimaryMakesItTheClustersDatabase() {
         threeNodes();
         start(standalone());

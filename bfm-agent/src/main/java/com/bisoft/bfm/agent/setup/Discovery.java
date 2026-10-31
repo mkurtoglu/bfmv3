@@ -31,6 +31,7 @@ import java.util.regex.Pattern;
 public class Discovery {
 
     private static final Pattern PORT = Pattern.compile("(?m)^\\s*port\\s*=\\s*'?(\\d+)'?");
+    private static final Pattern SOCKETS = Pattern.compile("(?m)^\\s*unix_socket_directories\\s*=\\s*'([^']*)'");
 
     private final Path root;
     private final ProcessRunner runner;
@@ -65,6 +66,28 @@ public class Discovery {
             port = Integer.parseInt(m.group(1));
         }
         return port;
+    }
+
+    /**
+     * The first socket directory of the last {@code unix_socket_directories} line, or null. An abstract socket
+     * ({@code @name}) cannot be used by psql's {@code -h}, so it is skipped.
+     */
+    public static String socketDirFromConf(String text) {
+        Matcher m = SOCKETS.matcher(text);
+        String value = null;
+        while (m.find()) {
+            value = m.group(1);
+        }
+        if (value == null) {
+            return null;
+        }
+        for (String d : value.split(",")) {
+            String t = d.trim();
+            if (!t.isEmpty() && !t.startsWith("@")) {
+                return t;
+            }
+        }
+        return null;
     }
 
     /** One line of {@code pg_lsclusters}: version, cluster, port, status, owner, data directory. */
@@ -134,9 +157,16 @@ public class Discovery {
             }
         }
         Path real = dir.startsWith(root) ? Path.of("/").resolve(root.relativize(dir).toString()) : dir;
+        // A running server says where its socket is; a stopped one is asked through its settings.
+        String socket = running && pid.socketDir() != null && !pid.socketDir().isBlank() ? pid.socketDir() : null;
+        if (socket == null) {
+            socket = socketDirFromConf(read(dir.resolve("postgresql.auto.conf")));
+        }
+        if (socket == null) {
+            socket = socketDirFromConf(read(dir.resolve("postgresql.conf")));
+        }
         return new PgInstance(real, version, port == null ? 5432 : port, running, role, bin,
-                pid != null && pid.socketDir() != null ? pid.socketDir() : "/var/run/postgresql",
-                managed.get(real), unitFor(real));
+                socket == null ? "/var/run/postgresql" : socket, managed.get(real), unitFor(real));
     }
 
     /** Working directories of running postmasters (a postmaster is a postgres process whose parent is not one). */
@@ -182,7 +212,8 @@ public class Discovery {
         addManaged(out, base.resolve("agent.properties"), "minipgagent");
         try (DirectoryStream<Path> ds = Files.newDirectoryStream(base)) {
             for (Path p : ds) {
-                if (Files.isDirectory(p)) {
+                // "minipgagent remove" leaves <instance>.removed-<time> behind for the record: it runs nothing.
+                if (Files.isDirectory(p) && !p.getFileName().toString().contains(".removed-")) {
                     addManaged(out, p.resolve("agent.properties"), "minipgagent@" + p.getFileName());
                 }
             }

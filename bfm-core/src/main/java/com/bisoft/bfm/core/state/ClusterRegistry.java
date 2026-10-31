@@ -30,20 +30,41 @@ public final class ClusterRegistry {
 
     private static final int COPY_EVENTS = 5000;
 
+    public static final String FILE = "file";
+    public static final String CONSOLE = "console";
+    public static final String ACTIVE = "active";
+    public static final String DRAFT = "draft";
+
     /**
      * @param source "file" when watcher.yml defines it, "console" when it was created there
+     * @param state  "active", or "draft" while the console's Add cluster wizard is not finished
      */
-    public record Entry(String id, String name, String source, long createdMillis) {
+    public record Entry(String id, String name, String source, long createdMillis, String state) {
+
+        public Entry(String id, String name, String source, long createdMillis) {
+            this(id, name, source, createdMillis, ACTIVE);
+        }
+
+        public boolean draft() {
+            return DRAFT.equals(state);
+        }
+
+        public boolean console() {
+            return CONSOLE.equals(source);
+        }
 
         String toJson() {
             return JsonMap.create().put("id", id).put("name", name).put("source", source)
-                    .put("createdMillis", createdMillis).toJson();
+                    .put("createdMillis", createdMillis).put("state", state).toJson();
         }
 
         static Entry fromJson(String json) {
             JsonMap m = Json.parseObject(json);
-            return new Entry(m.requireStr("id"), m.requireStr("name"), m.str("source", "file"),
-                    m.lng("createdMillis", 0));
+            if (m.bool("removed", false)) {
+                return null;
+            }
+            return new Entry(m.requireStr("id"), m.requireStr("name"), m.str("source", FILE),
+                    m.lng("createdMillis", 0), m.str("state", ACTIVE));
         }
     }
 
@@ -58,12 +79,25 @@ public final class ClusterRegistry {
         return v == null ? null : Entry.fromJson(v.value());
     }
 
+    /** The entry with this id, or null. */
+    public Entry byId(String id) {
+        for (Entry e : all()) {
+            if (e.id().equals(id)) {
+                return e;
+            }
+        }
+        return null;
+    }
+
     /** Every registered cluster, by name. */
     public List<Entry> all() {
         List<Entry> out = new ArrayList<>();
         for (StateStore.Versioned v : root.getPrefix(KEY_PREFIX).values()) {
             try {
-                out.add(Entry.fromJson(v.value()));
+                Entry e = Entry.fromJson(v.value());
+                if (e != null) {
+                    out.add(e);
+                }
             } catch (RuntimeException e) {
                 LOG.warning("unreadable registry entry: " + e.getMessage());
             }
@@ -133,7 +167,7 @@ public final class ClusterRegistry {
             scoped.put(ClusterIdentity.ID_KEY, id);
         }
         Entry e = new Entry(id, name, source, nowMillis);
-        if (!root.compareAndSet(KEY_PREFIX + name, 0, e.toJson())) {
+        if (!root.compareAndSet(KEY_PREFIX + name, versionOf(name), e.toJson())) {
             return find(name);
         }
         if (adoptLegacy) {
@@ -142,6 +176,70 @@ public final class ClusterRegistry {
             LOG.info("moved the state of cluster " + name + " (" + id + ") under " + ScopedStateStore.key(id, ""));
         }
         return e;
+    }
+
+    /** The registry key's version (0 when absent; a removed cluster's tombstone counts, so its name can be reused). */
+    private long versionOf(String name) {
+        StateStore.Versioned v = root.get(KEY_PREFIX + name);
+        return v == null ? 0 : v.version();
+    }
+
+    // ---------------------------------------------------------------- clusters created in the console
+
+    /** A new console cluster in the draft state, with its spec; null when the name is taken. */
+    public Entry createDraft(com.bisoft.bfm.core.config.ClusterSpec spec, long nowMillis) {
+        if (find(spec.name()) != null) {
+            return null;
+        }
+        String id = UUID.randomUUID().toString();
+        StateStore scoped = new ScopedStateStore(root, id);
+        scoped.compareAndSet(ClusterIdentity.ID_KEY, 0, id);
+        scoped.put(com.bisoft.bfm.core.config.ClusterSpec.KEY, spec.toJson());
+        Entry e = new Entry(id, spec.name(), CONSOLE, nowMillis, DRAFT);
+        return root.compareAndSet(KEY_PREFIX + spec.name(), versionOf(spec.name()), e.toJson()) ? e : null;
+    }
+
+    /** The spec of a console cluster and its version (to tell an engine that it changed), or null. */
+    public StateStore.Versioned spec(String id) {
+        return new ScopedStateStore(root, id).get(com.bisoft.bfm.core.config.ClusterSpec.KEY);
+    }
+
+    public void saveSpec(String id, com.bisoft.bfm.core.config.ClusterSpec spec) {
+        new ScopedStateStore(root, id).put(com.bisoft.bfm.core.config.ClusterSpec.KEY, spec.toJson());
+    }
+
+    /** Turns a draft into a running cluster: from now on every watcher of the group runs its engine. */
+    public Entry activate(String name) {
+        StateStore.Versioned v = root.get(KEY_PREFIX + name);
+        Entry e = v == null ? null : Entry.fromJson(v.value());
+        if (e == null || !e.draft()) {
+            throw new IllegalStateException("no draft named " + name);
+        }
+        Entry active = new Entry(e.id(), e.name(), e.source(), e.createdMillis(), ACTIVE);
+        if (!root.compareAndSet(KEY_PREFIX + name, v.version(), active.toJson())) {
+            throw new IllegalStateException("cluster " + name + " changed meanwhile; try again");
+        }
+        return active;
+    }
+
+    /**
+     * Removes a console cluster from the registry (its engine stops on every watcher). Its state and events stay
+     * under its id, for the record; the name can be used again.
+     */
+    public void remove(String name, String by, long nowMillis) {
+        StateStore.Versioned v = root.get(KEY_PREFIX + name);
+        Entry e = v == null ? null : Entry.fromJson(v.value());
+        if (e == null) {
+            throw new IllegalStateException("no cluster named " + name);
+        }
+        if (!e.console()) {
+            throw new IllegalStateException(name + " is defined in watcher.yml: remove it there");
+        }
+        String tomb = JsonMap.create().put("removed", true).put("id", e.id()).put("name", name).put("by", by)
+                .put("timeMillis", nowMillis).toJson();
+        if (!root.compareAndSet(KEY_PREFIX + name, v.version(), tomb)) {
+            throw new IllegalStateException("cluster " + name + " changed meanwhile; try again");
+        }
     }
 
     /** Copies every top-level key of the old layout and the default event log into the cluster's scope. */

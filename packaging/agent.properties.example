@@ -50,7 +50,7 @@ pg.promote.timeout.seconds=60
 pg.autostart.replica=false
 # Commands are templates split on whitespace before {bin} {data} {port} {state} {node} {mode} {timeout}
 # are filled. No shell is involved.
-#pg.start.command={bin}/pg_ctl -D {data} -l {state}/postgres-start.log -w -t {timeout} start
+#pg.start.command={bin}/pg_ctl -D {data} -l {state}/postgres-start.log -o -p{port} -w -t {timeout} start
 #pg.stop.command={bin}/pg_ctl -D {data} -m {mode} -w -t {timeout} stop
 #pg.status.command={bin}/pg_ctl -D {data} status
 

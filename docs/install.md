@@ -29,11 +29,28 @@ PostgreSQL) still applies; the agent wizard checks it and offers the fixes.
    how agent certificates are made (`ca`: the watchers keep a CA and nodes enroll — recommended; `files`: stores
    from `bfm-make-certs`), and for three watchers the peers. It writes `/etc/bfm/watcher.yml`, `watcher.env`, the
    console certificate, the CA (moved into the shared state on the first start) and, for a Raft group, the other
-   watchers' certificates with the commands to copy them. Then add your clusters under `bfm.clusters` in
-   `watcher.yml` (see §5.2) and restart.
-2. **In the console**: *Agent certificates* shows the CA and, per node, *Enrollment command*: a one-time token,
-   valid 30 minutes, for that node only.
-3. **On each database host** (as root): `dnf install ./minipgagent-*.rpm`, then the printed command:
+   watchers' certificates with the commands to copy them.
+2. **In the console**: *Add cluster* (admins only):
+
+   1. *Basics*: the name (part of the console's URLs; typed to confirm a switchover), the environment, where
+      automatic failover may go, self-fencing, and under *Advanced* the poll interval, failure threshold and lag
+      limit. *Allow two nodes on one host* is for labs only.
+   2. *Nodes*: each node's name, agent address (`https://host:port`, the address in its certificate), PostgreSQL
+      address and port (the node's own, never the VIP), data center and priority. At least two.
+   3. *Enroll*: one command per node — a one-time token, valid 30 minutes, for that node only — and whether each
+      node's agent answers yet.
+   4. *Checks*: across the nodes (every agent answers and is not bound elsewhere, one PostgreSQL major version,
+      at most one primary, one database, one node per host, clocks) and each node's own settings. A red line
+      blocks creation; yellow ones say what to do after it.
+   5. *Start*: *Adopt* if one node already runs as primary (the watchers record it and keep the replicas), or
+      *Build*: start the chosen node as primary, then re-initialize every other node from it with
+      `pg_basebackup` (nodes holding another database, such as a fresh `initdb`, are rebuilt too).
+   6. *Review*: type the cluster's name to create it. The console opens its Operations page.
+
+   A draft is kept in the watchers' state until created or discarded; the Fleet page lists it with *Continue*.
+   Clusters can still be defined under `bfm.clusters` in `watcher.yml` (§5.2) instead; those are changed there.
+3. **On each database host** (as root): `dnf install ./minipgagent-*.rpm`, then the command from step 3 of the
+   wizard:
 
    ```bash
    sudo minipgagent setup --enroll https://bfm.example.com:8443 --token 7Q2…Kx --fingerprint SHA256:4b:9e:…
@@ -56,6 +73,19 @@ PostgreSQL) still applies; the agent wizard checks it and offers the fixes.
      `bfm-make-certs` instead of the token.
    - `minipgagent remove <instance>` stops and disables the instance and sets its settings and sudo rule aside;
      PostgreSQL keeps running and can be handed back to its own service.
+
+4. **Later**, on a cluster made in the console, the Overview's *Cluster ▾* menu has:
+
+   - *Add node…*: the node's addresses, then its enrollment command. The watchers poll it at once; once its agent
+     runs it follows the primary, or is rewound or re-initialized from its menu (a node holding another database
+     is only ever re-initialized).
+   - *Detach…* (type the name): automatic failover is paused, the watchers stop, the primary gets a last lease
+     that never fences, and every agent forgets the cluster. PostgreSQL keeps running on every node and the event
+     log stays. Then `minipgagent remove` on each host, or add the nodes to another cluster with new enrollment
+     commands.
+
+   A node's menu has *Remove from the cluster…*: the watchers stop polling it and its agent forgets the cluster;
+   PostgreSQL keeps running. The same calls exist in the REST API (README, "REST API") for scripts.
 
 The rest of this guide is the manual way, and what the wizards do under the hood.
 
@@ -509,6 +539,13 @@ Ratis group, and only the Raft leader acts.
 Followers poll, publish what they see, show the console read-only and link to the leader through `url`. With
 `self-fence: true` a primary that stops getting lease renewals releases the VIP and stops PostgreSQL by itself,
 which is what makes a split brain impossible when the watchers cannot reach it.
+
+The three watchers run **every** cluster together: list them all under `bfm.clusters` in the same `watcher.yml`,
+or add them in the console. Each watcher runs an engine per cluster; the leader acts for all of them, and when it
+goes the new leader carries on for every cluster. The *Add cluster* wizard and the *Cluster ▾* menu work on the
+leader (a follower's page links to it); a cluster created there runs on all three watchers within seconds. The CA
+that signs agent certificates is kept in the shared state, encrypted with `secret.key` — one more reason the
+three watchers need the same `secret.key`.
 
 ---
 

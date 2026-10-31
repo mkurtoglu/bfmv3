@@ -75,8 +75,12 @@ public final class RemoveCommand {
         if (!unit.isEmpty()) {
             out.println("   then offer to enable " + unit + " again");
         }
-        out.println(" The watchers see the node as unreachable: take it out of the cluster (or detach the cluster)"
-                + " first, or expect alerts.");
+        if (Files.exists(host.path("/var/lib/minipgagent/" + instance).resolve("binding"))) {
+            out.println(" The watchers see the node as unreachable: take it out of the cluster (or detach the cluster)"
+                    + " first, or expect alerts.");
+        } else {
+            out.println(" It is bound to no cluster (detached, or taken out of its cluster): no watcher misses it.");
+        }
         if (host.dryRun) {
             out.println(" Dry run: nothing was changed.");
             return 0;

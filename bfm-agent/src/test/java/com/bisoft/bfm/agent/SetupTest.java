@@ -58,7 +58,11 @@ class SetupTest {
         Files.createDirectories(root.resolve("proc/4343"));
         // bi: stopped, port only in postgresql.conf
         file("/var/lib/postgresql/15/main/PG_VERSION", "15\n");
-        file("/var/lib/postgresql/15/main/postgresql.conf", "#port = 1\nport = 5434   # bi\n");
+        file("/var/lib/postgresql/15/main/postgresql.conf", "#port = 1\nport = 5434   # bi\n"
+                + "unix_socket_directories = '/run/bi, /tmp'\n");
+        // ...whose agent was taken off with "minipgagent remove": the folder kept for the record runs nothing
+        file("/etc/bfm/minipgagent/bi.removed-20261031-192111/agent.properties",
+                "node.name=bi-a1\npg.data=/var/lib/postgresql/15/main\n");
         file("/usr/pgsql-16/bin/pg_ctl", "");
 
         List<PgInstance> found = new Discovery(root, quietRunner()).find(List.of());
@@ -77,6 +81,8 @@ class SetupTest {
         assertEquals("?", bi.role());
         assertEquals("15", bi.major());
         assertNull(bi.binDir(), "no PostgreSQL 15 programs on this host");
+        assertEquals("/run/bi", bi.socketDir(), "a stopped server's socket comes from its settings");
+        assertNull(bi.managedBy(), "a removed agent instance manages nothing");
     }
 
     @Test
@@ -94,6 +100,9 @@ class SetupTest {
         assertEquals(6543, p.port());
         assertEquals("/run/pg", p.socketDir());
         assertEquals(5434, Discovery.portFromConf("port=5433\nport = '5434'\n"));
+        assertEquals("/tmp/pg", Discovery.socketDirFromConf("#unix_socket_directories = '/var/run/postgresql'\n"
+                + "unix_socket_directories = '@abstract, /tmp/pg,/run/postgresql'\n"));
+        assertEquals(null, Discovery.socketDirFromConf("#unix_socket_directories = '/tmp'\n"));
     }
 
     @Test

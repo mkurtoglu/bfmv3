@@ -21,9 +21,10 @@ final class NodeActions {
      * What the menu needs to know about the node.
      *
      * @param otherDatabase its agent is this cluster's, but its data directory holds another database
+     * @param remove        takes it out of a cluster created in the console, or null
      */
     record Node(String name, boolean isPrimary, boolean agentOnline, boolean runsAsReplica,
-                boolean noPrimaryRunning, boolean otherDatabase) {
+                boolean noPrimaryRunning, boolean otherDatabase, Runnable remove) {
     }
 
     private NodeActions() {
@@ -71,6 +72,10 @@ final class NodeActions {
                     text, "Start", true,
                     () -> start(() -> console.watcher().startPrimary(n.name(), user), n.name() + " as primary",
                             after)));
+        }
+        if (admin && n.remove() != null) {
+            MenuItem rm = sub.addItem("Remove from the cluster…", e -> n.remove().run());
+            rm.addClassName("pg-danger");
         }
         if (!admin) {
             MenuItem none = sub.addItem("Only admins can start operations");

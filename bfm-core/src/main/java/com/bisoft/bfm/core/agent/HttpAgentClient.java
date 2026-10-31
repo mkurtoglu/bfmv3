@@ -178,6 +178,17 @@ public class HttpAgentClient implements AgentClient {
         return command("/v1/slots/drop", body(epoch).put("name", name));
     }
 
+    @Override
+    public ApiResult unbind(long epoch) {
+        return command("/v1/unbind", body(epoch));
+    }
+
+    @Override
+    public JsonMap checks(List<java.util.Map<String, String>> peers, String systemIdentifier) {
+        return com.bisoft.bfm.common.json.Json.parseObject(call("POST", "/v1/checks", JsonMap.create()
+                .put("peers", peers).put("systemIdentifier", systemIdentifier), commandTimeout, false));
+    }
+
     private JsonMap body(long epoch) {
         JsonMap b = JsonMap.create().put("epoch", epoch);
         String id = clusterId;

@@ -500,6 +500,17 @@ public class AgentService {
     }
 
     /**
+     * Forgets the cluster this agent belongs to: its watchers detach the cluster and stop steering it. Only that
+     * cluster's watchers may ask (the binding check runs first). PostgreSQL and the VIP are not touched.
+     */
+    public ApiResult unbind(JsonMap body) {
+        accept(body);
+        String was = binding.clusterId();
+        binding.clear();
+        return ApiResult.ok(was == null ? "not bound" : "no longer bound to cluster " + was);
+    }
+
+    /**
      * The readiness checks of setup, live: {@code peers} ([{name, address}]) are the other nodes that must be able
      * to replicate from this one; {@code systemIdentifier} the cluster's. Read only.
      */

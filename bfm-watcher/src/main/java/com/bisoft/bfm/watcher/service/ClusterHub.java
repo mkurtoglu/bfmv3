@@ -6,6 +6,7 @@ import com.bisoft.bfm.core.agent.AgentClientFactory;
 import com.bisoft.bfm.core.config.NodeConfig;
 import com.bisoft.bfm.core.notify.NotificationDispatcher;
 import com.bisoft.bfm.core.notify.SecretBox;
+import com.bisoft.bfm.core.ops.OperationProgress;
 import com.bisoft.bfm.core.state.ClusterRegistry;
 import com.bisoft.bfm.core.state.ScopedStateStore;
 import com.bisoft.bfm.core.state.StateStore;
@@ -36,9 +37,17 @@ public final class ClusterHub implements AutoCloseable {
 
     private static final Logger LOG = Logger.getLogger(ClusterHub.class.getName());
 
-    /** One cluster as the console and the API see it. */
+    /**
+     * One cluster as the console and the API see it.
+     *
+     * @param source {@code file} (defined in watcher.yml, read only in the console) or {@code console}
+     */
     public record ClusterContext(String name, String id, String environment, Watcher watcher,
-                                 ConsoleService console, NotificationService notifications) {
+                                 ConsoleService console, NotificationService notifications, String source) {
+
+        public boolean fromConsole() {
+            return ClusterRegistry.CONSOLE.equals(source);
+        }
     }
 
     /** The cluster named in a request does not exist here. */
@@ -72,6 +81,8 @@ public final class ClusterHub implements AutoCloseable {
     private final ClusterRegistry registry;
     private final List<BfmProperties.Cluster> configured;
     private final Map<String, ClusterContext> contexts = new ConcurrentHashMap<>();
+    /** The spec version each console cluster's engine was built from. */
+    private final Map<String, Long> specVersions = new ConcurrentHashMap<>();
     private final ExecutorService mailExecutor = Executors.newSingleThreadExecutor(r -> daemon(r, "bfm-mail"));
     private ScheduledExecutorService resolver;
     private boolean poll;
@@ -95,16 +106,24 @@ public final class ClusterHub implements AutoCloseable {
         return t;
     }
 
-    /** Starts every engine's poll loop, now and as their clusters get registered. */
+    /**
+     * Starts every engine's poll loop, and keeps following the registry: clusters registered by the leader, created
+     * or changed in the console, or detached, get their engines started, rebuilt or stopped on every watcher.
+     */
     public synchronized void start() {
         poll = true;
         for (ClusterContext c : contexts.values()) {
             c.watcher().start();
         }
-        if (resolver == null && contexts.size() < configured.size()) {
+        if (resolver == null) {
             resolver = Executors.newSingleThreadScheduledExecutor(r -> daemon(r, "bfm-registry"));
-            resolver.scheduleWithFixedDelay(this::resolveSafely, 1, 1, TimeUnit.SECONDS);
+            resolver.scheduleWithFixedDelay(this::resolveSafely, 1, 2, TimeUnit.SECONDS);
         }
+    }
+
+    /** Follows the registry now (tests, and the console right after it changed a cluster). */
+    public void refresh() {
+        resolveSafely();
     }
 
     private void resolveSafely() {
@@ -156,10 +175,66 @@ public final class ClusterHub implements AutoCloseable {
                 ctx.watcher().start();
             }
         }
-        if (contexts.size() == configured.size() && resolver != null) {
-            resolver.shutdown();
-            resolver = null;
+        resolveConsoleClusters();
+    }
+
+    /** Engines for the clusters created in the console: started, rebuilt when their spec changed, stopped. */
+    private void resolveConsoleClusters() {
+        java.util.Set<String> fileNames = new java.util.HashSet<>(names(configured));
+        java.util.Set<String> active = new java.util.HashSet<>();
+        for (ClusterRegistry.Entry e : registry.all()) {
+            if (!e.console() || e.draft() || fileNames.contains(e.name())) {
+                continue;
+            }
+            StateStore.Versioned v = registry.spec(e.id());
+            if (v == null) {
+                continue;
+            }
+            active.add(e.name());
+            ClusterContext ctx = contexts.get(e.name());
+            if (ctx != null && ctx.id().equals(e.id()) && specVersions.getOrDefault(e.name(), -1L) == v.version()) {
+                continue;
+            }
+            if (ctx != null && ctx.watcher().operations().stream().anyMatch(OperationProgress.Snapshot::running)) {
+                continue; // rebuilt once its operation is over
+            }
+            com.bisoft.bfm.core.config.ClusterSpec spec = com.bisoft.bfm.core.config.ClusterSpec.fromJson(v.value());
+            if (spec.nodes().size() < 2) {
+                continue;
+            }
+            if (ctx != null) {
+                ctx.watcher().close();
+            }
+            ClusterContext built = build(e, spec);
+            contexts.put(e.name(), built);
+            specVersions.put(e.name(), v.version());
+            LOG.info("cluster " + e.name() + " (" + e.id() + ", created in the console): " + spec.nodes().size()
+                    + " nodes" + (ctx == null ? "" : ", rebuilt with its new settings"));
+            if (poll) {
+                built.watcher().start();
+            }
         }
+        for (ClusterContext c : new ArrayList<>(contexts.values())) {
+            if (c.fromConsole() && !active.contains(c.name())) {
+                c.watcher().close();
+                contexts.remove(c.name());
+                specVersions.remove(c.name());
+                LOG.info("cluster " + c.name() + " (" + c.id() + ") is no longer run here");
+            }
+        }
+    }
+
+    private static List<String> names(List<BfmProperties.Cluster> list) {
+        return list.stream().map(BfmProperties.Cluster::name).toList();
+    }
+
+    private ClusterContext build(ClusterRegistry.Entry e, com.bisoft.bfm.core.config.ClusterSpec spec) {
+        Watcher w = new Watcher(spec.toConfig(), new ScopedStateStore(root, e.id()), agents, time, root);
+        w.eventLog().addListener(new NotificationDispatcher(e.name(), w.store(), w.notificationSettings(), mail,
+                mailExecutor, time, props.zone()));
+        return new ClusterContext(e.name(), e.id(), spec.environment(), w,
+                new ConsoleService(w, spec.environment(), props.raft().peers()),
+                new NotificationService(w, secrets, mail, props.zone()), ClusterRegistry.CONSOLE);
     }
 
     /**
@@ -189,7 +264,8 @@ public final class ClusterHub implements AutoCloseable {
                 mailExecutor, time, props.zone()));
         ConsoleService console = new ConsoleService(w, c.environment(), props.raft().peers());
         NotificationService notifications = new NotificationService(w, secrets, mail, props.zone());
-        return new ClusterContext(c.name(), e.id(), c.environment(), w, console, notifications);
+        return new ClusterContext(c.name(), e.id(), c.environment(), w, console, notifications,
+                ClusterRegistry.FILE);
     }
 
     private static String blankToNull(String s) {
@@ -198,26 +274,41 @@ public final class ClusterHub implements AutoCloseable {
 
     // ---------------------------------------------------------------- lookups
 
-    /** Every configured cluster's name, in the order of the configuration. */
+    /** Every cluster's name: those of watcher.yml in its order, then those created in the console. */
     public List<String> names() {
-        return configured.stream().map(BfmProperties.Cluster::name).toList();
+        List<String> out = new ArrayList<>(names(configured));
+        contexts.values().stream().filter(ClusterContext::fromConsole).map(ClusterContext::name).sorted()
+                .forEach(out::add);
+        return out;
     }
 
     /** True when this watcher runs more than one cluster: the console shows the fleet and the switcher. */
     public boolean multi() {
-        return configured.size() > 1;
+        return names().size() > 1;
     }
 
-    /** The clusters whose engines run, in the order of the configuration. */
+    /** The clusters whose engines run, in the order of {@link #names()}. */
     public List<ClusterContext> clusters() {
         List<ClusterContext> out = new ArrayList<>();
-        for (BfmProperties.Cluster c : configured) {
-            ClusterContext ctx = contexts.get(c.name());
+        for (String n : names()) {
+            ClusterContext ctx = contexts.get(n);
             if (ctx != null) {
                 out.add(ctx);
             }
         }
         return out;
+    }
+
+    public ClusterRegistry registry() {
+        return registry;
+    }
+
+    public TimeSource time() {
+        return time;
+    }
+
+    public AgentClientFactory agents() {
+        return agents;
     }
 
     public Optional<ClusterContext> find(String name) {
@@ -243,32 +334,47 @@ public final class ClusterHub implements AutoCloseable {
 
     /** The cluster of a one-cluster watcher; requests that name no cluster use it. */
     public ClusterContext single() {
-        if (multi()) {
-            throw new ClusterRequiredException(names());
+        List<String> names = names();
+        if (names.size() > 1) {
+            throw new ClusterRequiredException(names);
         }
-        if (configured.isEmpty()) {
+        if (names.isEmpty()) {
             throw new UnknownClusterException("this watcher runs no cluster yet");
         }
-        return require(configured.get(0).name());
+        return require(names.get(0));
     }
 
     /** The environment configured for a cluster (shown before its engine runs too). */
     public String environment(String name) {
-        return configured.stream().filter(c -> c.name().equals(name)).map(BfmProperties.Cluster::environment)
+        ClusterContext c = contexts.get(name);
+        if (c != null) {
+            return c.environment();
+        }
+        return configured.stream().filter(x -> x.name().equals(name)).map(BfmProperties.Cluster::environment)
                 .findFirst().orElse(null);
     }
 
-    /** Every node of every configured cluster, for checks that span clusters. */
+    /** Every node of every running cluster, for checks that span clusters. */
     public List<NodeConfig> allNodes() {
         List<NodeConfig> out = new ArrayList<>();
-        for (BfmProperties.Cluster c : configured) {
-            out.addAll(BfmProperties.toClusterConfig(c).nodes());
+        for (ClusterContext c : clusters()) {
+            out.addAll(c.watcher().config().nodes());
         }
         return out;
     }
 
     public StateStore store() {
         return root;
+    }
+
+    /** This watcher's id ({@code bfm.watcher-id}). */
+    public String watcherId() {
+        return props.watcherId();
+    }
+
+    /** The watchers of the Raft group, with their consoles' URLs when configured. */
+    public List<BfmProperties.Peer> peers() {
+        return props.raft().peers();
     }
 
     @Override

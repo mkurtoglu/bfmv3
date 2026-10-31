@@ -74,14 +74,83 @@ public class EnrollmentService {
         return ca.exists();
     }
 
+    /**
+     * A cluster a token can be issued for: a running one, or a draft of the console's Add cluster wizard (its agents
+     * enroll before the cluster is created, bound to the id it will have).
+     */
+    record Target(String id, String name, String environment, List<NodeConfig> nodes,
+                  com.bisoft.bfm.core.event.EventLog events, String systemIdentifier) {
+
+        java.util.Optional<NodeConfig> node(String n) {
+            return nodes.stream().filter(x -> x.name().equals(n)).findFirst();
+        }
+    }
+
+    private Target target(ClusterContext c) {
+        return new Target(c.id(), c.name(), c.environment(), c.watcher().config().nodes(), c.watcher().eventLog(),
+                ClusterIdentity.systemIdentifier(c.watcher().store()));
+    }
+
+    /** A running cluster by name, or a draft. */
+    Target target(String name) {
+        ClusterContext c = hub.find(name).orElse(null);
+        if (c != null) {
+            return target(c);
+        }
+        ClusterRegistry.Entry e = hub.registry().find(name);
+        return e == null ? null : fromSpec(e);
+    }
+
+    private Target byId(String id) {
+        for (ClusterContext c : hub.clusters()) {
+            if (c.id().equals(id)) {
+                return target(c);
+            }
+        }
+        ClusterRegistry.Entry e = hub.registry().byId(id);
+        return e == null || !e.console() ? null : fromSpec(e);
+    }
+
+    private Target fromSpec(ClusterRegistry.Entry e) {
+        StateStore.Versioned v = hub.registry().spec(e.id());
+        if (v == null) {
+            return null;
+        }
+        com.bisoft.bfm.core.config.ClusterSpec spec = com.bisoft.bfm.core.config.ClusterSpec.fromJson(v.value());
+        List<NodeConfig> nodes = new ArrayList<>();
+        for (com.bisoft.bfm.core.config.ClusterSpec.NodeSpec n : spec.nodes()) {
+            if (n.agentUrl() != null && n.pgHost() != null) {
+                nodes.add(new NodeConfig(n.name(), n.agentUrl(), n.pgHost(), n.pgPort(), n.dc(), n.priority(),
+                        n.noFailover(), null));
+            }
+        }
+        StateStore scoped = new com.bisoft.bfm.core.state.ScopedStateStore(hub.store(), e.id());
+        return new Target(e.id(), e.name(), spec.environment(), nodes,
+                new com.bisoft.bfm.core.event.EventLog(scoped, time), ClusterIdentity.systemIdentifier(scoped));
+    }
+
     public Issued issue(ClusterContext c, String node, String user) {
+        return issue(target(c), node, user);
+    }
+
+    /** A token for a node of a running cluster or of a draft. */
+    public Issued issue(String cluster, String node, String user) {
+        Target t = target(cluster);
+        if (t == null) {
+            throw new IllegalArgumentException("no cluster named " + cluster);
+        }
+        return issue(t, node, user);
+    }
+
+    private Issued issue(Target c, String node, String user) {
         if (!ca.exists()) {
             throw new IllegalStateException("this watcher has no CA, so it cannot enroll agents; create one with"
                     + " 'bfm-watcher ca init' (or import yours with 'bfm-watcher ca import'), or give the node a"
                     + " certificate bundle from bfm-make-certs");
         }
-        NodeConfig n = c.watcher().config().node(node).orElseThrow(() ->
-                new IllegalArgumentException("cluster " + c.name() + " has no node " + node));
+        NodeConfig n = c.node(node).orElseThrow(() ->
+                new IllegalArgumentException("cluster " + c.name() + " has no node " + node + " (with an agent"
+                        + " address)"));
         byte[] raw = new byte[16];
         RANDOM.nextBytes(raw);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
@@ -94,7 +163,7 @@ public class EnrollmentService {
             throw new IllegalStateException("token collision; try again");
         }
         prune(now);
-        c.watcher().eventLog().publish(EventType.OPERATION, n.name(), "Enrollment token for " + n.name()
+        c.events().publish(EventType.OPERATION, n.name(), "Enrollment token for " + n.name()
                 + " issued by " + user + ", valid until " + Instant.ofEpochMilli(expires) + " (once)", user);
         return new Issued(c.name(), n.name(), token, expires, Keytool.fingerprint(ca.certificate()));
     }
@@ -118,7 +187,7 @@ public class EnrollmentService {
         if (rec.str("node") == null) {
             throw new EnrollmentException("unknown token (ask for a new one in the console)");
         }
-        ClusterContext c = hub.find(rec.str("cluster")).orElse(null);
+        Target c = byId(rec.str("clusterId"));
         String node = rec.requireStr("node");
         String host = (hostname == null || hostname.isBlank() ? "an unnamed host" : hostname.trim())
                 + (hostId == null || hostId.isBlank() ? "" : " (machine-id " + hostId.trim() + ")");
@@ -130,10 +199,10 @@ public class EnrollmentService {
             refuse(c, node, "an expired enrollment token for " + node + " was presented by " + host);
             throw new EnrollmentException("this token has expired; ask for a new one");
         }
-        if (c == null || !c.id().equals(rec.str("clusterId"))) {
+        if (c == null) {
             throw new EnrollmentException("the cluster of this token is no longer run by this watcher");
         }
-        NodeConfig n = c.watcher().config().node(node).orElseThrow(() ->
+        NodeConfig n = c.node(node).orElseThrow(() ->
                 new EnrollmentException("node " + node + " is no longer part of cluster " + c.name()));
         // Spend it before signing: a second use, even at the same moment, finds it used.
         if (!root.compareAndSet(key, v.version(), rec.put("usedAt", time.millis()).put("usedBy", host).toJson())) {
@@ -148,18 +217,18 @@ public class EnrollmentService {
             throw new EnrollmentException(e.getMessage());
         }
         X509Certificate leaf = Keytool.parse(chain).get(0);
-        c.watcher().eventLog().publish(EventType.OPERATION, node, node + " enrolled from " + host + "; its certificate"
+        c.events().publish(EventType.OPERATION, node, node + " enrolled from " + host + "; its certificate"
                 + " is valid until " + leaf.getNotAfter().toInstant() + " (" + Keytool.fingerprint(leaf) + ")",
                 "enrollment");
         List<Peer> peers = new ArrayList<>();
-        for (NodeConfig p : c.watcher().config().nodes()) {
+        for (NodeConfig p : c.nodes()) {
             if (!p.name().equals(node)) {
                 peers.add(new Peer(p.name(), p.pgHost(), p.pgPort()));
             }
         }
         return new Enrollment(c.id(), c.name(), c.environment(), n.name(), n.dc(), agent.getHost(),
                 agent.getPort() == -1 ? 8008 : agent.getPort(), n.pgHost(), n.pgPort(), peers,
-                ClusterIdentity.systemIdentifier(c.watcher().store()), chain, ca.certificatePem());
+                c.systemIdentifier(), chain, ca.certificatePem());
     }
 
     /** The certificate names a node needs: the agent URL's host, its PostgreSQL address and its host name. */
@@ -179,10 +248,9 @@ public class EnrollmentService {
         return String.join(",", out);
     }
 
-    private void refuse(ClusterContext c, String node, String message) {
+    private void refuse(Target c, String node, String message) {
         if (c != null) {
-            c.watcher().eventLog().publish(EventType.WRONG_IDENTITY, node, "Enrollment refused: " + message,
-                    "enrollment");
+            c.events().publish(EventType.WRONG_IDENTITY, node, "Enrollment refused: " + message, "enrollment");
         }
     }
 

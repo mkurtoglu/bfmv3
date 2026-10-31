@@ -315,11 +315,21 @@ public abstract class Operation implements Runnable {
 
     /** Makes sure the primary has a physical slot for every other node. */
     protected void ensureSlots(String primary, long epoch) {
+        ensureSlots(primary, epoch, null);
+    }
+
+    /**
+     * Makes sure the primary has a physical slot for every other node.
+     *
+     * @param rebuilt a node about to be re-initialized from the primary: it gets its slot even while its data
+     *                directory still holds another database, since pg_basebackup streams through that slot
+     */
+    protected void ensureSlots(String primary, long epoch, String rebuilt) {
         List<String> names = new ArrayList<>();
         java.util.Map<String, String> problems = ctx.identity().get().problems();
         for (NodeConfig n : ctx.cfg().nodes()) {
             // A slot nobody of this cluster uses would hold WAL on the primary for good.
-            if (!n.name().equals(primary) && !problems.containsKey(n.name())) {
+            if (!n.name().equals(primary) && (!problems.containsKey(n.name()) || n.name().equals(rebuilt))) {
                 names.add(n.slot());
             }
         }

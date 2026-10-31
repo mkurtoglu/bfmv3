@@ -14,6 +14,7 @@ import com.vaadin.flow.shared.Registration;
 import com.bisoft.bfm.common.Lsn;
 import com.bisoft.bfm.core.state.RoleChange;
 import com.bisoft.bfm.watcher.config.BfmProperties;
+import com.bisoft.bfm.watcher.service.ClusterWizardService;
 import com.bisoft.bfm.watcher.service.FleetService;
 import com.bisoft.bfm.watcher.service.FleetService.ClusterSummary;
 import com.bisoft.bfm.watcher.service.Terms;
@@ -31,17 +32,23 @@ import java.util.TreeSet;
 public class FleetView extends Div {
 
     private final FleetService fleet;
+    private final ClusterWizardService wizard;
+    private final boolean admin;
+    private final Div drafts = new Div();
     private final ZoneId zone;
     private final Grid<ClusterSummary> grid = new Grid<>();
     private final Select<String> environment = new Select<>();
     private final Div summary = Ui.div("pg-row");
-    private final com.vaadin.flow.component.html.Span empty = Ui.text("pg-empty", "This watcher runs no cluster yet."
-            + " Define clusters under bfm.clusters in watcher.yml and restart it.");
+    private final com.vaadin.flow.component.html.Span empty = Ui.text("pg-empty", "This watcher runs no cluster yet:"
+            + " add one here (Add cluster), or define it under bfm.clusters in watcher.yml.");
     private Registration poll;
 
-    public FleetView(FleetService fleet, BfmProperties props) {
+    public FleetView(FleetService fleet, BfmProperties props, ClusterWizardService wizard,
+                     com.vaadin.flow.spring.security.AuthenticationContext auth) {
         this.fleet = fleet;
         this.zone = props.zone();
+        this.wizard = wizard;
+        this.admin = auth.hasRole("ADMIN");
         addClassName("pg-page");
         H1 title = new H1("Fleet");
         title.addClassName("pg-title");
@@ -51,8 +58,17 @@ public class FleetView extends Div {
                 refresh();
             }
         });
+        Div right = Ui.div("pg-row", environment);
+        if (admin) {
+            com.vaadin.flow.component.button.Button addCluster = new com.vaadin.flow.component.button.Button(
+                    "Add cluster", com.vaadin.flow.component.icon.VaadinIcon.PLUS.create(),
+                    e -> com.vaadin.flow.component.UI.getCurrent().navigate("clusters/new"));
+            addCluster.addThemeVariants(com.vaadin.flow.component.button.ButtonVariant.LUMO_PRIMARY);
+            right.add(addCluster);
+        }
+        right.getStyle().set("align-items", "end");
         add(Ui.div("pg-spread", new Div(Ui.text("pg-eyebrow", "Every cluster this watcher runs, worst first"),
-                title), environment), summary);
+                title), right), summary, drafts);
 
         grid.addThemeVariants(GridVariant.LUMO_ROW_STRIPES, GridVariant.LUMO_WRAP_CELL_CONTENT);
         grid.setAllRowsVisible(true);
@@ -118,6 +134,7 @@ public class FleetView extends Div {
         grid.setItems(shown);
         grid.setVisible(!all.isEmpty());
         empty.setVisible(all.isEmpty());
+        renderDrafts();
 
         summary.removeAll();
         long healthy = all.stream().filter(s -> "Healthy".equals(s.health())).count();
@@ -125,6 +142,26 @@ public class FleetView extends Div {
         all.stream().map(ClusterSummary::health).filter(h -> !"Healthy".equals(h)).distinct().forEach(h ->
                 summary.add(Ui.chip(all.stream().filter(s -> s.health().equals(h)).count() + " "
                         + h.toLowerCase(), OverviewPage.healthTone(h))));
+    }
+
+    /** Clusters whose Add cluster wizard is not finished: anyone with admin rights may continue them. */
+    private void renderDrafts() {
+        drafts.removeAll();
+        List<ClusterWizardService.Draft> list = wizard.drafts();
+        if (list.isEmpty()) {
+            return;
+        }
+        Div card = Ui.card("Being created");
+        for (ClusterWizardService.Draft d : list) {
+            Div row = Ui.div("pg-spread", Ui.div("pg-row", Ui.text("pg-node-name", d.name()), Ui.text("pg-note",
+                    d.spec().nodes().size() + " nodes · drafted " + Ui.shortTime(d.createdMillis(), zone))));
+            if (admin) {
+                row.add(new Anchor("clusters/new/" + d.name() + "?step=" + (d.spec().nodes().size() < 2 ? 2 : 3),
+                        "Continue"));
+            }
+            card.add(row);
+        }
+        drafts.add(card);
     }
 
     @Override

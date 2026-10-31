@@ -261,7 +261,8 @@ class ReplicationPage extends Div {
         boolean runsAsReplica = "Streaming".equals(r.state()) || "Not streaming".equals(r.state());
         return NodeActions.menu(console, user, admin, new NodeActions.Node(r.node(), false, r.agentOnline(),
                 runsAsReplica, last != null && !last.primaryRunning(),
-                console.watcher().identity().foreignData().contains(r.node())), () -> toggle(r), this::refresh);
+                console.watcher().identity().foreignData().contains(r.node()), null), () -> toggle(r),
+                this::refresh);
     }
 
     // ---------------------------------------------------------------- refreshing

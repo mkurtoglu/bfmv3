@@ -70,9 +70,10 @@ class OverviewPage extends Div {
     private Grid.Column<NodeRow> actionsColumn;
     private Registration poll;
     private Overview last;
+    private final ClusterAdmin clusterAdmin;
 
     OverviewPage(ConsoleService console, NotificationService notifications, AuthenticationContext auth,
-                 ZoneId zone) {
+                 ZoneId zone, ClusterAdmin clusterAdmin) {
         this.console = console;
         this.notifications = notifications;
         this.admin = auth.hasRole("ADMIN");
@@ -85,7 +86,8 @@ class OverviewPage extends Div {
         String env = console.environment();
         Span eyebrow = Ui.text("pg-eyebrow", console.watcher().config().name()
                 + (env == null || env.isBlank() ? "" : " · " + Terms.capitalize(env)));
-        Div head = Ui.div("pg-spread", new Div(eyebrow, title), headStatus);
+        this.clusterAdmin = clusterAdmin;
+        Div head = Ui.div("pg-spread", new Div(eyebrow, title), Ui.div("pg-row", headStatus, manageMenu()));
         headStatus.addClassName("pg-row");
 
         buildGrid();
@@ -120,6 +122,27 @@ class OverviewPage extends Div {
     /** Another page of this cluster. */
     private String link(String page) {
         return ClusterRoutes.path(console.watcher().config().name(), page);
+    }
+
+    /** Add node and Detach, for a cluster created in the console; one defined in watcher.yml says so. */
+    private Component manageMenu() {
+        com.vaadin.flow.component.menubar.MenuBar mb = new com.vaadin.flow.component.menubar.MenuBar();
+        if (!admin) {
+            return mb;
+        }
+        mb.addThemeVariants(com.vaadin.flow.component.menubar.MenuBarVariant.LUMO_TERTIARY,
+                com.vaadin.flow.component.menubar.MenuBarVariant.LUMO_SMALL);
+        var root = mb.addItem("Cluster ▾");
+        var sub = root.getSubMenu();
+        if (clusterAdmin == null) {
+            var hint = sub.addItem("Defined in watcher.yml: change it there");
+            hint.setEnabled(false);
+            return mb;
+        }
+        sub.addItem("Add node…", e -> clusterAdmin.addNode());
+        var detach = sub.addItem("Detach…", e -> clusterAdmin.detach());
+        detach.addClassName("pg-danger");
+        return mb;
     }
 
     private static Span heading(String text) {
@@ -234,7 +257,9 @@ class OverviewPage extends Div {
         boolean noPrimaryRunning = last != null && last.nodes().stream().noneMatch(n -> "Primary".equals(n.role()));
         return NodeActions.menu(console, user, admin, new NodeActions.Node(r.name(), r.isPrimary(), r.agentOnline(),
                 "Replica".equals(r.role()), noPrimaryRunning,
-                console.watcher().identity().foreignData().contains(r.name())), () -> toggle(r), this::refresh);
+                console.watcher().identity().foreignData().contains(r.name()),
+                clusterAdmin == null || r.isPrimary() ? null : () -> clusterAdmin.removeNode(r.name(), null)),
+                () -> toggle(r), this::refresh);
     }
 
     private void renderNodeCards(Overview o) {

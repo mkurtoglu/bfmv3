@@ -497,6 +497,14 @@ public final class FakeCluster implements AgentClientFactory {
                 }
                 Node up = nodes.values().stream().filter(n -> n.host.equals(h)).findFirst().orElseThrow();
                 String id = UUID.randomUUID().toString();
+                if (slot != null && !up.slots.contains(slot)) {
+                    // pg_basebackup -S streams through the slot: without it, it stops at once.
+                    did("reinit from " + h + " failed: no slot " + slot);
+                    ops.put(id, new OperationStatus(id, "reinit", OperationStatus.State.FAILED,
+                            "pg_basebackup failed: replication slot \"" + slot + "\" does not exist", time.millis(),
+                            time.millis(), List.of()));
+                    return ApiResult.started(id, "reinit started");
+                }
                 vipHolder.remove(vip, name);
                 lsn = up.lsn;
                 timeline = up.timeline;
@@ -590,6 +598,18 @@ public final class FakeCluster implements AgentClientFactory {
                     slots.addAll(names);
                 }
                 return ApiResult.ok("slots present");
+            }
+        }
+
+        @Override
+        public ApiResult unbind(long e) {
+            synchronized (FakeCluster.this) {
+                reachable();
+                epoch(e);
+                boundCluster = null;
+                boundClusterName = null;
+                did("unbind");
+                return ApiResult.ok("unbound");
             }
         }
 

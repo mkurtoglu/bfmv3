@@ -63,4 +63,19 @@ public interface AgentClient {
     ApiResult ensureSlots(long epoch, List<String> names);
 
     ApiResult dropSlot(long epoch, String name);
+
+    /** Makes the agent forget its cluster (detach). Agents too old to know it refuse with 404. */
+    default ApiResult unbind(long epoch) {
+        throw new AgentCallException(node(), 404, "this agent cannot be unbound");
+    }
+
+    /**
+     * The agent's readiness checks ({@code POST /v1/checks}) for the given peers; read only.
+     *
+     * @param peers name and address of each other node
+     */
+    default com.bisoft.bfm.common.json.JsonMap checks(java.util.List<java.util.Map<String, String>> peers,
+                                                    String systemIdentifier) {
+        throw new AgentCallException(node(), 404, "this agent has no readiness checks");
+    }
 }

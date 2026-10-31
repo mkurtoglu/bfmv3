@@ -1287,6 +1287,57 @@ public class Watcher implements AutoCloseable {
         }
     }
 
+    /**
+     * The first half of detaching the cluster from its watchers, in the order that keeps everything running:
+     * pause automatic failover, stop this engine's loop (no more renewals or repairs), give the primary a last lease
+     * that never fences (so it does not stop itself when renewals stop, even with self-fencing on), and make every
+     * agent forget the cluster. PostgreSQL, the VIP and the data are not touched.
+     *
+     * @return one line per node: what its agent said
+     */
+    public synchronized List<String> detach(String user) {
+        requireLeader();
+        ClusterState st = readState();
+        if (st != null && st.operation() != null) {
+            throw new StateConflictException(st.operation().type() + " is running; detach when it is over");
+        }
+        if (roleOperationRunning()) {
+            throw new StateConflictException(roleOp.type() + " is running; detach when it is over");
+        }
+        if (st != null) {
+            setControls(false, true, null, null, user);
+        }
+        if (loop != null) {
+            loop.shutdownNow();
+            loop = null;
+        }
+        List<String> out = new ArrayList<>();
+        long epoch = st == null ? view.maxAgentEpoch() : st.epoch();
+        if (st != null && st.primary() != null) {
+            try {
+                agents.get(st.primary()).grantLease(epoch, cfg.timing().leaseTtlMs(), false);
+                out.add(st.primary() + ": last lease granted without fencing");
+            } catch (AgentCallException e) {
+                out.add(st.primary() + ": last lease not granted (" + e.detail() + ")");
+            }
+        }
+        for (AgentClient a : agents.values()) {
+            if (identity.problems().containsKey(a.node())) {
+                out.add(a.node() + ": left alone (" + identity.problem(a.node()) + ")");
+                continue;
+            }
+            try {
+                out.add(a.node() + ": " + a.unbind(epoch).message());
+            } catch (AgentCallException e) {
+                out.add(a.node() + ": not unbound (" + e.detail() + "); clear it there with 'minipgagent remove'"
+                        + " or by deleting its state.dir/binding");
+            }
+        }
+        events.publish(EventType.CONTROL_CHANGED, null, "Cluster " + cfg.name() + " detached from its watchers by "
+                + user + ": " + String.join("; ", out), user);
+        return out;
+    }
+
     /** Drops a physical slot on the primary. Slots of configured nodes are refused. */
     public void dropSlot(String slot, String user) {
         requireLeader();

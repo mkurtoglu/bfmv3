@@ -1,6 +1,5 @@
 package com.bisoft.bfm.watcher.ui;
 
-import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.dialog.Dialog;
@@ -12,7 +11,6 @@ import com.vaadin.flow.component.html.Pre;
 import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
-import com.vaadin.flow.server.VaadinRequest;
 import com.vaadin.flow.spring.security.AuthenticationContext;
 import com.bisoft.bfm.core.config.NodeConfig;
 import com.bisoft.bfm.watcher.config.BfmProperties;
@@ -150,29 +148,8 @@ public class CertificatesView extends Div {
 
     private void issue(NodeRow r) {
         EnrollmentService.Issued[] t = new EnrollmentService.Issued[1];
-        if (!Ui.attempt(() -> t[0] = enrollment.issue(hub.require(r.cluster()), r.node(), user))) {
-            return;
+        if (Ui.attempt(() -> t[0] = enrollment.issue(hub.require(r.cluster()), r.node(), user))) {
+            EnrollDialog.open(t[0], consoleTls, zone);
         }
-        VaadinRequest req = VaadinRequest.getCurrent();
-        String scheme = req != null && req.isSecure() ? "https://" : "http://";
-        String host = req == null || req.getHeader("Host") == null ? "localhost" : req.getHeader("Host");
-        String fp = consoleTls.fingerprint();
-        String command = "sudo minipgagent setup --enroll " + scheme + host + " --token " + t[0].token()
-                + (fp == null ? " --insecure-http" : " --fingerprint " + fp);
-        Dialog d = new Dialog();
-        d.setHeaderTitle("Enroll " + r.node() + " of " + r.cluster());
-        Pre pre = new Pre(command);
-        pre.addClassName("pg-mono");
-        pre.getStyle().set("white-space", "pre-wrap").set("word-break", "break-all");
-        d.add(Ui.text("pg-note", "Shown once. Valid until " + Ui.full(t[0].expiresAtMillis(), zone) + " "
-                + Ui.zone(zone) + "; the CA's fingerprint is " + t[0].caFingerprint() + "."), pre);
-        Button copy = new Button("Copy", e -> {
-            UI.getCurrent().getPage().executeJs("navigator.clipboard.writeText($0)", command);
-            Ui.ok("Copied");
-        });
-        copy.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        d.getFooter().add(new Button("Close", e -> d.close()), copy);
-        d.setWidth("min(720px, 95vw)");
-        d.open();
     }
 }

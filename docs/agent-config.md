@@ -61,7 +61,7 @@ pg.promote.timeout.seconds=60
 # Start a stopped replica when the agent comes up (never a primary). Off: the watcher starts it.
 pg.autostart.replica=false
 # Defaults; override only if your site starts PostgreSQL differently.
-#pg.start.command={bin}/pg_ctl -D {data} -l {state}/postgres-start.log -w -t {timeout} start
+#pg.start.command={bin}/pg_ctl -D {data} -l {state}/postgres-start.log -o -p{port} -w -t {timeout} start
 #pg.stop.command={bin}/pg_ctl -D {data} -m {mode} -w -t {timeout} stop
 #pg.status.command={bin}/pg_ctl -D {data} status
 
@@ -198,7 +198,7 @@ another cluster.
 | `pg.start.timeout.seconds` | `120` | Passed to `pg_ctl -t` for start and stop; the agent kills the command 15 s later. Raise it for a database with long crash recovery, and keep the watcher's `bfm.agent.command-timeout` above it. |
 | `pg.promote.timeout.seconds` | `60` | `pg_promote(true, N)`: how long the agent waits for the server to leave recovery. |
 | `pg.autostart.replica` | `false` | When the agent starts and finds PostgreSQL stopped, start it as a replica — only with `standby.signal` present, the node not fenced and no interrupted rewind or rebuild. A rebooted replica is then back without waiting for a watcher. A primary is never started this way. |
-| `pg.start.command` | `{bin}/pg_ctl -D {data} -l {state}/postgres-start.log -w -t {timeout} start` | How PostgreSQL is started. |
+| `pg.start.command` | `{bin}/pg_ctl -D {data} -l {state}/postgres-start.log -o -p{port} -w -t {timeout} start` | How PostgreSQL is started. `-p{port}` makes `pg.port` win over the `port` in the data directory's `postgresql.conf`, which a re-initialize copies from the primary (it may differ on a host that runs several instances). |
 | `pg.stop.command` | `{bin}/pg_ctl -D {data} -m {mode} -w -t {timeout} stop` | How it is stopped. |
 | `pg.status.command` | `{bin}/pg_ctl -D {data} status` | How "is it running" is answered. |
 

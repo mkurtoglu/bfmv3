@@ -108,7 +108,7 @@ public final class AgentConfig {
         pgUser = p.getProperty("pg.user", "postgres");
         pgDatabase = p.getProperty("pg.database", "postgres");
         pgStartCommand = p.getProperty("pg.start.command",
-                "{bin}/pg_ctl -D {data} -l {state}/postgres-start.log -w -t {timeout} start");
+                "{bin}/pg_ctl -D {data} -l {state}/postgres-start.log -o -p{port} -w -t {timeout} start");
         pgStopCommand = p.getProperty("pg.stop.command",
                 "{bin}/pg_ctl -D {data} -m {mode} -w -t {timeout} stop");
         pgStatusCommand = p.getProperty("pg.status.command", "{bin}/pg_ctl -D {data} status");

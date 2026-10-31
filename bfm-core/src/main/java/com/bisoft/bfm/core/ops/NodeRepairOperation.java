@@ -98,7 +98,7 @@ public final class NodeRepairOperation extends Operation {
         NodeConfig pc = node(primary);
         NodeConfig nc = node(node);
         progress.done("check", "primary " + primary + " runs; epoch " + epoch);
-        ensureSlots(primary, epoch);
+        ensureSlots(primary, epoch, kind == Kind.REINIT ? node : null);
 
         boolean ok = false;
         String last = null;

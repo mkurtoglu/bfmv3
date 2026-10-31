@@ -61,6 +61,7 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
 
     private final ClusterHub hub;
     private final FleetService fleet;
+    private final boolean admin;
     private final Span watchers = new Span();
     private final Span clusterName = Ui.text("pg-cluster-name", "");
     private final Span environment = new Span();
@@ -79,6 +80,7 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
     public MainLayout(ClusterHub hub, FleetService fleet, AuthenticationContext auth) {
         this.hub = hub;
         this.fleet = fleet;
+        this.admin = auth.hasRole("ADMIN");
         setPrimarySection(Section.NAVBAR);
 
         Div brandText = Ui.div("pg-brand-text", Ui.text("pg-brand-name", "BFM"),
@@ -99,7 +101,6 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
         health.addClassName("pg-health-chip");
         cluster.add(environment, health);
 
-        boolean admin = auth.hasRole("ADMIN");
         Span user = Ui.text("pg-note", auth.getPrincipalName().orElse("") + " · " + Terms.role(admin));
         user.addClassName("pg-wide-only");
         Button logout = new Button(VaadinIcon.SIGN_OUT.create(), e -> auth.logout());
@@ -159,6 +160,9 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
         }
         nav.addItem(new SideNavItem("Hosts", "hosts", VaadinIcon.SERVER.create()));
         nav.addItem(new SideNavItem("Agent certificates", "certificates", VaadinIcon.KEY.create()));
+        if (admin) {
+            nav.addItem(new SideNavItem("Add cluster", "clusters/new", VaadinIcon.PLUS_CIRCLE.create()));
+        }
         if (current == null) {
             return;
         }
@@ -267,9 +271,21 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
         } else {
             var peers = store.peers();
             var lead = store.leadership();
-            long fresh = current == null ? 10_000 : current.watcher().config().timing().observationFreshMs();
+            ClusterHub.ClusterContext any = current != null ? current
+                    : hub.clusters().stream().findFirst().orElse(null);
+            long fresh = any == null ? 10_000 : any.watcher().config().timing().observationFreshMs();
+            // Raft tells a follower only when it last heard from the leader; the other followers show up through
+            // the observations every watcher writes to the shared state.
+            Map<String, Long> seen = new java.util.HashMap<>();
+            if (any != null) {
+                for (com.bisoft.bfm.core.monitor.Observation o : any.watcher().observations()) {
+                    seen.put(o.watcherId(), o.timeMillis());
+                }
+            }
+            long now = System.currentTimeMillis();
             long up = peers.stream().filter(p -> p.self() || (p.lastContactMs() != null
-                    && p.lastContactMs() < fresh)).count();
+                    && p.lastContactMs() < fresh) || (seen.containsKey(p.id())
+                    && now - seen.get(p.id()) < fresh)).count();
             watchers.setText("Watchers " + up + "/" + peers.size() + " · leader "
                     + (lead.leaderId() == null ? "none" : lead.leaderId()));
         }

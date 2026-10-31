@@ -5,6 +5,7 @@ import com.bisoft.bfm.core.notify.SecretBox;
 import com.bisoft.bfm.watcher.config.BfmProperties;
 import com.bisoft.bfm.watcher.service.CaBootstrap;
 import com.bisoft.bfm.watcher.service.ClusterHub;
+import com.bisoft.bfm.watcher.service.ClusterWizardService;
 import com.bisoft.bfm.watcher.service.ConsoleTls;
 import com.bisoft.bfm.watcher.service.EnrollmentService;
 import com.bisoft.bfm.watcher.service.FleetService;
@@ -45,6 +46,11 @@ public class ApiWebConfig implements WebMvcConfigurer {
     @Bean
     public EnrollmentService enrollmentService(WatcherCa ca, TimeSource time) {
         return new EnrollmentService(hub, ca, time);
+    }
+
+    @Bean
+    public ClusterWizardService clusterWizardService(EnrollmentService enrollment) {
+        return new ClusterWizardService(hub, enrollment);
     }
 
     @Bean(destroyMethod = "close")

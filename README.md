@@ -127,15 +127,21 @@ The short version, with the wizards:
 
 1. **Watcher**: install the RPM and run `bfm-watcher setup` (as root). It asks for the watcher id, the console's
    names and port, the first admin and, for three watchers, the peers; it writes `/etc/bfm/watcher.yml`, the
-   console certificate and a CA (or uses your `bfm-make-certs` stores), and starts the service. Clusters go
-   under `bfm.clusters`.
-2. **Each database host**: install the `minipgagent` RPM; in the console, *Agent certificates* → *Enrollment
-   command* for the node, and run the printed `sudo minipgagent setup --enroll … --token … --fingerprint …` there.
+   console certificate and a CA (or uses your `bfm-make-certs` stores), and starts the service.
+2. **In the console**: *Add cluster* (name, environment, failover rules, then the nodes: agent address and
+   PostgreSQL address) prints one enrollment command per node. Clusters can also go under `bfm.clusters` in
+   `watcher.yml` instead; those are changed there.
+3. **Each database host**: install the `minipgagent` RPM and run the printed
+   `sudo minipgagent setup --enroll … --token … --fingerprint …` there.
    It finds the PostgreSQL instance, gets the node's certificate with the one-time token (the fingerprint proves
    it talks to your watcher), asks for the agent port and the VIP, checks PostgreSQL (with fixes it applies only
    after you confirm each one, never restarting PostgreSQL), shows every change, then writes the instance's
    settings, certificates and sudo rule and starts `minipgagent@<cluster>`. `--answers FILE` answers everything
    for Ansible; `--dry-run` shows the plan; `minipgagent remove <instance>` takes it off again.
+4. **Back in the console**, the wizard checks the nodes together (agents answer, one PostgreSQL major version, at
+   most one primary, one database, one node per host, clocks, each node's settings and `pg_hba.conf`) and creates
+   the cluster: *Adopt* records the running primary, *Build* starts the chosen node as primary and re-initializes
+   the others from it. You type the cluster's name to create it.
 
 Or by hand:
 
@@ -197,6 +203,15 @@ The console then adds a **Fleet** page (every cluster in one line, worst first),
 and cluster pages under `/c/<cluster>/...`. The **Hosts** page shows which instances of which clusters run on each
 server. A watcher with one cluster looks as before; its old addresses (`/`, `/replication`, ...) still work.
 
+Clusters can also be made in the console, without touching `watcher.yml`: **Add cluster** walks through
+basics, nodes, enrollment, checks, how to start (adopt the running primary, or build from one node) and a review
+where the name is typed. A half-done cluster stays as a draft on the Fleet page. A cluster made this way has a
+**Cluster ▾** menu on its Overview: **Add node…** (enrollment command; the node joins as a replica, re-initialized
+from its menu if it holds another database) and **Detach…** (failover paused, the primary gets a last lease that
+never fences, every agent forgets the cluster; PostgreSQL keeps running everywhere and the event log stays). A
+node's menu has **Remove from the cluster…**. Clusters from `watcher.yml` show these greyed out: they are changed
+there. With three watchers the wizards run on the leader; a follower's console links to it.
+
 Upgrading a one-cluster watcher keeps everything: on its first start the leading watcher moves the cluster's state
 and events under the cluster (keeping its id) and leaves the old keys for a downgrade.
 
@@ -222,6 +237,10 @@ The console works on a phone: node tables turn into cards and less important col
 Set `bfm.raft.enabled: true` and list the three (or five) watchers in `peers`. The Raft leader is the acting
 watcher; followers poll and publish what they see, show the console read-only and link to the leader. Watchers
 use the agent TLS stores between themselves (`raft.tls: true`). Self-fencing is recommended with Raft.
+One group runs every cluster: each watcher runs an engine per cluster, the leader acts for all of them, and when
+it goes the new leader carries on for every cluster. A cluster made in the leader's console runs on all
+watchers within seconds; copy `secret.key` to every watcher so any leader can use the stored CA and SMTP
+password.
 
 ### REST API
 
@@ -248,6 +267,14 @@ to the console's login page, so a monitoring script can rely on the status code.
 | `DELETE /api/v1/slots/{name}` | Drop an inactive slot that belongs to no node |
 | `GET/PUT /api/v1/notifications/...` , `POST /api/v1/notifications/test` | Mail settings and test mail |
 | `POST /api/v1/clusters/{cluster}/enrollments` | `{"node":"pg-b1"}`: a one-time enrollment token and the setup command (ADMIN) |
+| `GET /api/v1/drafts` / `POST /api/v1/drafts` | Clusters being created / `{"name":"bi","environment":"test"}` starts one (ADMIN) |
+| `PUT /api/v1/drafts/{name}` | Basics and nodes, any field left out keeps its value: `{"allowColocation":false,"nodes":[{"name":"bi-a1","agentUrl":"https://10.0.3.1:8008","pgHost":"10.0.3.1","pgPort":5432,"dc":"DC1"}]}` (port 5432, priority 100 by default) |
+| `POST /api/v1/drafts/{name}/enrollments` | `{"node":"bi-a1"}`: enrollment token and command for a node of the draft |
+| `GET /api/v1/drafts/{name}/checks` | The checks across the nodes and each node's own; `FAIL` blocks creation |
+| `POST /api/v1/drafts/{name}/create` | `{"mode":"ADOPT"}` or `{"mode":"BUILD","primary":"bi-a1"}`, with `"confirm":"bi"` |
+| `DELETE /api/v1/drafts/{name}` | Discard a draft; its agents forget it |
+| `POST /api/v1/clusters/{cluster}/nodes` / `DELETE .../nodes/{node}` | Add a node (answers its enrollment command) / take one out (console-made clusters) |
+| `DELETE /api/v1/clusters/{cluster}?confirm={cluster}` | Detach a console-made cluster |
 | `POST /api/v1/enroll` | What `minipgagent setup` calls: token + certificate request in, certificate and node settings out (no login; the token is the credential) |
 | `GET /api/v1/ca` / `POST /api/v1/ca` | The agents' CA; create one, or take over `ca.crt` + `ca.key` from `bfm-make-certs` (ADMIN) |
 
@@ -326,9 +353,10 @@ rejoin, a failover refused because the VIP cannot come up, and the retry once it
 
 - Several clusters can share servers (one agent instance per PostgreSQL instance,
   [docs/install.md §10](docs/install.md#10-several-clusters-on-one-host)) and one watcher (group) can run many of
-  them; clusters are defined in `watcher.yml` (creating them from the console is the next step of
-  [docs/design/multi-cluster.md](docs/design/multi-cluster.md)). One HTTP client serves every cluster's agents,
-  with the longest `agent-timeout` of them.
+  them, defined in `watcher.yml` or made in the console
+  ([docs/design/multi-cluster.md](docs/design/multi-cluster.md)). One HTTP client serves every cluster's agents,
+  with the longest `agent-timeout` of them. Per-cluster permissions are not there yet: ADMIN and VIEWER apply to
+  every cluster.
 - A primary whose PostgreSQL hangs but keeps its port open is not failed over automatically (replicas still
   reach it); the console shows it and an operator decides.
 - Wall clocks of the watchers should be in sync (NTP); Raft observations carry wall-clock times.
