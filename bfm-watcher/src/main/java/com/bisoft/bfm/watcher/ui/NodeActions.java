@@ -1,6 +1,5 @@
 package com.bisoft.bfm.watcher.ui;
 
-import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.contextmenu.SubMenu;
 import com.vaadin.flow.component.icon.VaadinIcon;
@@ -46,8 +45,8 @@ final class NodeActions {
             sub.addItem("Details", e -> details.run());
         }
         if (admin && !n.isPrimary()) {
-            sub.addItem("Switch over to " + n.name() + "…", e -> UI.getCurrent().navigate(SwitchoverView.class,
-                    new QueryParameters(Map.of("target", List.of(n.name())))));
+            sub.addItem("Switch over to " + n.name() + "…", e -> ClusterRoutes.go(console.watcher().config().name(),
+                    "switchover", new QueryParameters(Map.of("target", List.of(n.name())))));
             sub.addItem("Rejoin (pg_rewind)…", e -> Ui.confirmTyped(n.name(), "Rejoin " + n.name(),
                     n.name() + " is stopped, rewound with pg_rewind against the primary and started as a replica."
                             + " Its data directory is kept.", "Rejoin", false,

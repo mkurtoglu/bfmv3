@@ -20,7 +20,9 @@ import java.util.List;
  * @param watcherId this watcher's id; with Raft it must be one of the peers
  * @param dataDir   state, events, Raft log and {@code secret.key}
  * @param timeZone  zone used for times in the UI and in mails
- * @param cluster   the PostgreSQL cluster
+ * @param cluster   the PostgreSQL cluster, when the watcher runs one
+ * @param clusters  the PostgreSQL clusters, when it runs several (one console for all of them); {@code cluster}, if
+ *                  also given, comes first
  * @param agent     how to reach the agents
  * @param raft      optional three-watcher consensus
  * @param users     console and API users
@@ -31,12 +33,46 @@ public record BfmProperties(
         @DefaultValue("/var/lib/bfm-watcher") Path dataDir,
         String timeZone,
         Cluster cluster,
+        List<Cluster> clusters,
         @DefaultValue Agent agent,
         @DefaultValue Raft raft,
         List<User> users) {
 
     public BfmProperties {
         users = users == null ? List.of() : List.copyOf(users);
+        clusters = clusters == null ? List.of() : List.copyOf(clusters);
+    }
+
+    /** Every configured cluster: {@code bfm.cluster} first, then {@code bfm.clusters}. Names are checked. */
+    public List<Cluster> allClusters() {
+        List<Cluster> out = new ArrayList<>();
+        if (cluster != null && cluster.nodes() != null && !cluster.nodes().isEmpty()) {
+            out.add(cluster);
+        }
+        out.addAll(clusters);
+        if (out.isEmpty()) {
+            throw new IllegalStateException("no cluster configured: set bfm.cluster or bfm.clusters");
+        }
+        java.util.Set<String> names = new java.util.HashSet<>();
+        java.util.Map<String, String> urls = new java.util.HashMap<>();
+        for (Cluster c : out) {
+            if (c.name() == null || !c.name().matches("[A-Za-z0-9][A-Za-z0-9._-]{0,62}")) {
+                throw new IllegalStateException("cluster name '" + c.name() + "': use letters, digits, '.', '_' and"
+                        + " '-' (it is part of the console's URLs)");
+            }
+            if (!names.add(c.name())) {
+                throw new IllegalStateException("two clusters are named " + c.name());
+            }
+            for (Node n : c.nodes() == null ? List.<Node>of() : c.nodes()) {
+                String url = n.agentUrl() == null ? null : n.agentUrl().replaceAll("/+$", "").toLowerCase();
+                String other = url == null ? null : urls.put(url, c.name() + "/" + n.name());
+                if (other != null) {
+                    throw new IllegalStateException("agent-url " + n.agentUrl() + " is given for " + other + " and for "
+                            + c.name() + "/" + n.name() + ": one agent serves one node of one cluster");
+                }
+            }
+        }
+        return out;
     }
 
     public ZoneId zone() {
@@ -46,9 +82,12 @@ public record BfmProperties(
     /**
      * @param environment shown in the console header and on the login page so nobody mistakes one cluster's
      *                    console for another's: production, staging, test, development or any other word
+     * @param id          optional cluster id, the one its agents are bound to; set it when moving a cluster from
+     *                    another watcher (its Overview page shows the id), otherwise one is generated
      */
     public record Cluster(
             String name,
+            String id,
             String environment,
             @DefaultValue("DC_LOCAL") FailoverScope scope,
             @DefaultValue("false") boolean selfFence,
@@ -119,11 +158,13 @@ public record BfmProperties(
     }
 
     /**
-     * @param enabled run with three (or five) watchers in an Apache Ratis group
-     * @param peers   every watcher, this one included
-     * @param tls     use the agent TLS stores between watchers too
+     * @param enabled   run with three (or five) watchers in an Apache Ratis group
+     * @param peers     every watcher, this one included
+     * @param tls       use the agent TLS stores between watchers too
+     * @param groupName the Raft group's name; defaults to the first cluster's name
      */
-    public record Raft(@DefaultValue("false") boolean enabled, List<Peer> peers, @DefaultValue("true") boolean tls) {
+    public record Raft(@DefaultValue("false") boolean enabled, List<Peer> peers, @DefaultValue("true") boolean tls,
+                       String groupName) {
         public Raft {
             peers = peers == null ? List.of() : List.copyOf(peers);
         }
@@ -144,9 +185,24 @@ public record BfmProperties(
 
     public enum Role { ADMIN, VIEWER }
 
+    /** The first configured cluster (the only one in a single-cluster setup). */
     public ClusterConfig toClusterConfig() {
+        return toClusterConfig(allClusters().get(0));
+    }
+
+    /**
+     * The Raft group's name: {@code raft.group-name}, or the first cluster's name (what one-cluster watchers always
+     * used, so their Raft log stays theirs). Set it when the first cluster may change.
+     */
+    public String raftGroupName() {
+        return raft.groupName() != null && !raft.groupName().isBlank() ? raft.groupName()
+                : allClusters().get(0).name();
+    }
+
+    public static ClusterConfig toClusterConfig(Cluster cluster) {
         if (cluster == null || cluster.nodes() == null || cluster.nodes().isEmpty()) {
-            throw new IllegalStateException("bfm.cluster.nodes is not configured");
+            throw new IllegalStateException("nodes of cluster " + (cluster == null ? "?" : cluster.name())
+                    + " are not configured");
         }
         List<NodeConfig> nodes = new ArrayList<>();
         for (Node n : cluster.nodes()) {

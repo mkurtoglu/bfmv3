@@ -53,6 +53,26 @@ bfm:
         dc: DR
         no-failover: false                 # true: never promoted automatically, switchover still allowed
 
+  # Several clusters in one watcher (one console for all of them): list them here, each with the same settings
+  # as `cluster` above (nodes, timing, scope, ...); `cluster`, if also given, comes first. Names appear in URLs:
+  # letters, digits, '.', '_' and '-'. A cluster moved from another watcher keeps the id its agents are bound to
+  # (its old console shows it on the Overview page).
+  # clusters:
+  #   - name: crm
+  #     id: a5443743-ff8b-4a1f-b399-d9765c971c45
+  #     environment: production
+  #     nodes:
+  #       - name: crm-a1
+  #         agent-url: https://10.0.0.11:8009    # the second agent instance on that host
+  #         pg-host: 10.0.0.11
+  #         pg-port: 5433
+  #         dc: DC1
+  #       - name: crm-a2
+  #         agent-url: https://10.0.0.12:8009
+  #         pg-host: 10.0.0.12
+  #         pg-port: 5433
+  #         dc: DC1
+
   agent:
     tls:
       enabled: true
@@ -68,6 +88,7 @@ bfm:
   raft:
     enabled: false
     tls: true                            # watchers talk to each other with the agent TLS stores
+    # group-name: bfm                    # default: the first cluster's name; set it before reordering clusters
     peers:
       - id: w1
         host: 10.0.9.1

@@ -663,3 +663,10 @@ vaadin-menu-bar-item.pg-danger, vaadin-context-menu-item.pg-danger { color: var(
 @media (max-width: 760px) {
   .pg-wide-only { display: none; }
 }
+
+/* ---------------------------------------------------------------- fleet and hosts */
+.pg-host-name { font-weight: 700; font-size: 18px; color: var(--pg-ink); }
+.pg-switcher { --lumo-text-field-size: var(--lumo-size-s); }
+@media (max-width: 600px) {
+  .pg-switcher { width: 150px !important; }
+}

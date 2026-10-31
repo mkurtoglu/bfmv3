@@ -207,9 +207,9 @@ public final class RaftStateStore implements StateStore {
     }
 
     @Override
-    public List<String> events(int limit) {
+    public List<String> events(String log, int limit) {
         JsonMap r = Json.parseObject(stateMachine.read(Json.write(JsonMap.create().put("op", "events")
-                .put("limit", limit))));
+                .put("log", log).put("limit", limit))));
         return r.strList("events");
     }
 
@@ -239,8 +239,12 @@ public final class RaftStateStore implements StateStore {
     }
 
     @Override
-    public void appendEvent(String json) {
-        write(JsonMap.create().put("op", "event").put("json", json));
+    public void appendEvent(String log, String json) {
+        JsonMap c = JsonMap.create().put("op", "event").put("json", json);
+        if (log != null && !log.isEmpty()) {
+            c.put("log", log);
+        }
+        write(c);
     }
 
     // ---- leadership ----

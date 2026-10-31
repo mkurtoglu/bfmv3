@@ -64,13 +64,13 @@ final class TestStore implements StateStore {
     }
 
     @Override
-    public void appendEvent(String json) {
-        inner.appendEvent(json);
+    public void appendEvent(String log, String json) {
+        inner.appendEvent(log, json);
     }
 
     @Override
-    public List<String> events(int limit) {
-        return inner.events(limit);
+    public List<String> events(String log, int limit) {
+        return inner.events(log, limit);
     }
 
     @Override

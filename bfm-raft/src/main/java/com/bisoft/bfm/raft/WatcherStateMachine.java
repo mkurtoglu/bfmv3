@@ -36,7 +36,8 @@ import java.util.concurrent.CompletableFuture;
  * the Raft log; a compare-and-set is decided when the entry is applied, so every watcher reaches the same answer.
  *
  * <p>Commands: {@code {"op":"cas","key":k,"expected":n,"value":v}}, {@code {"op":"put","key":k,"value":v}},
- * {@code {"op":"event","json":e}}. Queries: {@code get}, {@code prefix}, {@code events}, {@code ping}.
+ * {@code {"op":"event","json":e,"log":l}} (no {@code log}: the default one). Queries: {@code get}, {@code prefix},
+ * {@code events} (with {@code log}), {@code ping}.
  */
 public class WatcherStateMachine extends BaseStateMachine {
 
@@ -47,7 +48,12 @@ public class WatcherStateMachine extends BaseStateMachine {
 
     private final SimpleStateMachineStorage storage = new SimpleStateMachineStorage();
     private final Map<String, Entry> data = new TreeMap<>();
-    private final Deque<String> events = new ArrayDeque<>();
+    /** Event logs by name; "" is the default one. */
+    private final Map<String, Deque<String>> logs = new TreeMap<>();
+
+    private Deque<String> log(String name) {
+        return logs.computeIfAbsent(name == null ? "" : name, k -> new ArrayDeque<>());
+    }
 
     @Override
     public void initialize(RaftServer server, RaftGroupId groupId, RaftStorage raftStorage) throws IOException {
@@ -76,7 +82,7 @@ public class WatcherStateMachine extends BaseStateMachine {
         }
         JsonMap root = Json.parseObject(Files.readString(f.toPath(), StandardCharsets.UTF_8));
         data.clear();
-        events.clear();
+        logs.clear();
         JsonMap keys = root.obj("keys");
         if (keys != null) {
             for (String k : keys.raw().keySet()) {
@@ -84,7 +90,13 @@ public class WatcherStateMachine extends BaseStateMachine {
                 data.put(k, new Entry(e.str("value"), e.lng("version", 1)));
             }
         }
-        events.addAll(root.strList("events"));
+        log("").addAll(root.strList("events"));
+        JsonMap named = root.obj("logs");
+        if (named != null) {
+            for (String name : named.raw().keySet()) {
+                log(name).addAll(named.strList(name));
+            }
+        }
         setLastAppliedTermIndex(snapshot.getTermIndex());
     }
 
@@ -96,7 +108,14 @@ public class WatcherStateMachine extends BaseStateMachine {
             last = getLastAppliedTermIndex();
             Map<String, Object> keys = new LinkedHashMap<>();
             data.forEach((k, v) -> keys.put(k, JsonMap.create().put("value", v.value()).put("version", v.version()).raw()));
-            json = Json.write(JsonMap.create().put("keys", keys).put("events", new ArrayList<>(events)));
+            Map<String, Object> named = new LinkedHashMap<>();
+            logs.forEach((name, events) -> {
+                if (!name.isEmpty()) {
+                    named.put(name, new ArrayList<>(events));
+                }
+            });
+            json = Json.write(JsonMap.create().put("keys", keys).put("events", new ArrayList<>(log("")))
+                    .put("logs", named));
         }
         if (last == null) {
             return -1; // nothing applied yet
@@ -148,6 +167,7 @@ public class WatcherStateMachine extends BaseStateMachine {
                 return reply(true, null);
             }
             case "event" -> {
+                Deque<String> events = log(c.str("log", ""));
                 events.addLast(c.str("json"));
                 while (events.size() > KEEP_EVENTS) {
                     events.removeFirst();
@@ -192,6 +212,7 @@ public class WatcherStateMachine extends BaseStateMachine {
             case "events" -> {
                 int limit = q.integer("limit", 100);
                 List<String> out = new ArrayList<>();
+                Deque<String> events = logs.getOrDefault(q.str("log", ""), new ArrayDeque<>());
                 Iterator<String> it = events.descendingIterator();
                 while (it.hasNext() && out.size() < limit) {
                     out.add(it.next());

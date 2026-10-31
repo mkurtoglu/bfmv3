@@ -14,7 +14,7 @@ bfm:
         pg-host: 10.0.0.1
         dc: DC1
       - name: pg-a2
-        agent-url: http://127.0.0.1:1
+        agent-url: http://127.0.0.1:2
         pg-host: 10.0.0.2
         dc: DC1
   agent:

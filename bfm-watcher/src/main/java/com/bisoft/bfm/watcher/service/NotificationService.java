@@ -8,28 +8,29 @@ import com.bisoft.bfm.core.notify.MailMessage;
 import com.bisoft.bfm.core.notify.NotificationDispatcher;
 import com.bisoft.bfm.core.notify.NotificationSettings;
 import com.bisoft.bfm.core.notify.SecretBox;
-import com.bisoft.bfm.watcher.config.BfmProperties;
 import com.bisoft.bfm.watcher.mail.MailNotifier;
-import org.springframework.stereotype.Service;
 
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/** Reads and changes the mail settings; the SMTP password is stored encrypted and never returned. */
-@Service
+/**
+ * Reads and changes one cluster's mail settings; the SMTP password is stored encrypted and never returned. The SMTP
+ * server is shared by every cluster of the watcher, recipients, rules and thresholds are the cluster's.
+ */
 public class NotificationService {
 
     private final Watcher watcher;
     private final SecretBox secrets;
     private final MailNotifier notifier;
-    private final BfmProperties props;
+    private final ZoneId zone;
 
-    public NotificationService(Watcher watcher, SecretBox secrets, MailNotifier notifier, BfmProperties props) {
+    public NotificationService(Watcher watcher, SecretBox secrets, MailNotifier notifier, ZoneId zone) {
         this.watcher = watcher;
         this.secrets = secrets;
         this.notifier = notifier;
-        this.props = props;
+        this.zone = zone;
     }
 
     /** SMTP settings as shown to users: the password only as "set" or not. */
@@ -135,7 +136,7 @@ public class NotificationService {
             to.add(r.address());
         }
         return new NotificationDispatcher(watcher.config().name(), watcher.store(), watcher.notificationSettings(),
-                notifier, Runnable::run, com.bisoft.bfm.core.TimeSource.SYSTEM, props.zone()).render(e, to);
+                notifier, Runnable::run, com.bisoft.bfm.core.TimeSource.SYSTEM, zone).render(e, to);
     }
 
     private void audit(String message, String actor) {

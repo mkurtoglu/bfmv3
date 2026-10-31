@@ -22,7 +22,7 @@ import java.util.TreeMap;
 
 /**
  * State for a single watcher, kept in {@code state.json} (rewritten atomically) and {@code events.jsonl}
- * (appended) under the data directory. The watcher is always the leader.
+ * (appended; {@code events-<log>.jsonl} for a named log) under the data directory. The watcher is always the leader.
  */
 public class LocalStateStore implements StateStore {
 
@@ -30,9 +30,9 @@ public class LocalStateStore implements StateStore {
 
     private final String selfId;
     private final Path stateFile;
-    private final Path eventsFile;
+    private final Path dataDir;
     private final Map<String, Versioned> data = new TreeMap<>();
-    private final Deque<String> events = new ArrayDeque<>();
+    private final Map<String, Deque<String>> logs = new java.util.HashMap<>();
 
     public LocalStateStore(String selfId, Path dataDir) {
         this.selfId = selfId;
@@ -42,7 +42,7 @@ public class LocalStateStore implements StateStore {
             throw new UncheckedIOException(e);
         }
         this.stateFile = dataDir.resolve("state.json");
-        this.eventsFile = dataDir.resolve("events.jsonl");
+        this.dataDir = dataDir;
         load();
     }
 
@@ -54,7 +54,7 @@ public class LocalStateStore implements StateStore {
     private LocalStateStore(String selfId) {
         this.selfId = selfId;
         this.stateFile = null;
-        this.eventsFile = null;
+        this.dataDir = null;
     }
 
     private void load() {
@@ -66,16 +66,6 @@ public class LocalStateStore implements StateStore {
                     for (String k : keys.raw().keySet()) {
                         JsonMap e = keys.obj(k);
                         data.put(k, new Versioned(e.str("value"), e.lng("version", 1)));
-                    }
-                }
-            }
-            if (Files.exists(eventsFile)) {
-                for (String line : Files.readAllLines(eventsFile, StandardCharsets.UTF_8)) {
-                    if (!line.isBlank()) {
-                        events.addLast(line);
-                        if (events.size() > KEEP_EVENTS) {
-                            events.removeFirst();
-                        }
                     }
                 }
             }
@@ -126,23 +116,64 @@ public class LocalStateStore implements StateStore {
     public synchronized void put(String key, String value) {
         Versioned cur = data.get(key);
         data.put(key, new Versioned(value, cur == null ? 1 : cur.version() + 1));
-        if (!key.startsWith("observation/")) {
+        if (!ephemeral(key)) {
             persist();
         }
     }
 
+    /** {@code events.jsonl} for the default log, {@code events-<log>.jsonl} for a named one. */
+    private Path eventsFile(String log) {
+        if (dataDir == null) {
+            return null;
+        }
+        if (!log.matches("[A-Za-z0-9._-]*")) {
+            throw new IllegalArgumentException("bad event log name " + log);
+        }
+        return dataDir.resolve(log.isEmpty() ? "events.jsonl" : "events-" + log + ".jsonl");
+    }
+
+    /** The log, read from its file the first time it is used. */
+    private Deque<String> log(String log) {
+        Deque<String> events = logs.get(log);
+        if (events != null) {
+            return events;
+        }
+        events = new ArrayDeque<>();
+        Path file = eventsFile(log);
+        if (file != null && Files.exists(file)) {
+            try {
+                for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+                    if (!line.isBlank()) {
+                        events.addLast(line);
+                        if (events.size() > KEEP_EVENTS) {
+                            events.removeFirst();
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException("cannot read " + file, e);
+            }
+        }
+        logs.put(log, events);
+        return events;
+    }
+
     @Override
-    public synchronized void appendEvent(String json) {
+    public synchronized void appendEvent(String log, String json) {
+        Deque<String> events = log(log);
         events.addLast(json);
         while (events.size() > KEEP_EVENTS) {
             events.removeFirst();
         }
-        if (eventsFile != null) {
+        Path file = eventsFile(log);
+        if (file != null) {
             try {
-                Files.writeString(eventsFile, json.replace('\n', ' ') + "\n", StandardCharsets.UTF_8,
+                Files.writeString(file, json.replace('\n', ' ') + "\n", StandardCharsets.UTF_8,
                         StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-                if (events.size() == KEEP_EVENTS && Files.size(eventsFile) > 8L * 1024 * 1024) {
-                    rewriteEvents();
+                if (events.size() == KEEP_EVENTS && Files.size(file) > 8L * 1024 * 1024) {
+                    Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+                    Files.write(tmp, events, StandardCharsets.UTF_8);
+                    Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
                 }
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
@@ -150,14 +181,9 @@ public class LocalStateStore implements StateStore {
         }
     }
 
-    private void rewriteEvents() throws IOException {
-        Path tmp = eventsFile.resolveSibling("events.jsonl.tmp");
-        Files.write(tmp, events, StandardCharsets.UTF_8);
-        Files.move(tmp, eventsFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-    }
-
     @Override
-    public synchronized List<String> events(int limit) {
+    public synchronized List<String> events(String log, int limit) {
+        Deque<String> events = log(log);
         List<String> out = new ArrayList<>(Math.min(limit, events.size()));
         Iterator<String> it = events.descendingIterator();
         while (it.hasNext() && out.size() < limit) {
@@ -186,13 +212,18 @@ public class LocalStateStore implements StateStore {
         // nothing to release
     }
 
+    /** Observations are rewritten every poll and mean nothing after a restart; they are kept in memory only. */
+    static boolean ephemeral(String key) {
+        return key.startsWith("observation/") || key.contains("/observation/");
+    }
+
     private void persist() {
         if (stateFile == null) {
             return;
         }
         Map<String, Object> keys = new LinkedHashMap<>();
         data.forEach((k, v) -> {
-            if (!k.startsWith("observation/")) {
+            if (!ephemeral(k)) {
                 keys.put(k, JsonMap.create().put("value", v.value()).put("version", v.version()).raw());
             }
         });

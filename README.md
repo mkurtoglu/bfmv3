@@ -171,9 +171,24 @@ Operator actions (console or API, ADMIN only, written to the event log with the 
   maintenance on or auto re-initialize on asks first, and so does the reverse while the primary is down (it starts
   a failover at once).
 
+### Several clusters, one console
+
+One watcher (or one Raft group) can run several clusters: list them under `bfm.clusters` instead of
+`bfm.cluster`. Each cluster gets its own engine (poll loop, failover decisions, operations), its own part of the
+shared state and its own event log; a failover in one never waits for another. The SMTP server is shared,
+recipients, rules and thresholds are each cluster's. Agents are bound to their cluster's id, so a cluster moved
+here from another watcher keeps that id: set `bfm.clusters[].id` to the id its old console showed.
+
+The console then adds a **Fleet** page (every cluster in one line, worst first), a cluster switcher in the header,
+and cluster pages under `/c/<cluster>/...`. The **Hosts** page shows which instances of which clusters run on each
+server. A watcher with one cluster looks as before; its old addresses (`/`, `/replication`, ...) still work.
+
+Upgrading a one-cluster watcher keeps everything: on its first start the leading watcher moves the cluster's state
+and events under the cluster (keeping its id) and leaves the old keys for a downgrade.
+
 ### Console
 
-Every page shows the cluster's name, its environment (`bfm.cluster.environment`; production gets a red bar) and
+Every cluster page shows the cluster's name, its environment (`environment`; production gets a red bar) and
 its health in the header. Light or dark follows the operating system, or what the operator picks in the header.
 The console works on a phone: node tables turn into cards and less important columns step aside.
 
@@ -185,6 +200,8 @@ The console works on a phone: node tables turn into cards and less important col
 | Operations | Running and finished operations with their steps, how long each step took, and the log |
 | Events | The event log, filterable by severity and text (`events?q=pg-a2`); a row opens to its full report |
 | Notifications | SMTP settings, recipients, alert thresholds (`512 KB`, `1 GB`), which events send mail, test mail; unsaved changes are marked |
+| Fleet (several clusters) | Every cluster: environment, health and why, primary and its host, replicas streaming, max lag, last role change (⚑ until acknowledged) |
+| Hosts | Every server the agents report (`/etc/machine-id`) with the instances on it; marks a cluster with more than one node on one host |
 
 ### Raft mode
 
@@ -194,7 +211,9 @@ use the agent TLS stores between themselves (`raft.tls: true`). Self-fencing is 
 
 ### REST API
 
-HTTP Basic with the console users; reads need any user, changes need ADMIN. Answers are always JSON, errors
+HTTP Basic with the console users; reads need any user, changes need ADMIN. Every call below exists for each
+cluster as `/api/v1/clusters/{cluster}/...` (for example `/api/v1/clusters/erp/switchover`); the short form
+`/api/v1/...` answers while the watcher runs one cluster, and 409 with the cluster names when it runs several. Answers are always JSON, errors
 included: 401 with a `WWW-Authenticate` header when credentials are missing or wrong, 403 when a viewer tries
 to change something, 409 when the cluster state does not allow it (`{"error":"..."}`, with `leader` when
 another watcher leads), 400 for a bad request and 502 when an agent cannot be reached. The API never redirects
@@ -202,7 +221,9 @@ to the console's login page, so a monitoring script can rely on the status code.
 
 | Call | Purpose |
 | --- | --- |
-| `GET /api/v1/cluster` | Overview: state, nodes, lag, lease, slots, watchers, `healthReasons`, `roleChange` |
+| `GET /api/v1/clusters` | Every cluster: health and reasons, primary and its host, replicas, lag, last role change |
+| `GET /api/v1/hosts` | Every host with the instances of every cluster on it |
+| `GET /api/v1/cluster` (`/api/v1/clusters/{cluster}`) | Overview: state, nodes, lag, lease, slots, watchers, `healthReasons`, `roleChange`, `clusterId` |
 | `GET /api/v1/role-change` / `POST /api/v1/role-change/acknowledge` | The last failover or switchover / mark it seen (ADMIN) |
 | `GET /api/v1/replication` | Replication: walsender rows, each replica's own view, slots, lag |
 | `GET /api/v1/events?limit=` / `GET /api/v1/operations[/{id}]` | Event log / operations with steps and log |
@@ -285,9 +306,11 @@ rejoin, a failover refused because the VIP cannot come up, and the retry once it
 
 ## Limits
 
-- One cluster per watcher (group). Run another watcher (group) for another cluster. Several clusters can share
-  servers (one agent instance per PostgreSQL instance, [docs/install.md §10](docs/install.md#10-several-clusters-on-one-host));
-  one console for many clusters is designed in [docs/design/multi-cluster.md](docs/design/multi-cluster.md).
+- Several clusters can share servers (one agent instance per PostgreSQL instance,
+  [docs/install.md §10](docs/install.md#10-several-clusters-on-one-host)) and one watcher (group) can run many of
+  them; clusters are defined in `watcher.yml` (creating them from the console is the next step of
+  [docs/design/multi-cluster.md](docs/design/multi-cluster.md)). One HTTP client serves every cluster's agents,
+  with the longest `agent-timeout` of them.
 - A primary whose PostgreSQL hangs but keeps its port open is not failed over automatically (replicas still
   reach it); the console shows it and an operator decides.
 - Wall clocks of the watchers should be in sync (NTP); Raft observations carry wall-clock times.

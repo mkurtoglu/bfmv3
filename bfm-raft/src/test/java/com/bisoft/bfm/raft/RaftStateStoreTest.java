@@ -160,9 +160,16 @@ class RaftStateStoreTest {
             await("a leader", () -> leader() != null);
             if (round == 0) {
                 assertTrue(leader().compareAndSet("cluster", 0, "{\"epoch\":5}"));
+                leader().appendEvent("{\"n\":0}");
+                leader().appendEvent("id-erp", "{\"n\":1}");
+                leader().appendEvent("id-crm", "{\"n\":2}");
                 stores.forEach(RaftStateStore::close);
             } else {
                 assertEquals("{\"epoch\":5}", leader().get("cluster").value());
+                await("events replayed", () -> !leader().events("id-erp", 5).isEmpty());
+                assertEquals(List.of("{\"n\":1}"), leader().events("id-erp", 5), "each cluster's own log");
+                assertEquals(List.of("{\"n\":2}"), leader().events("id-crm", 5));
+                assertEquals(List.of("{\"n\":0}"), leader().events(5));
             }
         }
     }

@@ -4,6 +4,7 @@ import com.bisoft.bfm.core.FakeCluster;
 import com.bisoft.bfm.core.ManualTime;
 import com.bisoft.bfm.core.TimeSource;
 import com.bisoft.bfm.core.Watcher;
+import com.bisoft.bfm.watcher.service.ClusterHub;
 import com.bisoft.bfm.core.agent.AgentClientFactory;
 import com.bisoft.bfm.core.event.EventType;
 import com.bisoft.bfm.core.state.LocalStateStore;
@@ -88,11 +89,15 @@ class ApiSecurityTest {
     MockMvc mvc;
 
     @Autowired
-    Watcher watcher;
+    ClusterHub hub;
+
+    private Watcher watcher() {
+        return hub.single().watcher();
+    }
 
     private void tick() {
         TIME.advance(2000);
-        watcher.tick();
+        watcher().tick();
     }
 
     @Test
@@ -135,7 +140,7 @@ class ApiSecurityTest {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"maintenance\":true}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.maintenance").value(true));
-        assertTrue(watcher.events(20).stream().anyMatch(e -> e.type() == EventType.CONTROL_CHANGED
+        assertTrue(watcher().events(20).stream().anyMatch(e -> e.type() == EventType.CONTROL_CHANGED
                 && "admin".equals(e.actor()) && e.message().contains("maintenance mode on")));
         mvc.perform(put("/api/v1/controls").with(httpBasic("admin", "admin-pw"))
                 .contentType(MediaType.APPLICATION_JSON).content("{\"maintenance\":false}")).andExpect(status().isOk());
@@ -145,10 +150,10 @@ class ApiSecurityTest {
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.type").value("SWITCHOVER"));
         long deadline = System.currentTimeMillis() + 10_000;
-        while (watcher.operations().get(0).running() && System.currentTimeMillis() < deadline) {
+        while (watcher().operations().get(0).running() && System.currentTimeMillis() < deadline) {
             Thread.sleep(5);
         }
-        assertEquals("pg-a2", watcher.state().primary());
+        assertEquals("pg-a2", watcher().state().primary());
         mvc.perform(get("/api/v1/operations").with(httpBasic("viewer", "viewer-pw")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].state").value("SUCCEEDED"))
@@ -188,7 +193,8 @@ class ApiSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.smtp.passwordSet").value(true))
                 .andExpect(jsonPath("$.smtp.passwordSecret").doesNotExist());
-        String stored = watcher.store().get("notifications").value();
+        String stored = hub.store().get("global/smtp").value();
+        assertTrue(stored.contains("smtp.example.com"), "one SMTP server for every cluster of the watcher");
         assertTrue(!stored.contains("s3cret"), "the SMTP password is stored encrypted");
     }
 }

@@ -1,6 +1,7 @@
 # Design: several clusters per server, and the installation wizards
 
-Status: **decided** (§13), being implemented in four phases (§12). Phase 1 (host safety) is done.
+Status: **decided** (§13), being implemented in four phases (§12). Phase 1 (host safety) and phase 2 (one watcher,
+many clusters) are done; clusters are defined in `watcher.yml` until the console wizards of phase 4.
 
 BFM today manages one PostgreSQL cluster per watcher, and its packages install one agent per server. This design
 lets one server carry several PostgreSQL clusters, lets one watcher (or one Raft group of three) run all of them
@@ -214,10 +215,16 @@ small cached summary per cluster that each engine refreshes once per poll.
 
 On the first start of the new version, when the store has the old single-cluster keys and no registry:
 
-1. create a registry entry for `bfm.cluster` with a new cluster id;
-2. copy `cluster`, `role-change`, `primary-position`, observations, events and notification settings under
-   `clusters/<id>/`; keep the old keys untouched (a downgrade still finds them);
-3. write `migrated-to-registry` with the version; the next start skips this.
+1. create a registry entry for the cluster that owns the old state (the only one configured, or the one whose
+   nodes include the primary that state records), keeping the cluster id from phase 1 so its agents stay bound;
+2. copy `cluster`, `role-change`, `primary-position`, the identity keys, events and notification settings under
+   `clusters/<id>/` (observations are rewritten every poll and are not copied); keep the old keys untouched (a
+   downgrade still finds them);
+3. write `migrated-to-registry`; the next start skips this. The registry entry is the commit point: a start that
+   stopped in between copies again and does not duplicate events.
+
+Clusters moved from other watchers take their ids from `bfm.clusters[].id`; a configured id that differs from the
+one registered stops the watcher with an error instead of steering a cluster under the wrong identity.
 
 With Raft, the leader runs the migration once; followers see it replicated. The console's single-cluster URLs
 (`/`, `/replication`, …) redirect to `/c/<name>/…` while there is exactly one cluster, so bookmarks keep working.

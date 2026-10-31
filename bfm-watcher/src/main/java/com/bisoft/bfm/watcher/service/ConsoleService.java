@@ -18,7 +18,6 @@ import com.bisoft.bfm.core.state.ClusterState;
 import com.bisoft.bfm.core.state.RoleChange;
 import com.bisoft.bfm.core.state.StateStore;
 import com.bisoft.bfm.watcher.config.BfmProperties;
-import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -27,16 +26,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** Builds the read models shown in the console and returned by the REST API. */
-@Service
+/** Builds the read models of one cluster shown in the console and returned by the REST API. */
 public class ConsoleService {
 
     private final Watcher watcher;
-    private final BfmProperties props;
+    private final String environment;
+    private final List<BfmProperties.Peer> peers;
 
-    public ConsoleService(Watcher watcher, BfmProperties props) {
+    public ConsoleService(Watcher watcher, String environment, List<BfmProperties.Peer> peers) {
         this.watcher = watcher;
-        this.props = props;
+        this.environment = environment;
+        this.peers = peers == null ? List.of() : List.copyOf(peers);
+    }
+
+    public String environment() {
+        return environment;
     }
 
     public Watcher watcher() {
@@ -176,7 +180,7 @@ public class ConsoleService {
         long now = System.currentTimeMillis();
         List<WatcherRow> watchers = new ArrayList<>();
         Map<String, String> urls = new HashMap<>();
-        for (BfmProperties.Peer p : props.raft().peers()) {
+        for (BfmProperties.Peer p : peers) {
             urls.put(p.id(), p.url());
         }
         for (StateStore.WatcherPeer w : watcher.peers()) {
@@ -216,7 +220,7 @@ public class ConsoleService {
                 st != null && st.autoFailover(), st != null && st.maintenance(), st != null && st.mailEnabled(),
                 st != null && st.autoReinit(), cfg.scope().name(), cfg.selfFence(), vipAddress, vipHolder, maxLag,
                 maxLagNode, maxDelay, lease, st == null ? null : st.operation(), rows, slots, watchers,
-                view.observedAtMillis(), props.cluster().environment(), reasons,
+                view.observedAtMillis(), environment, reasons,
                 lead.leader() ? watcher.failoverBlockedReason() : null, watcher.lastRoleChange(), controls(),
                 watcher.identity().clusterId(), watcher.identity().systemId());
     }

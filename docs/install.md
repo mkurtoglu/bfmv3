@@ -475,8 +475,26 @@ which is what makes a split brain impossible when the watchers cannot reach it.
 ## 10. Several clusters on one host
 
 One server can carry PostgreSQL instances of several clusters (say `erp` on port 5432 and `crm` on 5433), each
-with its own agent instance. Each cluster has its own watcher (or watcher group) for now; one watcher for many
-clusters is the next step of [the multi-cluster design](design/multi-cluster.md).
+with its own agent instance. One watcher (or watcher group) can run all of them, with one console: list them under
+`bfm.clusters` in `watcher.yml` (see `packaging/watcher.yml.example`). The console then shows a Fleet page and a
+cluster switcher; the Hosts page shows which instances share a server.
+
+```yaml
+bfm:
+  clusters:
+    - name: erp
+      environment: production
+      nodes: [ ... ]            # agent-url https://db01:8008, https://db02:8008
+    - name: crm
+      environment: production
+      nodes: [ ... ]            # agent-url https://db01:8009, https://db02:8009
+```
+
+**Moving clusters from separate watchers into one.** Each cluster's agents are bound to its cluster id. Note each
+cluster's id from its current console (Overview, below the topology), stop the old watchers, and give the ids in
+`bfm.clusters[].id`; the new watcher registers the clusters under those ids and the agents accept it. A watcher
+that ran one cluster can also simply be upgraded and given more clusters: it keeps its cluster's state, events and
+id. Two entries naming the same agent URL are refused at start.
 
 | What | `erp` on db01 | `crm` on db01 |
 | --- | --- | --- |

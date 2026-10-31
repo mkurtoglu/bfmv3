@@ -1,7 +1,6 @@
 package com.bisoft.bfm.watcher.api;
 
 import com.bisoft.bfm.core.NotLeaderException;
-import com.bisoft.bfm.core.Watcher;
 import com.bisoft.bfm.core.agent.AgentCallException;
 import com.bisoft.bfm.core.event.ClusterEvent;
 import com.bisoft.bfm.core.event.MailRule;
@@ -14,6 +13,8 @@ import com.bisoft.bfm.core.state.ClusterState;
 import com.bisoft.bfm.core.state.RoleChange;
 import com.bisoft.bfm.core.state.StateConflictException;
 import com.bisoft.bfm.core.state.StateUnavailableException;
+import com.bisoft.bfm.watcher.service.ClusterHub;
+import com.bisoft.bfm.watcher.service.ClusterHub.ClusterContext;
 import com.bisoft.bfm.watcher.service.ConsoleService;
 import com.bisoft.bfm.watcher.service.NotificationService;
 import org.springframework.http.HttpStatus;
@@ -35,63 +36,55 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * REST API, {@code /api/v1}. GET needs any user; everything that changes something needs ADMIN. Every change is
- * written to the event log with the user name.
+ * REST API of one cluster: {@code /api/v1/clusters/{cluster}/...}, and {@code /api/v1/...} while the watcher runs a
+ * single cluster (with several, those answer 409 with the cluster names). GET needs any user; everything that
+ * changes something needs ADMIN. Every change is written to the cluster's event log with the user name.
  */
 @RestController
-@RequestMapping("/api/v1")
+@RequestMapping({"/api/v1", "/api/v1/clusters/{cluster}"})
 public class ApiController {
-
-    private final Watcher watcher;
-    private final ConsoleService console;
-    private final NotificationService notifications;
-
-    public ApiController(Watcher watcher, ConsoleService console, NotificationService notifications) {
-        this.watcher = watcher;
-        this.console = console;
-        this.notifications = notifications;
-    }
 
     // ---- reads ----
 
     @GetMapping("/cluster")
-    public ConsoleService.Overview cluster() {
-        return console.overview();
+    public ConsoleService.Overview cluster(ClusterContext c) {
+        return c.console().overview();
     }
 
     @GetMapping("/replication")
-    public ConsoleService.Replication replication() {
-        return console.replication();
+    public ConsoleService.Replication replication(ClusterContext c) {
+        return c.console().replication();
     }
 
     @GetMapping("/events")
-    public List<ClusterEvent> events(@RequestParam(defaultValue = "100") int limit) {
-        return watcher.events(Math.min(Math.max(limit, 1), 1000));
+    public List<ClusterEvent> events(ClusterContext c, @RequestParam(defaultValue = "100") int limit) {
+        return c.watcher().events(Math.min(Math.max(limit, 1), 1000));
     }
 
     @GetMapping("/operations")
-    public List<OperationProgress.Snapshot> operations() {
-        return watcher.operations();
+    public List<OperationProgress.Snapshot> operations(ClusterContext c) {
+        return c.watcher().operations();
     }
 
     @GetMapping("/operations/{id}")
-    public ResponseEntity<OperationProgress.Snapshot> operation(@PathVariable String id) {
-        return watcher.operation(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
+    public ResponseEntity<OperationProgress.Snapshot> operation(ClusterContext c, @PathVariable String id) {
+        return c.watcher().operation(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping("/switchover/checks")
-    public List<PreCheck> checks(@RequestParam String target) {
-        return watcher.switchoverChecks(target);
+    public List<PreCheck> checks(ClusterContext c, @RequestParam String target) {
+        return c.watcher().switchoverChecks(target);
     }
 
     @GetMapping("/lag/{node}")
-    public List<LagHistory.Sample> lag(@PathVariable String node, @RequestParam(defaultValue = "30") int minutes) {
-        return watcher.lagHistory().series(node, Math.min(Math.max(minutes, 1), 60), System.currentTimeMillis());
+    public List<LagHistory.Sample> lag(ClusterContext c, @PathVariable String node,
+                                       @RequestParam(defaultValue = "30") int minutes) {
+        return c.watcher().lagHistory().series(node, Math.min(Math.max(minutes, 1), 60), System.currentTimeMillis());
     }
 
     @GetMapping("/notifications")
-    public NotificationService.SettingsView notificationSettings() {
-        return notifications.view();
+    public NotificationService.SettingsView notificationSettings(ClusterContext c) {
+        return c.notifications().view();
     }
 
     // ---- commands ----
@@ -101,88 +94,96 @@ public class ApiController {
     }
 
     @PostMapping("/switchover")
-    public ResponseEntity<OperationProgress.Snapshot> switchover(@RequestBody SwitchoverRequest r, Authentication a) {
+    public ResponseEntity<OperationProgress.Snapshot> switchover(ClusterContext c, @RequestBody SwitchoverRequest r,
+                                                                 Authentication a) {
         SwitchoverOperation.Options o = new SwitchoverOperation.Options(
                 r.checkpointFirst() == null || r.checkpointFirst(),
                 r.restartOldAsReplica() == null || r.restartOldAsReplica(),
                 r.mail() == null || r.mail());
-        return ResponseEntity.status(HttpStatus.ACCEPTED).body(watcher.switchover(r.target(), o, a.getName(),
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(c.watcher().switchover(r.target(), o, a.getName(),
                 r.confirm()));
     }
 
     @PostMapping("/nodes/{node}/rejoin")
-    public ResponseEntity<OperationProgress.Snapshot> rejoin(@PathVariable String node, Authentication a) {
-        return ResponseEntity.status(HttpStatus.ACCEPTED).body(watcher.rejoin(node, a.getName()));
+    public ResponseEntity<OperationProgress.Snapshot> rejoin(ClusterContext c, @PathVariable String node,
+                                                             Authentication a) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(c.watcher().rejoin(node, a.getName()));
     }
 
     @PostMapping("/nodes/{node}/reinit")
-    public ResponseEntity<OperationProgress.Snapshot> reinit(@PathVariable String node, Authentication a) {
-        return ResponseEntity.status(HttpStatus.ACCEPTED).body(watcher.reinit(node, a.getName()));
+    public ResponseEntity<OperationProgress.Snapshot> reinit(ClusterContext c, @PathVariable String node,
+                                                             Authentication a) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(c.watcher().reinit(node, a.getName()));
     }
 
     @PostMapping("/nodes/{node}/start-primary")
-    public ResponseEntity<OperationProgress.Snapshot> startPrimary(@PathVariable String node, Authentication a) {
-        return ResponseEntity.status(HttpStatus.ACCEPTED).body(watcher.startPrimary(node, a.getName()));
+    public ResponseEntity<OperationProgress.Snapshot> startPrimary(ClusterContext c, @PathVariable String node,
+                                                                   Authentication a) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(c.watcher().startPrimary(node, a.getName()));
     }
 
     /** The last failover or switchover; the console shows it until someone acknowledges it. 204 when none. */
     @GetMapping("/role-change")
-    public ResponseEntity<RoleChange> roleChange() {
-        RoleChange rc = watcher.lastRoleChange();
+    public ResponseEntity<RoleChange> roleChange(ClusterContext c) {
+        RoleChange rc = c.watcher().lastRoleChange();
         return rc == null ? ResponseEntity.noContent().build() : ResponseEntity.ok(rc);
     }
 
     @PostMapping("/role-change/acknowledge")
-    public RoleChange acknowledgeRoleChange(Authentication a) {
-        return watcher.acknowledgeRoleChange(a.getName());
+    public RoleChange acknowledgeRoleChange(ClusterContext c, Authentication a) {
+        return c.watcher().acknowledgeRoleChange(a.getName());
     }
 
     public record Controls(Boolean autoFailover, Boolean maintenance, Boolean mailEnabled, Boolean autoReinit) {
     }
 
     @PutMapping("/controls")
-    public ClusterState controls(@RequestBody Controls c, Authentication a) {
-        return watcher.setControls(c.autoFailover(), c.maintenance(), c.mailEnabled(), c.autoReinit(), a.getName());
+    public ClusterState controls(ClusterContext c, @RequestBody Controls body, Authentication a) {
+        return c.watcher().setControls(body.autoFailover(), body.maintenance(), body.mailEnabled(),
+                body.autoReinit(), a.getName());
     }
 
     @DeleteMapping("/slots/{name}")
-    public ResponseEntity<Void> dropSlot(@PathVariable String name, Authentication a) {
-        watcher.dropSlot(name, a.getName());
+    public ResponseEntity<Void> dropSlot(ClusterContext c, @PathVariable String name, Authentication a) {
+        c.watcher().dropSlot(name, a.getName());
         return ResponseEntity.noContent().build();
     }
 
     @PutMapping("/notifications/smtp")
-    public NotificationService.SettingsView smtp(@RequestBody NotificationService.SmtpChange c, Authentication a) {
-        notifications.saveSmtp(c, a.getName());
-        return notifications.view();
+    public NotificationService.SettingsView smtp(ClusterContext c, @RequestBody NotificationService.SmtpChange body,
+                                                 Authentication a) {
+        c.notifications().saveSmtp(body, a.getName());
+        return c.notifications().view();
     }
 
     @PutMapping("/notifications/recipients")
-    public NotificationService.SettingsView recipients(@RequestBody List<NotificationSettings.Recipient> r,
+    public NotificationService.SettingsView recipients(ClusterContext c,
+                                                       @RequestBody List<NotificationSettings.Recipient> r,
                                                        Authentication a) {
-        notifications.saveRecipients(r, a.getName());
-        return notifications.view();
+        c.notifications().saveRecipients(r, a.getName());
+        return c.notifications().view();
     }
 
     @PutMapping("/notifications/rules")
-    public NotificationService.SettingsView rules(@RequestBody Map<MailRule, NotificationSettings.Rule> r,
+    public NotificationService.SettingsView rules(ClusterContext c,
+                                                  @RequestBody Map<MailRule, NotificationSettings.Rule> r,
                                                   Authentication a) {
-        notifications.saveRules(r, a.getName());
-        return notifications.view();
+        c.notifications().saveRules(r, a.getName());
+        return c.notifications().view();
     }
 
     public record Thresholds(long lagAlertBytes, long slotAlertBytes) {
     }
 
     @PutMapping("/notifications/thresholds")
-    public NotificationService.SettingsView thresholds(@RequestBody Thresholds t, Authentication a) {
-        notifications.saveThresholds(t.lagAlertBytes(), t.slotAlertBytes(), a.getName());
-        return notifications.view();
+    public NotificationService.SettingsView thresholds(ClusterContext c, @RequestBody Thresholds t, Authentication a) {
+        c.notifications().saveThresholds(t.lagAlertBytes(), t.slotAlertBytes(), a.getName());
+        return c.notifications().view();
     }
 
     @PostMapping("/notifications/test")
-    public Map<String, Object> testMail(Authentication a) throws Exception {
-        return Map.of("sentTo", notifications.sendTest(a.getName()));
+    public Map<String, Object> testMail(ClusterContext c, Authentication a) throws Exception {
+        return Map.of("sentTo", c.notifications().sendTest(a.getName()));
     }
 
     // ---- errors ----
@@ -194,6 +195,19 @@ public class ApiController {
             body.put("leader", leader);
         }
         return ResponseEntity.status(status).body(body);
+    }
+
+    @ExceptionHandler(ClusterHub.UnknownClusterException.class)
+    public ResponseEntity<Map<String, Object>> unknownCluster(ClusterHub.UnknownClusterException e) {
+        return error(HttpStatus.NOT_FOUND, e.getMessage(), null);
+    }
+
+    @ExceptionHandler(ClusterHub.ClusterRequiredException.class)
+    public ResponseEntity<Map<String, Object>> clusterRequired(ClusterHub.ClusterRequiredException e) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", e.getMessage());
+        body.put("clusters", e.clusters());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
     }
 
     @ExceptionHandler(NotLeaderException.class)

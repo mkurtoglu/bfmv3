@@ -19,6 +19,9 @@
 #     LAB_VIP=192.168.0.60 LAB_DR_VIP=10.20.0.60 scripts/local-lab.sh up
 # A mistyped agent port: LAB_WRONG_AGENT=pg-dr1=18110 scripts/local-lab.sh restart-watcher points pg-dr1 at
 # another agent's port; the console shows it as "Wrong identity" and leaves it alone.
+# One watcher for both (the fleet console): stops each lab's own watcher and runs one for all of them, keeping the
+# cluster ids their agents are bound to:
+#   LAB=/tmp/bfm-lab-fleet LAB_FLEET="/tmp/bfm-lab /tmp/bfm-lab-crm" scripts/local-lab.sh fleet-up
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -227,6 +230,44 @@ vip_fail() {
   if [ "$mode" = on ]; then touch "$LAB/net/fail-add@$n"; else rm -f "$LAB/net/fail-add@$n"; fi
 }
 
+# One watcher for several labs: their cluster sections become bfm.clusters, each with the id its agents are bound
+# to (read from the first node's binding file), so nothing has to be re-bound.
+fleet_up() {
+  [ -n "${LAB_FLEET:-}" ] || die "set LAB_FLEET to the lab directories, for example \"/tmp/bfm-lab /tmp/bfm-lab-crm\""
+  [ -f "$WATCHER_JAR" ] || die "build first: mvn -DskipTests package"
+  local first_lab m first id
+  first_lab=$(echo "$LAB_FLEET" | awk '{print $1}')
+  mkdir -p "$LAB"
+  for m in $LAB_FLEET; do
+    [ -f "$m/watcher.yml" ] || die "$m is not a lab directory (no watcher.yml)"
+    [ -f "$m/watcher.pid" ] && kill "$(cat "$m/watcher.pid")" 2>/dev/null || true
+  done
+  sleep 2
+  {
+    printf 'server:\n  port: %s\nbfm:\n  watcher-id: w1\n  data-dir: %s/watcher\n  clusters:\n' \
+      "$CONSOLE_PORT" "$LAB"
+    for m in $LAB_FLEET; do
+      first=$(sed -n 's/^      - name: //p' "$m/watcher.yml" | head -1)
+      id=$(head -1 "$m/$first/state/binding" 2>/dev/null || true)
+      # "  cluster:" ... "  agent:" without those two lines, two spaces deeper, as one list item
+      sed -n '/^  cluster:/,/^  agent:/p' "$m/watcher.yml" | sed '1d;$d' | sed 's/^/  /' | while IFS= read -r line; do
+        if [ -n "${line##      name: *}" ] || [ -n "${done_first:-}" ]; then
+          printf '%s\n' "$line"
+        else
+          printf '    - name: %s\n' "${line#      name: }"
+          [ -n "$id" ] && printf '      id: %s\n' "$id"
+          done_first=1
+        fi
+      done
+    done
+    sed -n '/^  agent:/,$p' "$first_lab/watcher.yml"
+  } >"$LAB/watcher.yml"
+  nohup java -jar "$WATCHER_JAR" --spring.config.additional-location="file:$LAB/watcher.yml" \
+    >"$LAB/watcher.log" 2>&1 &
+  echo $! >"$LAB/watcher.pid"
+  echo "One watcher for $(echo "$LAB_FLEET" | wc -w) clusters on $CONSOLE (admin / $ADMIN_PW)."
+}
+
 down() {
   [ -f "$LAB/watcher.pid" ] && kill "$(cat "$LAB/watcher.pid")" 2>/dev/null || true
   for n in "${NODES[@]}"; do
@@ -244,6 +285,7 @@ case "${1:-}" in
   vip-fail) vip_fail "${2:-}" "${3:-}" ;;
   status) api "$CONSOLE/api/v1/cluster" ;;
   restart-watcher) restart_watcher ;;
+  fleet-up) fleet_up ;;
   down) down ;;
-  *) sed -n '2,20p' "$0"; exit 64 ;;
+  *) sed -n '2,23p' "$0"; exit 64 ;;
 esac

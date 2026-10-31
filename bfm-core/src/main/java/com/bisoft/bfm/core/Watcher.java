@@ -135,11 +135,20 @@ public class Watcher implements AutoCloseable {
     private final Map<String, String> lastProblem = new ConcurrentHashMap<>();
 
     public Watcher(ClusterConfig cfg, StateStore store, AgentClientFactory factory, TimeSource time) {
+        this(cfg, store, factory, time, null);
+    }
+
+    /**
+     * @param shared the watcher's whole store when {@code store} is one cluster's part of it: settings every
+     *               cluster shares (the SMTP server) live there; null when the watcher runs one cluster
+     */
+    public Watcher(ClusterConfig cfg, StateStore store, AgentClientFactory factory, TimeSource time,
+                   StateStore shared) {
         this.cfg = cfg;
         this.store = store;
         this.time = time;
         this.repo = new ClusterStateRepo(store);
-        this.notifications = new NotificationSettingsRepo(store);
+        this.notifications = new NotificationSettingsRepo(store, shared);
         this.events = new EventLog(store, time);
         this.actor = "watcher " + store.selfId();
         Map<String, AgentClient> a = new LinkedHashMap<>();

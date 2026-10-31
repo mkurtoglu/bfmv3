@@ -36,10 +36,24 @@ public interface StateStore extends AutoCloseable {
     /** Unconditional write, used for per-watcher observations. */
     void put(String key, String value);
 
-    void appendEvent(String json);
+    /** Appends to the default event log. */
+    default void appendEvent(String json) {
+        appendEvent("", json);
+    }
 
-    /** Newest first. */
-    List<String> events(int limit);
+    /** The default event log, newest first. */
+    default List<String> events(int limit) {
+        return events("", limit);
+    }
+
+    /**
+     * Appends to a named event log; each cluster of a watcher keeps its own, so a busy cluster never pushes another
+     * cluster's history out. {@code ""} is the default log.
+     */
+    void appendEvent(String log, String json);
+
+    /** A named event log, newest first. */
+    List<String> events(String log, int limit);
 
     Leadership leadership();
 
