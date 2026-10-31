@@ -1,0 +1,146 @@
+/* Style of the HTML guides made by scripts/docs-html.sh: the console's colors, readable on screen and on paper. */
+:root {
+  --bg: #F4F7EF;
+  --paper: #FFFFFF;
+  --ink: #1F2D3A;
+  --text: #34424F;
+  --muted: #5B6874;
+  --line: #E2E8DA;
+  --accent: #4E7D16;
+  --accent-ink: #355A0C;
+  --code-bg: #EEF2E8;
+  --pre-bg: #1F2D3A;
+  --pre-ink: #E8F0DD;
+  --th-bg: #F6FAF0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12181D;
+    --paper: #1A2229;
+    --ink: #EEF2EA;
+    --text: #D5DCD2;
+    --muted: #A3ADA6;
+    --line: #2E3A42;
+    --accent: #8CC152;
+    --accent-ink: #A9D676;
+    --code-bg: #24303A;
+    --pre-bg: #0D1216;
+    --pre-ink: #DDE8D3;
+    --th-bg: #202A31;
+  }
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body {
+  margin: 0;
+  font: 16px/1.6 "Plus Jakarta Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+.page {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 32px 24px 80px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #4E7D16;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.brand strong { color: var(--ink); font-size: 18px; letter-spacing: -0.01em; }
+article {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 40px 48px;
+}
+h1, h2, h3, h4 { color: var(--ink); line-height: 1.2; letter-spacing: -0.015em; }
+h1 { font-size: 40px; margin: 0 0 16px; font-weight: 800; }
+h2 {
+  font-size: 28px;
+  margin: 48px 0 16px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+  font-weight: 800;
+}
+h3 { font-size: 20px; margin: 32px 0 12px; }
+a { color: var(--accent-ink); text-underline-offset: 2px; }
+a:hover { color: var(--accent); }
+hr { display: none; }
+p, li { max-width: 78ch; }
+li { margin: 4px 0; }
+code {
+  font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  background: var(--code-bg);
+  padding: 1px 6px;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+pre {
+  background: var(--pre-bg);
+  color: var(--pre-ink);
+  padding: 16px 18px;
+  border-radius: 12px;
+  overflow-x: auto;
+  font-size: 14px;
+  line-height: 1.5;
+}
+pre code { background: none; padding: 0; color: inherit; font-size: inherit; overflow-wrap: normal; }
+.table-wrap { overflow-x: auto; margin: 16px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { background: var(--th-bg); color: var(--ink); font-weight: 700; font-size: 14px; }
+figure { margin: 20px 0 28px; }
+img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 2px 10px rgba(31, 45, 58, 0.08);
+  display: block;
+}
+figcaption { color: var(--muted); font-size: 14px; margin-top: 8px; }
+ul.task-list { list-style: none; padding-left: 4px; }
+ul.task-list li input { margin-right: 8px; }
+nav#TOC {
+  background: var(--th-bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin: 24px 0 8px;
+}
+nav#TOC::before { content: "Contents"; display: block; font-weight: 800; color: var(--ink); margin-bottom: 6px; }
+nav#TOC ul { margin: 0; padding-left: 20px; }
+nav#TOC > ul > li > ul { display: none; }
+.footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 24px; }
+@media (max-width: 900px) {
+  table { display: block; overflow-x: auto; }
+}
+@media (max-width: 700px) {
+  .page { padding: 16px 12px 48px; }
+  article { padding: 24px 18px; border-radius: 14px; }
+  h1 { font-size: 30px; }
+  h2 { font-size: 23px; }
+}
+@media print {
+  html, body { background: #FFFFFF; }
+  .page { max-width: none; padding: 0; }
+  article { border: none; padding: 0; }
+  h2 { break-before: page; border-top: none; }
+  figure, img, table, pre { break-inside: avoid; }
+  a { color: inherit; text-decoration: none; }
+}
