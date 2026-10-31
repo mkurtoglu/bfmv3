@@ -1,6 +1,6 @@
 # Design: several clusters per server, and the installation wizards
 
-Status: **proposal**, for review before implementation.
+Status: **decided** (§13), being implemented in four phases (§12).
 
 BFM today manages one PostgreSQL cluster per watcher, and its packages install one agent per server. This design
 lets one server carry several PostgreSQL clusters, lets one watcher (or one Raft group of three) run all of them
@@ -74,7 +74,7 @@ The design answers each:
 | Wrong certificate | The watcher checks that the agent's certificate names the node it expects (CN = node name, as `bfm-make-certs` and enrollment issue them). A port mix-up fails the TLS identity check before any command is sent. |
 | Shared state directory | The agent takes an exclusive `flock` on `state.dir/lock` at start and refuses to run if it is held: *"state directory /var/lib/minipgagent/erp is in use by PID 4711"*. |
 | Watchdog | A host-wide lock (`/run/minipgagent/watchdog.lock`). The second agent with `watchdog.enabled=true` refuses to start. The wizard turns the watchdog off when a host carries more than one instance. |
-| Primaries piled on one host | The agent reports its `hostId` and hostname; the console shows primaries per host and warns above a threshold (§7.3). An advisory **Balance** suggests switchovers; nothing moves on its own. |
+| Primaries piled on one host | The agent reports its `hostId` and hostname; the Hosts page shows which primaries share a host (§7.3). No warning is raised (decision 7); nothing moves on its own. |
 | Two nodes of one cluster on one host | The wizards refuse it unless *Allow co-location (lab only)* is ticked; the console marks such a cluster *No host redundancy*. |
 | Many rebuilds hitting one host's disks | Re-initialize and rejoin are queued per host (default: one at a time per host), visible in Operations. |
 
@@ -198,7 +198,6 @@ bfm:
       nodes: [ ... ]
   console:
     co-location: block            # block | warn: two nodes of one cluster on one host
-    primaries-per-host-warning: 2 # warn when a host holds more primaries than this
   rebuilds-per-host: 1            # concurrent re-initialize / rejoin per host
 ```
 
@@ -270,17 +269,16 @@ With Raft, the leader runs the migration once; followers see it replicated. The 
 
 ```
  Hosts
- db01  (machine-id 3f2a…)                                          ⚠ 2 primaries on this host
+ db01  (machine-id 3f2a…)                                           1 primary · 1 replica
    erp   pg-a1  PRIMARY   PG 5432  agent :8008  VIP 192.168.0.50
    crm   pg-b1  replica   PG 5433  agent :8009  VIP 192.168.0.60
-   → A crash of db01 fails over erp and crm at once.  [ Suggest balance ]
- db02
+ db02                                                                1 primary · 1 replica
    erp   pg-a2  replica   PG 5432  agent :8008
    crm   pg-b2  PRIMARY   PG 5433  agent :8009
 ```
 
-*Suggest balance* lists the switchovers that would leave at most the configured number of primaries per host; each
-one is started by hand on its own Switchover page, with its own checks and confirmation.
+The page shows the distribution and nothing more: no warning for primaries sharing a host (decision 7). Two nodes
+of the *same* cluster on one host are a different matter and are marked (§3).
 
 ### 7.4 API
 
@@ -462,7 +460,6 @@ Six steps, with a draft saved after each, so an installation spread over a day c
    | Replicas stream from the primary; slots possible | warn |
    | Clock difference under 2 s between agents and watcher | warn |
    | Free space for a re-initialize | warn |
-   | Primaries per host after creation within the configured limit | warn |
 
 5. **Start**: *Adopt* when one node already runs as primary (the watcher records it and creates the slots), or
    *Build* when none does (choose the primary: Start as primary, then Re-initialize the others, with live
@@ -515,21 +512,22 @@ each host. Typed confirmation with the cluster name; written to the event log.
 | **1. Host safety** | template unit and instance layout, state lock, watchdog host lock, binding with cluster id, system identifier guard, certificate name check, host id in status, docs for "several clusters per host" with one watcher per cluster | S–M | Several clusters per host become safe today, with one watcher per cluster |
 | **2. Multi-cluster watcher** | registry, engines, scoped store, migration, Fleet and Hosts pages, switcher, `/api/v1/clusters/…` | L | One console for every cluster |
 | **3. Terminal wizards** | `minipgagent setup` / `remove`, `bfm-watcher setup`, enrollment and the CA | M | No hand-edited files on the servers |
-| **4. Console wizards** | Add cluster, Add node, Detach, drafts, live checks, balance suggestions | M–L | Clusters created and grown from the console |
+| **4. Console wizards** | Add cluster, Add node, Detach, drafts, live checks | M–L | Clusters created and grown from the console |
 
 Phase 1 should come first whatever is decided about the rest: the gap in §3 exists as soon as two clusters share a
 host.
 
 ---
 
-## 13. Decisions needed
+## 13. Decisions
 
-| # | Question | Proposal |
+| # | Question | Decided |
 | --- | --- | --- |
 | 1 | Does the watcher hold the agents' CA (enrollment), or only the offline flow? | Enrollment by default, offline always available |
 | 2 | Two nodes of one cluster on one host | Blocked; *lab only* override |
 | 3 | One agent process per instance, or one per host | Per instance (§5.1) |
 | 4 | May the wizards change PostgreSQL settings and `pg_hba.conf`? | Yes, each change shown and confirmed; never a restart |
-| 5 | One watcher process for all clusters, or one per cluster | One (a `bfm-watcher@.service` per cluster stays possible for strict separation) |
+| 5 | One watcher process for all clusters, or one per cluster | One |
 | 6 | Per-cluster permissions in this work or later | Later; the shapes are ready (§8.4) |
-| 7 | Primaries-per-host warning threshold | 2 |
+| 7 | Warn when several primaries share a host? | No; the Hosts page shows the distribution only |
+| 8 | Scope | All four phases (§12) |
