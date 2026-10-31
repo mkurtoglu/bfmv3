@@ -15,6 +15,7 @@ import com.bisoft.bfm.agent.state.LeaseGuard;
 import com.bisoft.bfm.agent.state.Watchdog;
 import com.bisoft.bfm.agent.vip.VipManager;
 import com.bisoft.bfm.common.json.JsonMap;
+import com.bisoft.bfm.common.json.JsonWritable;
 import com.bisoft.bfm.common.model.AgentIdentity;
 import com.bisoft.bfm.common.model.ApiResult;
 import com.bisoft.bfm.common.model.NodeStatus;
@@ -22,6 +23,7 @@ import com.bisoft.bfm.common.model.OperationStatus;
 import com.bisoft.bfm.common.model.PgRole;
 
 import java.io.IOException;
+import java.util.List;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.net.Socket;
@@ -57,6 +59,7 @@ public class AgentService {
 
     private volatile PgSnapshot snapshot = PgSnapshot.stopped(ControlData.UNKNOWN, "not probed yet");
     private volatile boolean vipHeld;
+    private final Psql psql;
     private volatile String vipError;
     private volatile long probedAtNanos;
 
@@ -67,6 +70,7 @@ public class AgentService {
     public AgentService(AgentConfig cfg, ProcessRunner runner, LeaseGuard lease) throws IOException {
         this.cfg = cfg;
         Psql psql = new Psql(cfg, runner);
+        this.psql = psql;
         this.probe = new PgProbe(cfg, runner, psql);
         this.interrupted = new InterruptedOperation(cfg.stateDir);
         this.pg = new PgController(cfg, runner, psql, probe, interrupted);
@@ -493,6 +497,22 @@ public class AgentService {
             return null;
         });
         return ApiResult.ok("slot " + name + " dropped");
+    }
+
+    /**
+     * The readiness checks of setup, live: {@code peers} ([{name, address}]) are the other nodes that must be able
+     * to replicate from this one; {@code systemIdentifier} the cluster's. Read only.
+     */
+    public JsonWritable checks(JsonMap body) {
+        List<com.bisoft.bfm.agent.setup.Readiness.Peer> peers = new java.util.ArrayList<>();
+        for (JsonMap p : body.objList("peers", m -> m)) {
+            peers.add(new com.bisoft.bfm.agent.setup.Readiness.Peer(p.str("name", p.str("address")),
+                    p.requireStr("address")));
+        }
+        List<com.bisoft.bfm.agent.setup.Readiness.Check> list = com.bisoft.bfm.agent.setup.Readiness.run(
+                sql -> psql.query(sql, 10), body.str("replicationUser", cfg.replicationUser), peers,
+                body.str("systemIdentifier"), cfg.pgData.toString());
+        return () -> java.util.Map.of("checks", list.stream().map(c -> c.toJsonValue()).toList());
     }
 
     public OperationStatus operation(String id) {

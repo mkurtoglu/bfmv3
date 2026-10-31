@@ -40,6 +40,7 @@ Requires:       java-21-headless
 Requires:       iproute
 Requires:       iputils
 Requires:       sudo
+Requires:       util-linux
 Requires:       systemd
 Requires(pre):  shadow-utils
 
@@ -190,5 +191,6 @@ systemctl daemon-reload >/dev/null 2>&1 || :
 %changelog
 * Sat Oct 31 2026 BFM <bfm@localhost> - 0.1.0-2
 - minipgagent@.service for several PostgreSQL instances per host; agents bind to one cluster
+- minipgagent setup / remove and bfm-watcher setup; enrollment with one-time tokens
 * Wed Oct 28 2026 BFM <bfm@localhost> - 0.1.0-1
 - First packages: agent and watcher for Rocky / RHEL 8 and 9

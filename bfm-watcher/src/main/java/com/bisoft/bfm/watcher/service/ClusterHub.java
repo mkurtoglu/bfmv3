@@ -167,6 +167,9 @@ public final class ClusterHub implements AutoCloseable {
      * primary that state records.
      */
     private String legacyOwner() {
+        if (configured.isEmpty()) {
+            return null;
+        }
         if (configured.size() == 1) {
             return configured.get(0).name();
         }
@@ -242,6 +245,9 @@ public final class ClusterHub implements AutoCloseable {
     public ClusterContext single() {
         if (multi()) {
             throw new ClusterRequiredException(names());
+        }
+        if (configured.isEmpty()) {
+            throw new UnknownClusterException("this watcher runs no cluster yet");
         }
         return require(configured.get(0).name());
     }

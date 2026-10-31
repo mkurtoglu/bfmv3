@@ -35,6 +35,8 @@ public class FleetView extends Div {
     private final Grid<ClusterSummary> grid = new Grid<>();
     private final Select<String> environment = new Select<>();
     private final Div summary = Ui.div("pg-row");
+    private final com.vaadin.flow.component.html.Span empty = Ui.text("pg-empty", "This watcher runs no cluster yet."
+            + " Define clusters under bfm.clusters in watcher.yml and restart it.");
     private Registration poll;
 
     public FleetView(FleetService fleet, BfmProperties props) {
@@ -80,7 +82,7 @@ public class FleetView extends Div {
         Ui.hideBelow(grid, 900, env, lag, change);
         Ui.hideBelow(grid, 600, replicas);
         Div card = Ui.card(null);
-        card.add(grid, Ui.text("pg-note", "⚑ not acknowledged yet. Hover a state for its reasons."));
+        card.add(empty, grid, Ui.text("pg-note", "⚑ not acknowledged yet. Hover a state for its reasons."));
         add(card);
         refresh();
     }
@@ -114,6 +116,8 @@ public class FleetView extends Div {
         List<ClusterSummary> shown = all.stream().filter(s -> filter == null || filter.startsWith("All")
                 || filter.equalsIgnoreCase(s.environment())).toList();
         grid.setItems(shown);
+        grid.setVisible(!all.isEmpty());
+        empty.setVisible(all.isEmpty());
 
         summary.removeAll();
         long healthy = all.stream().filter(s -> "Healthy".equals(s.health())).count();

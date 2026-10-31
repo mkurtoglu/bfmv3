@@ -171,6 +171,21 @@ class MultiClusterApiTest {
                 .andExpect(jsonPath("$[0].instances.length()").value(2))
                 .andExpect(jsonPath("$[0].sameCluster.length()").value(0));
 
+        // Enrollment: issuing a token needs ADMIN; spending it needs no login, only the token, and works once.
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
+                        "/api/v1/clusters/crm/enrollments").with(httpBasic("viewer", "viewer-pw"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"node\":\"crm-a2\"}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
+                        "/api/v1/clusters/crm/enrollments").with(httpBasic("admin", "admin-pw"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"node\":\"crm-a2\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error", containsString("no CA")));
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/enroll")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"token\":\"nope\",\"csr\":\"x\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error", containsString("unknown token")));
+
         // A failover in one cluster does not touch the other.
         CLUSTER.crash("erp-a1");
         for (int i = 0; i < 6; i++) {

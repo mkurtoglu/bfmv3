@@ -154,10 +154,11 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
     private void buildNav() {
         navBuilt = true;
         nav.removeAll();
-        if (hub.multi()) {
+        if (hub.names().size() != 1) {
             nav.addItem(new SideNavItem("Fleet", "fleet", VaadinIcon.GRID_BIG.create()));
         }
         nav.addItem(new SideNavItem("Hosts", "hosts", VaadinIcon.SERVER.create()));
+        nav.addItem(new SideNavItem("Agent certificates", "certificates", VaadinIcon.KEY.create()));
         if (current == null) {
             return;
         }

@@ -7,7 +7,10 @@ import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.logging.Logger;
 
-/** {@code java -jar minipgagent.jar /etc/bfm/minipgagent/agent.properties} */
+/**
+ * {@code java -jar minipgagent.jar /etc/bfm/minipgagent/agent.properties}, or the setup commands:
+ * {@code minipgagent setup ...} and {@code minipgagent remove <instance>}.
+ */
 public final class AgentMain {
 
     public static final String VERSION = "0.1.0";
@@ -19,6 +22,16 @@ public final class AgentMain {
     public static void main(String[] args) throws Exception {
         if (System.getProperty("java.util.logging.SimpleFormatter.format") == null) {
             System.setProperty("java.util.logging.SimpleFormatter.format", "%1$tF %1$tT %4$s %3$s - %5$s%6$s%n");
+        }
+        if (args.length > 0 && args[0].equals("setup")) {
+            System.exit(com.bisoft.bfm.agent.setup.SetupCommand.main(java.util.Arrays.copyOfRange(args, 1,
+                    args.length)));
+            return;
+        }
+        if (args.length > 0 && args[0].equals("remove")) {
+            System.exit(com.bisoft.bfm.agent.setup.RemoveCommand.main(java.util.Arrays.copyOfRange(args, 1,
+                    args.length)));
+            return;
         }
         Path config = Path.of(args.length > 0 ? args[0] : "/etc/bfm/minipgagent/agent.properties");
         AgentConfig cfg = AgentConfig.load(config);

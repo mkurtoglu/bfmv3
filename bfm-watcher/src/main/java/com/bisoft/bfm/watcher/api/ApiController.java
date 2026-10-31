@@ -16,6 +16,8 @@ import com.bisoft.bfm.core.state.StateUnavailableException;
 import com.bisoft.bfm.watcher.service.ClusterHub;
 import com.bisoft.bfm.watcher.service.ClusterHub.ClusterContext;
 import com.bisoft.bfm.watcher.service.ConsoleService;
+import com.bisoft.bfm.watcher.service.ConsoleTls;
+import com.bisoft.bfm.watcher.service.EnrollmentService;
 import com.bisoft.bfm.watcher.service.NotificationService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -43,6 +45,14 @@ import java.util.Map;
 @RestController
 @RequestMapping({"/api/v1", "/api/v1/clusters/{cluster}"})
 public class ApiController {
+
+    private final EnrollmentService enrollment;
+    private final ConsoleTls consoleTls;
+
+    public ApiController(EnrollmentService enrollment, ConsoleTls consoleTls) {
+        this.enrollment = enrollment;
+        this.consoleTls = consoleTls;
+    }
 
     // ---- reads ----
 
@@ -186,6 +196,32 @@ public class ApiController {
         return Map.of("sentTo", c.notifications().sendTest(a.getName()));
     }
 
+    public record EnrollmentRequest(String node) {
+    }
+
+    /**
+     * A one-time enrollment token for a node (ADMIN). The answer carries the command to run on the node's host,
+     * with the console's address and its certificate fingerprint.
+     */
+    @PostMapping("/enrollments")
+    public ResponseEntity<Map<String, Object>> enrollment(ClusterContext c, @RequestBody EnrollmentRequest r,
+                                                          Authentication a,
+                                                          jakarta.servlet.http.HttpServletRequest request) {
+        EnrollmentService.Issued t = enrollment.issue(c, r.node(), a.getName());
+        String base = request.getScheme() + "://" + request.getServerName() + ":" + request.getServerPort();
+        String fp = consoleTls.fingerprint();
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("cluster", t.cluster());
+        out.put("node", t.node());
+        out.put("token", t.token());
+        out.put("expiresAtMillis", t.expiresAtMillis());
+        out.put("consoleFingerprint", fp);
+        out.put("caFingerprint", t.caFingerprint());
+        out.put("command", "sudo minipgagent setup --enroll " + base + " --token " + t.token()
+                + (fp == null ? " --insecure-http" : " --fingerprint " + fp));
+        return ResponseEntity.status(HttpStatus.CREATED).body(out);
+    }
+
     // ---- errors ----
 
     private static ResponseEntity<Map<String, Object>> error(HttpStatus status, String message, String leader) {
@@ -208,6 +244,11 @@ public class ApiController {
         body.put("error", e.getMessage());
         body.put("clusters", e.clusters());
         return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, Object>> illegalState(IllegalStateException e) {
+        return error(HttpStatus.CONFLICT, e.getMessage(), null);
     }
 
     @ExceptionHandler(NotLeaderException.class)

@@ -82,6 +82,8 @@ public class SecurityConfig {
                 writeError(response, HttpStatus.FORBIDDEN, "this user may only read the cluster");
         http.securityMatcher("/api/**")
                 .authorizeHttpRequests(a -> a
+                        // A database host enrolling has no user: its one-time token is the credential.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/enroll").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/**").hasAnyRole("ADMIN", "VIEWER")
                         .anyRequest().hasRole("ADMIN"))
                 .httpBasic(b -> b.authenticationEntryPoint(unauthenticated))

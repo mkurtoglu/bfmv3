@@ -39,8 +39,8 @@ public class LegacyRedirect extends Div implements BeforeEnterObserver {
         }
         String path = e.getLocation().getPath();
         String page = path.isEmpty() || named != null ? "overview" : path;
-        if (hub.multi() || hub.clusters().isEmpty()) {
-            e.forwardTo(hub.multi() ? FleetView.class : HostsView.class);
+        if (hub.names().size() != 1 || hub.clusters().isEmpty()) {
+            e.forwardTo(FleetView.class);
             return;
         }
         e.forwardTo(ClusterRoutes.path(hub.clusters().get(0).name(), page), e.getLocation().getQueryParameters());

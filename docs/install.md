@@ -19,6 +19,46 @@ Example cluster used throughout:
 Replace every address, interface and name with your own. Nothing below needs an internet connection on the
 database servers.
 
+## The quick way: the setup wizards
+
+Steps 3 to 5 below (certificates, agents, watcher) can be done by two wizards instead of by hand. §2 (preparing
+PostgreSQL) still applies; the agent wizard checks it and offers the fixes.
+
+1. **On the watcher host** (as root): `dnf install ./bfm-watcher-*.rpm`, then `bfm-watcher setup`. It asks for the
+   watcher id, the data directory, the console's port and the names operators use for it, the first admin user,
+   how agent certificates are made (`ca`: the watchers keep a CA and nodes enroll — recommended; `files`: stores
+   from `bfm-make-certs`), and for three watchers the peers. It writes `/etc/bfm/watcher.yml`, `watcher.env`, the
+   console certificate, the CA (moved into the shared state on the first start) and, for a Raft group, the other
+   watchers' certificates with the commands to copy them. Then add your clusters under `bfm.clusters` in
+   `watcher.yml` (see §5.2) and restart.
+2. **In the console**: *Agent certificates* shows the CA and, per node, *Enrollment command*: a one-time token,
+   valid 30 minutes, for that node only.
+3. **On each database host** (as root): `dnf install ./minipgagent-*.rpm`, then the printed command:
+
+   ```bash
+   sudo minipgagent setup --enroll https://bfm.example.com:8443 --token 7Q2…Kx --fingerprint SHA256:4b:9e:…
+   ```
+
+   It lists the PostgreSQL instances on the host (running postmasters, `postmaster.pid`, the PGDG and Debian
+   locations, `pg_lsclusters`), enrolls with the token (the fingerprint proves it talks to your watcher, even with
+   a self-signed console certificate), asks for the agent port and the VIP (with a subnet and `arping -D` check),
+   runs the readiness checks — version, the cluster's database, `wal_level`, `wal_log_hints`, senders and slots,
+   `pg_hba.conf` entries for the other nodes, the replication role, room for a re-initialize — and offers each
+   fix separately. It never restarts PostgreSQL; a setting that needs a restart is written and reported. Then it
+   shows everything it will do, and on yes writes `/etc/bfm/minipgagent/<cluster>/` (settings, the node's
+   certificate, the CA), the sudo rule (checked with `visudo` before it takes effect), the `.pgpass` line,
+   disables the PostgreSQL service (PostgreSQL keeps running) and starts `minipgagent@<cluster>`.
+
+   - `--dry-run` shows the plan and changes nothing; `--answers FILE` answers every question from a properties
+     file (keys: `agent.port`, `vip.address`, `vip.interface`, `vip.prefix`, `replication.user`,
+     `replication.password`, `instance`, `fix.<check>`, `proceed`); `--yes` confirms everything.
+   - With an offline CA: `--bundle DIR` with the node's `NAME.p12`, `NAME.pass`, `ca.p12`, `ca.pass` from
+     `bfm-make-certs` instead of the token.
+   - `minipgagent remove <instance>` stops and disables the instance and sets its settings and sudo rule aside;
+     PostgreSQL keeps running and can be handed back to its own service.
+
+The rest of this guide is the manual way, and what the wizards do under the hood.
+
 ---
 
 ## 1. Before you start

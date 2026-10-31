@@ -1,5 +1,15 @@
 #!/bin/bash
 # Starts the MiniPG agent. Settings: /etc/bfm/minipgagent/agent.properties (or the file given as the first
 # argument). JVM options can be set in MINIPGAGENT_JAVA_OPTS, for example in /etc/bfm/minipgagent/agent.env.
-exec java ${MINIPGAGENT_JAVA_OPTS:--Xmx128m} -jar /usr/share/bfm/minipgagent.jar \
-    "${1:-/etc/bfm/minipgagent/agent.properties}"
+#
+#   minipgagent setup ...        turn a PostgreSQL instance on this host into a node (run as root; --help)
+#   minipgagent remove INSTANCE  take an agent instance off this host (PostgreSQL keeps running)
+JAR=/usr/share/bfm/minipgagent.jar
+case "${1:-}" in
+  setup|remove)
+    exec java -Xmx256m -jar "$JAR" "$@"
+    ;;
+  *)
+    exec java ${MINIPGAGENT_JAVA_OPTS:--Xmx128m} -jar "$JAR" "${1:-/etc/bfm/minipgagent/agent.properties}"
+    ;;
+esac

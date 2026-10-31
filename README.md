@@ -123,7 +123,21 @@ services either, because a restart would interrupt a running `pg_basebackup`, `p
 them when the cluster is idle. JVM options go into `/etc/bfm/minipgagent/agent.env`
 (`MINIPGAGENT_JAVA_OPTS`) and `/etc/bfm/watcher.env` (`BFM_WATCHER_JAVA_OPTS`).
 
-The short version:
+The short version, with the wizards:
+
+1. **Watcher**: install the RPM and run `bfm-watcher setup` (as root). It asks for the watcher id, the console's
+   names and port, the first admin and, for three watchers, the peers; it writes `/etc/bfm/watcher.yml`, the
+   console certificate and a CA (or uses your `bfm-make-certs` stores), and starts the service. Clusters go
+   under `bfm.clusters`.
+2. **Each database host**: install the `minipgagent` RPM; in the console, *Agent certificates* → *Enrollment
+   command* for the node, and run the printed `sudo minipgagent setup --enroll … --token … --fingerprint …` there.
+   It finds the PostgreSQL instance, gets the node's certificate with the one-time token (the fingerprint proves
+   it talks to your watcher), asks for the agent port and the VIP, checks PostgreSQL (with fixes it applies only
+   after you confirm each one, never restarting PostgreSQL), shows every change, then writes the instance's
+   settings, certificates and sudo rule and starts `minipgagent@<cluster>`. `--answers FILE` answers everything
+   for Ansible; `--dry-run` shows the plan; `minipgagent remove <instance>` takes it off again.
+
+Or by hand:
 
 1. **Certificates**: `bfm-make-certs /etc/bfm/certs pg-a1=10.0.0.11 pg-a2=10.0.0.12 w1=10.0.9.1,bfm.example.com`
    makes a private CA and one PKCS#12 store per agent and watcher. The addresses go into the certificates' SAN
@@ -233,6 +247,9 @@ to the console's login page, so a monitoring script can rely on the status code.
 | `PUT /api/v1/controls` | `{"autoFailover":true,"maintenance":false,"mailEnabled":true,"autoReinit":false}` |
 | `DELETE /api/v1/slots/{name}` | Drop an inactive slot that belongs to no node |
 | `GET/PUT /api/v1/notifications/...` , `POST /api/v1/notifications/test` | Mail settings and test mail |
+| `POST /api/v1/clusters/{cluster}/enrollments` | `{"node":"pg-b1"}`: a one-time enrollment token and the setup command (ADMIN) |
+| `POST /api/v1/enroll` | What `minipgagent setup` calls: token + certificate request in, certificate and node settings out (no login; the token is the credential) |
+| `GET /api/v1/ca` / `POST /api/v1/ca` | The agents' CA; create one, or take over `ca.crt` + `ca.key` from `bfm-make-certs` (ADMIN) |
 
 ### Mail
 
@@ -287,6 +304,7 @@ looks at the epoch.
 | `POST /v1/fence`, `/v1/fence/clear` | Self-fence / clear |
 | `POST /v1/peer-check` | Can this node reach host:port (failover confirmation) |
 | `POST /v1/slots/ensure`, `/v1/slots/drop` | Physical replication slots |
+| `POST /v1/checks` | Readiness checks of `minipgagent setup` (settings, `pg_hba.conf` for the given peers, replication role, database, room for a rebuild); read only |
 
 ## Tests
 

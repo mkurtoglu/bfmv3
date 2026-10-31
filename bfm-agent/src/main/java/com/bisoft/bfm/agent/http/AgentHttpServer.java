@@ -67,6 +67,7 @@ public class AgentHttpServer {
         routes.put("POST /v1/peer-check", svc::peerCheck);
         routes.put("POST /v1/slots/ensure", svc::ensureSlots);
         routes.put("POST /v1/slots/drop", svc::dropSlot);
+        routes.put("POST /v1/checks", svc::checks);
     }
 
     public void start() throws IOException {

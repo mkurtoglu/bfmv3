@@ -18,7 +18,8 @@ import java.nio.charset.StandardCharsets;
 /**
  * {@code java -jar bfm-watcher.jar --spring.config.additional-location=/etc/bfm/watcher.yml}
  *
- * <p>{@code java -jar bfm-watcher.jar hash-password} prints a password hash for {@code bfm.users}.
+ * <p>{@code java -jar bfm-watcher.jar hash-password} prints a password hash for {@code bfm.users};
+ * {@code java -jar bfm-watcher.jar setup} writes a first configuration.
  */
 @SpringBootApplication
 @ColorScheme(ColorScheme.Value.LIGHT_DARK)
@@ -29,6 +30,11 @@ public class WatcherApplication implements AppShellConfigurator {
     public static void main(String[] args) throws IOException {
         if (args.length > 0 && "hash-password".equals(args[0])) {
             hashPassword();
+            return;
+        }
+        if (args.length > 0 && "setup".equals(args[0])) {
+            System.exit(com.bisoft.bfm.watcher.setup.WatcherSetup.main(java.util.Arrays.copyOfRange(args, 1,
+                    args.length)));
             return;
         }
         SpringApplication.run(WatcherApplication.class, args);

@@ -1,7 +1,8 @@
 # Design: several clusters per server, and the installation wizards
 
-Status: **decided** (§13), being implemented in four phases (§12). Phase 1 (host safety) and phase 2 (one watcher,
-many clusters) are done; clusters are defined in `watcher.yml` until the console wizards of phase 4.
+Status: **decided** (§13), being implemented in four phases (§12). Phases 1 (host safety), 2 (one watcher, many
+clusters) and 3 (terminal wizards and enrollment) are done; clusters are defined in `watcher.yml` until the console
+wizards of phase 4.
 
 BFM today manages one PostgreSQL cluster per watcher, and its packages install one agent per server. This design
 lets one server carry several PostgreSQL clusters, lets one watcher (or one Raft group of three) run all of them

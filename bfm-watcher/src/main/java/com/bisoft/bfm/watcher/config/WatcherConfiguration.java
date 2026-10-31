@@ -107,7 +107,7 @@ public class WatcherConfiguration {
 
     /** One HTTP client serves every cluster's agents; it waits as long as the most patient cluster wants. */
     private static long maxAgentTimeoutMs(BfmProperties props) {
-        long max = 0;
+        long max = 3000;
         for (BfmProperties.Cluster c : props.allClusters()) {
             max = Math.max(max, BfmProperties.toClusterConfig(c).timing().agentTimeoutMs());
         }

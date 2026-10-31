@@ -50,9 +50,6 @@ public record BfmProperties(
             out.add(cluster);
         }
         out.addAll(clusters);
-        if (out.isEmpty()) {
-            throw new IllegalStateException("no cluster configured: set bfm.cluster or bfm.clusters");
-        }
         java.util.Set<String> names = new java.util.HashSet<>();
         java.util.Map<String, String> urls = new java.util.HashMap<>();
         for (Cluster c : out) {
@@ -187,7 +184,11 @@ public record BfmProperties(
 
     /** The first configured cluster (the only one in a single-cluster setup). */
     public ClusterConfig toClusterConfig() {
-        return toClusterConfig(allClusters().get(0));
+        List<Cluster> all = allClusters();
+        if (all.isEmpty()) {
+            throw new IllegalStateException("no cluster configured");
+        }
+        return toClusterConfig(all.get(0));
     }
 
     /**
@@ -195,8 +196,11 @@ public record BfmProperties(
      * used, so their Raft log stays theirs). Set it when the first cluster may change.
      */
     public String raftGroupName() {
-        return raft.groupName() != null && !raft.groupName().isBlank() ? raft.groupName()
-                : allClusters().get(0).name();
+        if (raft.groupName() != null && !raft.groupName().isBlank()) {
+            return raft.groupName();
+        }
+        List<Cluster> all = allClusters();
+        return all.isEmpty() ? "bfm" : all.get(0).name();
     }
 
     public static ClusterConfig toClusterConfig(Cluster cluster) {
