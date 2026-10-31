@@ -278,7 +278,8 @@ rejoin, a failover refused because the VIP cannot come up, and the retry once it
 
 ## Limits
 
-- One cluster per watcher (group). Run another watcher (group) for another cluster.
+- One cluster per watcher (group). Run another watcher (group) for another cluster. Several clusters per server
+  and one console for many clusters are designed in [docs/design/multi-cluster.md](docs/design/multi-cluster.md).
 - A primary whose PostgreSQL hangs but keeps its port open is not failed over automatically (replicas still
   reach it); the console shows it and an operator decides.
 - Wall clocks of the watchers should be in sync (NTP); Raft observations carry wall-clock times.
