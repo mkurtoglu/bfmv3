@@ -41,7 +41,7 @@ rm -rf "$TOP"
 mkdir -p "$TOP"/{SOURCES,SPECS,BUILD,RPMS,SRPMS}
 cp "$AGENT_JAR" "$WATCHER_JAR" "$TOP/SOURCES/"
 cp packaging/bin/minipgagent packaging/bin/bfm-watcher packaging/bin/bfm-make-certs "$TOP/SOURCES/"
-cp packaging/minipgagent.service packaging/bfm-watcher.service "$TOP/SOURCES/"
+cp packaging/minipgagent.service 'packaging/minipgagent@.service' packaging/bfm-watcher.service "$TOP/SOURCES/"
 cp packaging/agent.properties.example packaging/watcher.yml.example packaging/sudoers-minipgagent "$TOP/SOURCES/"
 cp README.md "$TOP/SOURCES/"
 cp packaging/rpm/bfm.spec "$TOP/SPECS/"

@@ -37,6 +37,8 @@ public class HttpAgentClient implements AgentClient {
     private final String token;
     private final Duration timeout;
     private final Duration commandTimeout;
+    private volatile String clusterId;
+    private volatile String clusterName;
 
     public HttpAgentClient(String node, String baseUrl, HttpClient http, String token, Duration timeout,
                            Duration commandTimeout) {
@@ -73,6 +75,12 @@ public class HttpAgentClient implements AgentClient {
     @Override
     public String node() {
         return node;
+    }
+
+    @Override
+    public void useCluster(String clusterId, String clusterName) {
+        this.clusterName = clusterName;
+        this.clusterId = clusterId;
     }
 
     @Override
@@ -170,8 +178,13 @@ public class HttpAgentClient implements AgentClient {
         return command("/v1/slots/drop", body(epoch).put("name", name));
     }
 
-    private static JsonMap body(long epoch) {
-        return JsonMap.create().put("epoch", epoch);
+    private JsonMap body(long epoch) {
+        JsonMap b = JsonMap.create().put("epoch", epoch);
+        String id = clusterId;
+        if (id != null) {
+            b.put("clusterId", id).put("clusterName", clusterName);
+        }
+        return b;
     }
 
     private ApiResult command(String path, JsonMap body) {
@@ -204,6 +217,12 @@ public class HttpAgentClient implements AgentClient {
         try {
             resp = http.send(rb.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         } catch (IOException e) {
+            NodeNameTrustManager.NodeNameMismatchException wrong = nameMismatch(e);
+            if (wrong != null) {
+                // Not an unreachable node: the watcher reached some agent, only not this node's.
+                throw new AgentCallException(node, com.bisoft.bfm.core.state.ClusterIdentity.WRONG_IDENTITY
+                        + wrong.getMessage(), e);
+            }
             throw new AgentCallException(node, "unreachable: " + describe(e, baseUrl, callTimeout), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -225,6 +244,15 @@ public class HttpAgentClient implements AgentClient {
             message = "HTTP " + status;
         }
         throw new AgentCallException(node, status, message == null ? "HTTP " + status : message);
+    }
+
+    private static NodeNameTrustManager.NodeNameMismatchException nameMismatch(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof NodeNameTrustManager.NodeNameMismatchException m) {
+                return m;
+            }
+        }
+        return null;
     }
 
     /** What went wrong, in the words an operator needs; never a bare Java class name. */

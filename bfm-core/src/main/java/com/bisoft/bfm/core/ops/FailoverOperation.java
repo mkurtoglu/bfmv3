@@ -270,8 +270,9 @@ public final class FailoverOperation extends Operation {
         int answered = 0;
         List<String> seen = new ArrayList<>();
         long timeout = Math.max(500, ctx.cfg().timing().agentTimeoutMs() - 500);
+        java.util.Map<String, String> problems = ctx.identity().get().problems();
         for (NodeConfig n : ctx.cfg().nodes()) {
-            if (n.name().equals(old.name())) {
+            if (n.name().equals(old.name()) || problems.containsKey(n.name())) {
                 continue;
             }
             try {

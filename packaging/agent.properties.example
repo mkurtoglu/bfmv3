@@ -1,15 +1,26 @@
 # MiniPG agent settings: /etc/bfm/minipgagent/agent.properties, readable by the postgres user only (600).
 # Start: minipgagent (installed by the RPM with minipgagent.service; runs /usr/share/bfm/minipgagent.jar)
+# Several PostgreSQL instances on this host: one agent instance each, minipgagent@<instance>.service, with
+# this file at /etc/bfm/minipgagent/<instance>/agent.properties (see docs/install.md, "Several clusters on
+# one host").
 # Every setting with its default and what it does: docs/agent-config.md
 #
 # Passwords and the token can also come from the environment (/etc/bfm/minipgagent/agent.env, read by the
 # unit): MINIPGAGENT_KEYSTORE_PASSWORD, MINIPGAGENT_TRUSTSTORE_PASSWORD, MINIPGAGENT_API_TOKEN. The
 # environment wins over the property, and the property over its .file form.
 
-# Must equal the node name in the watcher configuration.
+# Must equal the node name in the watcher configuration (and the name in this node's certificate).
 node.name=pg-a1
 listen.address=0.0.0.0
+# One port per agent instance on a host (8008, 8009, ...).
 listen.port=8008
+
+# The cluster this agent belongs to. Empty: it binds to the first watcher group that sends it a command and
+# refuses commands for any other cluster from then on (kept in state.dir/binding). Set it to the cluster id the
+# console shows to bind it explicitly.
+#cluster.id=
+# Set by minipgagent@<instance>.service; only needed when starting the agent another way.
+#instance.name=
 
 # Mutual TLS: only holders of a certificate signed by the BFM CA may call the agent (see bfm-make-certs).
 tls.enabled=true
@@ -20,8 +31,10 @@ tls.truststore.password.file=/etc/bfm/minipgagent/ca.pass
 # Optional second check; required when TLS is off (lab only). Also read from MINIPGAGENT_API_TOKEN.
 #api.token.file=/etc/bfm/minipgagent/agent.token
 
-# Epoch, fence flag and logs of background operations.
-state.dir=/var/lib/minipgagent
+# Epoch, fence flag, lease, cluster binding and logs of background operations. Default: /var/lib/minipgagent,
+# or /var/lib/minipgagent/<instance> for an agent instance. Locked while the agent runs: two agents can never
+# share one.
+#state.dir=/var/lib/minipgagent
 
 # PostgreSQL. The agent talks to it with psql over the Unix socket (peer authentication, no password).
 pg.bin=/usr/pgsql-16/bin
@@ -68,10 +81,12 @@ vip.dad.enabled=true
 fence.action=stop
 fence.stop.mode=immediate
 
-# Optional Linux watchdog while primary: if the agent hangs, the kernel resets the machine.
+# Optional Linux watchdog while primary: if the agent hangs, the kernel resets the machine. The reset takes
+# every PostgreSQL instance on the host down, so only one agent per host may use it (a host-wide lock).
 watchdog.enabled=false
 #watchdog.device=/dev/watchdog
 #watchdog.interval.ms=5000
+#watchdog.lock=/var/lib/minipgagent/watchdog.lock
 
 command.timeout.seconds=30
 probe.interval.ms=1000

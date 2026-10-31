@@ -51,6 +51,11 @@ PostgreSQL 13 or newer (the agent reloads `primary_conninfo` without a restart);
 - **Fencing.** A returning old primary, or any node that runs as primary although the state names another
   one, is fenced (VIP released, PostgreSQL stopped) and then rejoined as a replica with `pg_rewind`.
   A VIP found on a node that is not the primary is removed.
+- **The right node, the right database.** Every agent is bound to one cluster and refuses commands for another;
+  the watcher checks that each agent's certificate names its node, and that each node's PostgreSQL system
+  identifier is the cluster's. A node that fails a check (a mistyped port reaching another cluster's agent, a
+  data directory replaced by `initdb`) shows as *Wrong identity* and is left alone — never fenced, promoted,
+  followed or given a slot — and if it is the primary, automatic failover is blocked instead of started.
 
 ## Modules
 
@@ -230,6 +235,7 @@ This affects mail only: the agent calls and the Raft traffic use their own store
 
 ```
 minipgagent            # or: java -jar minipgagent.jar /etc/bfm/minipgagent/agent.properties
+systemctl enable --now minipgagent@crm   # one more instance on this host: /etc/bfm/minipgagent/crm/
 ```
 
 Runs as the `postgres` OS user and talks to PostgreSQL through `psql` over the Unix socket (peer
@@ -243,11 +249,12 @@ split on whitespace before placeholders are filled; no shell is involved.
 ### API
 
 All calls are JSON over HTTPS with mutual TLS (optional bearer token as a second check). Every command that
-changes the node carries `epoch`.
+changes the node carries `epoch` and `clusterId`; a bound agent refuses another cluster's commands before it
+looks at the epoch.
 
 | Call | Purpose |
 | --- | --- |
-| `GET /v1/status` | Role, timeline, LSNs, replication, slots, VIP, lease, fence |
+| `GET /v1/status` | Role, timeline, LSNs, replication, slots, VIP, lease, fence, system identifier, and `identity` (bound cluster, instance, host id, host name) |
 | `POST /v1/lease` | Grant or renew the primary lease (`ttlMs`, `fenceOnExpiry`) |
 | `POST /v1/vip/acquire` / `release`, `GET /v1/vip/check` | VIP up / down / duplicate check |
 | `POST /v1/pg/promote` | Promote; refused unless the VIP is up here |
@@ -278,8 +285,9 @@ rejoin, a failover refused because the VIP cannot come up, and the retry once it
 
 ## Limits
 
-- One cluster per watcher (group). Run another watcher (group) for another cluster. Several clusters per server
-  and one console for many clusters are designed in [docs/design/multi-cluster.md](docs/design/multi-cluster.md).
+- One cluster per watcher (group). Run another watcher (group) for another cluster. Several clusters can share
+  servers (one agent instance per PostgreSQL instance, [docs/install.md §10](docs/install.md#10-several-clusters-on-one-host));
+  one console for many clusters is designed in [docs/design/multi-cluster.md](docs/design/multi-cluster.md).
 - A primary whose PostgreSQL hangs but keeps its port open is not failed over automatically (replicas still
   reach it); the console shows it and an operator decides.
 - Wall clocks of the watchers should be in sync (NTP); Raft observations carry wall-clock times.

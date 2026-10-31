@@ -1,6 +1,6 @@
 # Design: several clusters per server, and the installation wizards
 
-Status: **decided** (§13), being implemented in four phases (§12).
+Status: **decided** (§13), being implemented in four phases (§12). Phase 1 (host safety) is done.
 
 BFM today manages one PostgreSQL cluster per watcher, and its packages install one agent per server. This design
 lets one server carry several PostgreSQL clusters, lets one watcher (or one Raft group of three) run all of them
@@ -72,8 +72,8 @@ The design answers each:
 | Wrong agent for a node | **Binding**: the agent stores `cluster id + node name` (state dir, file `binding`) and refuses any command whose `clusterId` differs, with 409 *"this agent belongs to cluster crm as pg-b1"*. Every command that changes the node already carries `epoch`; it carries `clusterId` too. |
 | Wrong data under a right agent | **System identifier guard**: the watcher records the cluster's system identifier at bootstrap. A node whose PostgreSQL reports another one is marked *foreign data directory*: never promoted, never rewound, never followed; only **Re-initialize** (which replaces it with the cluster's data) is offered. |
 | Wrong certificate | The watcher checks that the agent's certificate names the node it expects (CN = node name, as `bfm-make-certs` and enrollment issue them). A port mix-up fails the TLS identity check before any command is sent. |
-| Shared state directory | The agent takes an exclusive `flock` on `state.dir/lock` at start and refuses to run if it is held: *"state directory /var/lib/minipgagent/erp is in use by PID 4711"*. |
-| Watchdog | A host-wide lock (`/run/minipgagent/watchdog.lock`). The second agent with `watchdog.enabled=true` refuses to start. The wizard turns the watchdog off when a host carries more than one instance. |
+| Shared state directory | The agent takes an exclusive file lock on `state.dir/lock` at start and refuses to run if it is held: *"state directory /var/lib/minipgagent/erp is in use by PID 4711"*. |
+| Watchdog | A host-wide lock (`/var/lib/minipgagent/watchdog.lock`; not under `/run`, where a template unit's runtime directory would be removed when one instance stops). The second agent with `watchdog.enabled=true` refuses to start. The wizard turns the watchdog off when a host carries more than one instance. |
 | Primaries piled on one host | The agent reports its `hostId` and hostname; the Hosts page shows which primaries share a host (§7.3). No warning is raised (decision 7); nothing moves on its own. |
 | Two nodes of one cluster on one host | The wizards refuse it unless *Allow co-location (lab only)* is ticked; the console marks such a cluster *No host redundancy*. |
 | Many rebuilds hitting one host's disks | Re-initialize and rejoin are queued per host (default: one at a time per host), visible in Operations. |

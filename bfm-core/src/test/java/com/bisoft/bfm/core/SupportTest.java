@@ -60,7 +60,7 @@ class SupportTest {
             if (path.equals("/v1/status")) {
                 reply = new NodeStatus("pg-a1", "0.1.0", 1, true, PgRole.PRIMARY, 3, "1", 160004, "0/13000318",
                         null, null, null, null, null, null, List.of(), List.of(), "192.168.0.50", true, 14, null,
-                        false, null, null, null, null, null, null).toJson();
+                        false, null, null, null, null, null, null, null).toJson();
             } else if (path.equals("/v1/pg/promote")) {
                 status = 409;
                 reply = ApiResult.fail("VIP 192.168.0.50 is not up on this node; refusing to promote").toJson();
@@ -93,6 +93,13 @@ class SupportTest {
             assertTrue(e.detail().contains("refusing to promote"));
             JsonMap sent = Json.parseObject(body.get());
             assertEquals(15L, sent.lng("epoch", 0));
+            assertNull(sent.str("clusterId"), "no cluster named before the watcher knows its id");
+
+            c.useCluster("5f2c0d4e-0000-4000-8000-000000000001", "erp");
+            c.checkpoint(15);
+            sent = Json.parseObject(body.get());
+            assertEquals("5f2c0d4e-0000-4000-8000-000000000001", sent.str("clusterId"));
+            assertEquals("erp", sent.str("clusterName"));
 
             ApiResult vc = c.vipCheck();
             assertFalse(vc.ok(), "a taken VIP is an answer, not an error");

@@ -7,6 +7,8 @@ import com.bisoft.bfm.agent.exec.ProcessRunner;
 import com.bisoft.bfm.agent.http.AgentHttpServer;
 import com.bisoft.bfm.common.model.NodeStatus;
 import com.bisoft.bfm.common.model.PgRole;
+import com.bisoft.bfm.core.agent.AgentCallException;
+import com.bisoft.bfm.core.agent.AgentClient;
 import com.bisoft.bfm.core.agent.HttpAgentClient;
 import com.bisoft.bfm.core.config.ClusterConfig;
 import com.bisoft.bfm.core.config.NodeConfig;
@@ -15,8 +17,10 @@ import com.bisoft.bfm.core.event.EventType;
 import com.bisoft.bfm.core.monitor.NodeView;
 import com.bisoft.bfm.core.ops.OperationProgress;
 import com.bisoft.bfm.core.ops.SwitchoverOperation;
+import com.bisoft.bfm.core.state.ClusterIdentity;
 import com.bisoft.bfm.core.state.ClusterState;
 import com.bisoft.bfm.core.state.LocalStateStore;
+import com.bisoft.bfm.core.state.StateStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -32,11 +36,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.UUID;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -130,7 +136,8 @@ class WatcherPostgresIT {
         Timing timing = new Timing(500, 3, 2_000, 6_000, 2_000, 2_000, 16L * 1024 * 1024, 30_000, 120_000,
                 3_000, 3_000, 3_000);
         ClusterConfig cfg = ClusterConfig.of("it", configs, timing);
-        watcher = new Watcher(cfg, new LocalStateStore("w1", base.resolve("watcher")),
+        StateStore store = new LocalStateStore("w1", base.resolve("watcher"));
+        watcher = new Watcher(cfg, store,
                 HttpAgentClient.factory(null, TOKEN, Duration.ofSeconds(2), Duration.ofSeconds(180)), TimeSource.SYSTEM);
         watcher.start();
 
@@ -143,6 +150,29 @@ class WatcherPostgresIT {
         succeeds(watcher.reinit("c", "it"));
         sql("a", "CREATE TABLE t(x int); INSERT INTO t SELECT generate_series(1, 1000)");
         waitFor("b and c streaming", () -> streaming("b") && streaming("c"));
+
+        // Identity: the primary's system identifier is the cluster's, b and c (copies of a) share it, and every
+        // agent is bound to this cluster.
+        String sysid = scalar("a", "SELECT system_identifier FROM pg_control_system()");
+        waitFor("system identifier recorded", () -> sysid.equals(ClusterIdentity.systemIdentifier(store)));
+        String clusterId = ClusterIdentity.existingClusterId(store);
+        waitFor("every agent bound", () -> nodes.keySet().stream().allMatch(n -> status(n) != null
+                && clusterId.equals(status(n).identity().clusterId()) && sysid.equals(status(n).systemIdentifier())));
+        assertTrue(watcher.identity().problems().isEmpty(), watcher.identity().toString());
+
+        // A watcher of another cluster that reaches a's agent through a mistyped URL can do nothing to it.
+        AgentClient wrong = HttpAgentClient.factory(null, TOKEN, Duration.ofSeconds(2), Duration.ofSeconds(30))
+                .create(NodeConfig.of("crm-1", "http://127.0.0.1:" + nodes.get("a").agentPort, "127.0.0.1",
+                        nodes.get("a").pgPort, "DC1"));
+        wrong.useCluster(UUID.randomUUID().toString(), "crm");
+        long aEpoch = status("a").epoch();
+        AgentCallException refused = assertThrows(AgentCallException.class,
+                () -> wrong.fence(aEpoch + 100, "crm takes this for its rogue primary"));
+        assertEquals(409, refused.httpStatus());
+        assertTrue(refused.detail().contains("belongs to cluster it (" + clusterId + ") as a"), refused.detail());
+        assertEquals(aEpoch, status("a").epoch(), "the refused command did not move the epoch");
+        assertFalse(status("a").fenced());
+        assertTrue(vipOn("a"));
 
         // Planned switchover a -> b.
         waitFor("pre-checks pass", () -> com.bisoft.bfm.core.ops.PreCheck.allowed(watcher.switchoverChecks("b")));

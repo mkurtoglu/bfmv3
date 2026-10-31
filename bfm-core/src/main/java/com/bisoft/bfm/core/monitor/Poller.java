@@ -2,6 +2,7 @@ package com.bisoft.bfm.core.monitor;
 
 import com.bisoft.bfm.common.model.NodeStatus;
 import com.bisoft.bfm.core.TimeSource;
+import com.bisoft.bfm.core.agent.AgentCallException;
 import com.bisoft.bfm.core.agent.AgentClient;
 import com.bisoft.bfm.core.config.ClusterConfig;
 import com.bisoft.bfm.core.config.NodeConfig;
@@ -53,7 +54,8 @@ public class Poller implements AutoCloseable {
                 f.cancel(true);
                 error = "agent did not answer in time";
             } catch (ExecutionException e) {
-                error = e.getCause() == null ? e.getMessage() : e.getCause().getMessage();
+                error = e.getCause() instanceof AgentCallException ace ? ace.detail()
+                        : e.getCause() == null ? e.getMessage() : e.getCause().getMessage();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 error = "interrupted";

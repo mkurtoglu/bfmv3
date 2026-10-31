@@ -13,6 +13,8 @@ public enum EventType {
     AGENT_FENCED(Severity.CRITICAL, MailRule.AGENT_FENCED, false),
     ROGUE_PRIMARY_FENCED(Severity.CRITICAL, MailRule.FAILOVER, true),
     EPOCH_CONFLICT(Severity.CRITICAL, MailRule.PRIMARY_UNREACHABLE, false),
+    /** A node answers with another cluster's identity or another database: it is left alone until fixed. */
+    WRONG_IDENTITY(Severity.CRITICAL, MailRule.PRIMARY_UNREACHABLE, false),
     REPLICA_LAG(Severity.WARNING, MailRule.REPLICA_LAG, false),
     REPLICA_LAG_RESOLVED(Severity.INFO, null, false),
     INACTIVE_SLOT(Severity.WARNING, MailRule.INACTIVE_SLOT, false),

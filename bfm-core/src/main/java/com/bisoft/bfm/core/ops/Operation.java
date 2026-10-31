@@ -100,8 +100,22 @@ public abstract class Operation implements Runnable {
         return ctx.cfg().requireNode(name);
     }
 
-    /** Current status of {@code node}, or null when its agent does not answer. */
+    /**
+     * The node's status, or null when its agent does not answer or the node is not this cluster's (another
+     * cluster's agent behind this node's URL, or another database in its data directory): either way, nothing is
+     * done to it.
+     */
     protected NodeStatus statusOrNull(String node) {
+        NodeStatus s = rawStatus(node);
+        if (s != null && ctx.identity().get().problem(s) != null) {
+            log("watcher", node + " left alone: " + ctx.identity().get().problem(s));
+            return null;
+        }
+        return s;
+    }
+
+    /** The node's status whatever its identity, or null when the agent does not answer. */
+    protected NodeStatus rawStatus(String node) {
         try {
             return agent(node).status();
         } catch (AgentCallException e) {
@@ -111,7 +125,12 @@ public abstract class Operation implements Runnable {
 
     /** Tells every reachable agent about {@code epoch}, so commands from older epochs are refused from now on. */
     protected void announceEpoch(long epoch) {
+        java.util.Map<String, String> problems = ctx.identity().get().problems();
         for (NodeConfig n : ctx.cfg().nodes()) {
+            if (problems.containsKey(n.name())) {
+                log("watcher", "epoch " + epoch + " not sent to " + n.name() + ": " + problems.get(n.name()));
+                continue;
+            }
             try {
                 agent(n.name()).ensureSlots(epoch, List.of());
             } catch (AgentCallException e) {
@@ -297,8 +316,10 @@ public abstract class Operation implements Runnable {
     /** Makes sure the primary has a physical slot for every other node. */
     protected void ensureSlots(String primary, long epoch) {
         List<String> names = new ArrayList<>();
+        java.util.Map<String, String> problems = ctx.identity().get().problems();
         for (NodeConfig n : ctx.cfg().nodes()) {
-            if (!n.name().equals(primary)) {
+            // A slot nobody of this cluster uses would hold WAL on the primary for good.
+            if (!n.name().equals(primary) && !problems.containsKey(n.name())) {
                 names.add(n.slot());
             }
         }
@@ -321,7 +342,13 @@ public abstract class Operation implements Runnable {
             if (n.name().equals(primary) || skip.contains(n.name())) {
                 continue;
             }
-            NodeStatus s = statusOrNull(n.name());
+            NodeStatus s = rawStatus(n.name());
+            String wrong = s == null ? null : ctx.identity().get().problem(s);
+            if (wrong != null) {
+                problems.add(n.name() + " left alone: " + wrong);
+                log("watcher", n.name() + " left alone: " + wrong);
+                continue;
+            }
             if (s == null) {
                 problems.add(n.name() + " unreachable");
                 log("watcher", n.name() + " is unreachable; it will be pointed at " + primary + " when it returns");

@@ -5,6 +5,7 @@ import com.bisoft.bfm.core.agent.AgentClient;
 import com.bisoft.bfm.core.config.ClusterConfig;
 import com.bisoft.bfm.core.event.EventLog;
 import com.bisoft.bfm.core.monitor.ClusterView;
+import com.bisoft.bfm.core.state.ClusterIdentity;
 import com.bisoft.bfm.core.state.ClusterStateRepo;
 import com.bisoft.bfm.core.state.StateStore;
 
@@ -17,10 +18,11 @@ import java.util.function.Supplier;
  * @param pollNow      polls every agent right now
  * @param primaryInfo  newest WAL position and timeline seen on the primary
  * @param lease        lease bookkeeping, so a failover knows how long the old primary's lease may still run
+ * @param identity     the cluster's identity as of the last poll; nodes with a wrong one are left alone
  */
 public record OpContext(ClusterConfig cfg, Map<String, AgentClient> agents, StateStore store, ClusterStateRepo repo,
                         EventLog events, TimeSource time, Supplier<ClusterView> pollNow,
-                        Supplier<PrimaryInfo> primaryInfo, LeaseClock lease) {
+                        Supplier<PrimaryInfo> primaryInfo, LeaseClock lease, Supplier<ClusterIdentity.Check> identity) {
 
     public String selfId() {
         return store.selfId();

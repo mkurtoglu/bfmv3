@@ -97,6 +97,13 @@ public final class SwitchoverOperation extends Operation {
             out.add(PreCheck.fail("Target node", target + " is already the primary"));
             return out;
         }
+        for (String n : List.of(state.primary(), target)) {
+            String wrong = ctx.identity().get().problem(n);
+            if (wrong != null) {
+                out.add(PreCheck.fail(n + " is a node of this cluster", wrong));
+                return out;
+            }
+        }
         NodeView p = view.node(state.primary()).orElse(null);
         NodeView t = view.node(target).orElse(null);
         if (p == null || !p.runningPrimary()) {

@@ -72,7 +72,8 @@ public class ConsoleService {
                            String maxLagNode, Long maxLagDelayMs, Lease lease, ClusterState.OperationRef operation,
                            List<NodeRow> nodes, List<SlotRow> slots, List<WatcherRow> watchers,
                            long observedAtMillis, String environment, List<String> healthReasons,
-                           String failoverBlockedReason, RoleChange roleChange, Map<String, ControlChange> controls) {
+                           String failoverBlockedReason, RoleChange roleChange, Map<String, ControlChange> controls,
+                           String clusterId, String systemIdentifier) {
         /**
          * Where the running operation's steps and log can be followed. They live in the memory of the watcher
          * that runs it, so on any other watcher this is that watcher's console (from {@code raft.peers[].url}),
@@ -196,6 +197,9 @@ public class ConsoleService {
             health = "Starting";
         } else if (primary == null) {
             health = "No primary";
+        } else if (watcher.identity().problem(primary) != null) {
+            // Not "down": the watcher reaches the wrong agent or the wrong data there, the primary may run fine.
+            health = "Primary unverified";
         } else if (h != PrimaryHealth.OK) {
             health = "Primary down";
         } else if (reasons.isEmpty()) {
@@ -213,7 +217,8 @@ public class ConsoleService {
                 st != null && st.autoReinit(), cfg.scope().name(), cfg.selfFence(), vipAddress, vipHolder, maxLag,
                 maxLagNode, maxDelay, lease, st == null ? null : st.operation(), rows, slots, watchers,
                 view.observedAtMillis(), props.cluster().environment(), reasons,
-                lead.leader() ? watcher.failoverBlockedReason() : null, watcher.lastRoleChange(), controls());
+                lead.leader() ? watcher.failoverBlockedReason() : null, watcher.lastRoleChange(), controls(),
+                watcher.identity().clusterId(), watcher.identity().systemId());
     }
 
     private long since(String node) {
@@ -237,7 +242,10 @@ public class ConsoleService {
             return out;
         }
         NodeRow p = rows.stream().filter(NodeRow::isPrimary).findFirst().orElse(null);
-        if (h != PrimaryHealth.OK) {
+        String primaryWrong = watcher.identity().problem(primary);
+        if (primaryWrong != null) {
+            out.add(primary + " is left alone: " + primaryWrong + "; automatic failover will not start");
+        } else if (h != PrimaryHealth.OK) {
             out.add(primary + ": " + (p == null ? "not polled yet" : lower(p.state())));
         } else if (vipAddress != null && vipHolder == null) {
             out.add("VIP " + vipAddress + " is not up on " + primary);
@@ -250,7 +258,10 @@ public class ConsoleService {
             if (r.isPrimary()) {
                 continue;
             }
-            if (!r.agentOnline()) {
+            String wrong = watcher.identity().problem(r.name());
+            if (wrong != null) {
+                out.add(r.name() + " is left alone: " + wrong);
+            } else if (!r.agentOnline()) {
                 out.add(r.name() + ": agent unreachable");
             } else if (r.fenced()) {
                 out.add(r.name() + ": fenced");

@@ -77,6 +77,8 @@ class AgentUnitTest {
     void parsesControlData() {
         ControlData cd = ControlData.parse("""
                 pg_control version number:            1300
+                Catalog version number:               202307071
+                Database system identifier:           7000000000000000001
                 Database cluster state:               shut down
                 Latest checkpoint location:           0/3000028
                 Latest checkpoint's REDO location:    0/3000028
@@ -85,6 +87,7 @@ class AgentUnitTest {
         assertEquals("shut down", cd.clusterState());
         assertEquals("0/3000028", cd.checkpointLsn());
         assertEquals(Integer.valueOf(2), cd.timeline());
+        assertEquals("7000000000000000001", cd.systemIdentifier());
         assertTrue(cd.cleanShutdown());
     }
 

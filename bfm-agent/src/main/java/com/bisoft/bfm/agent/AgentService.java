@@ -7,6 +7,7 @@ import com.bisoft.bfm.agent.pg.PgController;
 import com.bisoft.bfm.agent.pg.PgProbe;
 import com.bisoft.bfm.agent.pg.PgSnapshot;
 import com.bisoft.bfm.agent.pg.Psql;
+import com.bisoft.bfm.agent.state.ClusterBinding;
 import com.bisoft.bfm.agent.state.EpochStore;
 import com.bisoft.bfm.agent.state.FenceState;
 import com.bisoft.bfm.agent.state.InterruptedOperation;
@@ -14,6 +15,7 @@ import com.bisoft.bfm.agent.state.LeaseGuard;
 import com.bisoft.bfm.agent.state.Watchdog;
 import com.bisoft.bfm.agent.vip.VipManager;
 import com.bisoft.bfm.common.json.JsonMap;
+import com.bisoft.bfm.common.model.AgentIdentity;
 import com.bisoft.bfm.common.model.ApiResult;
 import com.bisoft.bfm.common.model.NodeStatus;
 import com.bisoft.bfm.common.model.OperationStatus;
@@ -41,6 +43,9 @@ public class AgentService {
     private final EpochStore epoch;
     private final LeaseGuard lease;
     private final FenceState fence;
+    private final ClusterBinding binding;
+    private final String hostId;
+    private final String hostname;
     private final InterruptedOperation interrupted;
     private final OperationManager ops;
     private final Watchdog watchdog;
@@ -69,6 +74,9 @@ public class AgentService {
         this.epoch = new EpochStore(cfg.stateDir);
         this.lease = lease;
         this.fence = new FenceState(cfg.stateDir);
+        this.binding = new ClusterBinding(cfg.stateDir, cfg.clusterId, cfg.nodeName);
+        this.hostId = readHostId();
+        this.hostname = readHostname();
         this.ops = new OperationManager();
         this.watchdog = cfg.watchdogEnabled ? new Watchdog(cfg.watchdogDevice) : null;
     }
@@ -213,17 +221,54 @@ public class AgentService {
             error = error == null ? interrupted.refusal() : error + "; " + interrupted.refusal();
         }
         return new NodeStatus(cfg.nodeName, AgentMain.VERSION, System.currentTimeMillis(), s.running(), s.role(),
-                s.timeline(), s.systemIdentifier(), s.serverVersionNum(), s.currentLsn(), s.receiveLsn(),
+                s.timeline(), s.systemIdentifier() != null ? s.systemIdentifier() : c.systemIdentifier(),
+                s.serverVersionNum(), s.currentLsn(), s.receiveLsn(),
                 s.replayLsn(), s.replayDelayMs(), s.walReceiverStatus(), s.upstreamHost(), s.upstreamPort(),
                 s.replicas(), s.slots(), cfg.vipEnabled ? cfg.vipAddress : null, vipHeld, epoch.current(),
                 lease.info(), fence.fenced(), fence.reason(), c.clusterState(), c.checkpointLsn(), c.timeline(),
-                ops.busy(), error);
+                ops.busy(), error, new AgentIdentity(binding.clusterId(), binding.clusterName(), cfg.instanceName,
+                hostId, hostname));
+    }
+
+    /**
+     * Every command that changes the node goes through here: first the cluster it is meant for (a command for
+     * another cluster must not even move this agent's epoch), then its epoch.
+     */
+    private void accept(JsonMap body) {
+        binding.check(body);
+        epoch.accept(body.requireLng("epoch"));
+    }
+
+    /** The cluster this agent belongs to, or null while unbound. */
+    public String boundClusterId() {
+        return binding.clusterId();
+    }
+
+    private static String readHostId() {
+        try {
+            String id = Files.readString(java.nio.file.Path.of("/etc/machine-id")).trim();
+            return id.isEmpty() ? null : id;
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static String readHostname() {
+        String h = System.getenv("HOSTNAME");
+        if (h != null && !h.isBlank()) {
+            return h.trim();
+        }
+        try {
+            return java.net.InetAddress.getLocalHost().getHostName();
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     // ---- commands ----
 
     public ApiResult grantLease(JsonMap body) {
-        epoch.accept(body.requireLng("epoch"));
+        accept(body);
         long ttl = body.requireLng("ttlMs");
         boolean fenceOnExpiry = body.bool("fenceOnExpiry", false);
         if (fence.fenced()) {
@@ -234,7 +279,7 @@ public class AgentService {
     }
 
     public ApiResult vipAcquire(JsonMap body) {
-        epoch.accept(body.requireLng("epoch"));
+        accept(body);
         if (fence.fenced()) {
             throw AgentException.conflict("node is fenced: " + fence.reason());
         }
@@ -244,7 +289,7 @@ public class AgentService {
     }
 
     public ApiResult vipRelease(JsonMap body) {
-        epoch.accept(body.requireLng("epoch"));
+        accept(body);
         String msg = ops.exclusive("vip-release", vip::release);
         refresh();
         return ApiResult.ok(msg);
@@ -264,7 +309,7 @@ public class AgentService {
      */
     public ApiResult promote(JsonMap body) {
         long e = body.requireLng("epoch");
-        epoch.accept(e);
+        accept(body);
         if (fence.fenced()) {
             throw AgentException.conflict("node is fenced: " + fence.reason());
         }
@@ -281,12 +326,12 @@ public class AgentService {
     }
 
     public ApiResult checkpoint(JsonMap body) {
-        epoch.accept(body.requireLng("epoch"));
+        accept(body);
         return ApiResult.ok(ops.exclusive("checkpoint", pg::checkpoint));
     }
 
     public ApiResult stopPg(JsonMap body) {
-        epoch.accept(body.requireLng("epoch"));
+        accept(body);
         String mode = body.str("mode", "fast");
         boolean releaseVip = body.bool("releaseVip", false);
         String msg = ops.exclusive("stop", () -> {
@@ -306,7 +351,7 @@ public class AgentService {
     }
 
     public ApiResult startPg(JsonMap body) {
-        epoch.accept(body.requireLng("epoch"));
+        accept(body);
         boolean allowPrimary = body.bool("allowPrimary", false);
         if (allowPrimary && fence.fenced()) {
             throw AgentException.conflict("node is fenced and may only start as a replica: " + fence.reason());
@@ -323,7 +368,7 @@ public class AgentService {
 
     /** Makes this node a replica of host:port, keeping data. Refuses on a running primary (use demote). */
     public ApiResult follow(JsonMap body) {
-        epoch.accept(body.requireLng("epoch"));
+        accept(body);
         String host = body.requireStr("host");
         int port = body.integer("port", 5432);
         String slot = body.str("slot");
@@ -347,7 +392,7 @@ public class AgentService {
 
     /** Stops this node (releasing the VIP), optionally rewinds it, and starts it as a replica. Background. */
     public ApiResult demote(JsonMap body) {
-        epoch.accept(body.requireLng("epoch"));
+        accept(body);
         String host = body.requireStr("host");
         int port = body.integer("port", 5432);
         String slot = body.str("slot");
@@ -371,7 +416,7 @@ public class AgentService {
 
     /** Rebuilds this replica from host:port with pg_basebackup. Background. */
     public ApiResult reinit(JsonMap body) {
-        epoch.accept(body.requireLng("epoch"));
+        accept(body);
         String host = body.requireStr("host");
         int port = body.integer("port", 5432);
         String slot = body.str("slot");
@@ -392,7 +437,7 @@ public class AgentService {
 
     /** Fences this node. Carries the epoch like every other command, so a superseded watcher cannot stop a node. */
     public ApiResult fence(JsonMap body) {
-        epoch.accept(body.requireLng("epoch"));
+        accept(body);
         String reason = body.str("reason", "fenced by watcher");
         ApiResult r = fenceNow(reason);
         if (!r.ok()) {
@@ -402,7 +447,7 @@ public class AgentService {
     }
 
     public ApiResult clearFence(JsonMap body) {
-        epoch.accept(body.requireLng("epoch"));
+        accept(body);
         fence.clear();
         return ApiResult.ok("fence cleared");
     }
@@ -432,7 +477,7 @@ public class AgentService {
     }
 
     public ApiResult ensureSlots(JsonMap body) {
-        epoch.accept(body.requireLng("epoch"));
+        accept(body);
         ops.exclusive("ensure-slots", () -> {
             pg.ensureSlots(body.strList("names"));
             return null;
@@ -441,7 +486,7 @@ public class AgentService {
     }
 
     public ApiResult dropSlot(JsonMap body) {
-        epoch.accept(body.requireLng("epoch"));
+        accept(body);
         String name = body.requireStr("name");
         ops.exclusive("drop-slot", () -> {
             pg.dropSlot(name);

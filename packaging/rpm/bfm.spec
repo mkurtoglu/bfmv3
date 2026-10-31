@@ -26,6 +26,7 @@ Source7:        agent.properties.example
 Source8:        watcher.yml.example
 Source9:        sudoers-minipgagent
 Source10:       README.md
+Source11:       minipgagent@.service
 
 %description
 Automatic failover for PostgreSQL streaming replication clusters, with a virtual IP that follows the primary.
@@ -49,6 +50,9 @@ the primary lease from the watchers runs out.
 
 Settings: /etc/bfm/minipgagent/agent.properties. Sudo rule for the VIP: /etc/sudoers.d/minipgagent (set the
 address and the interface). Disable the PostgreSQL unit and let the agent start PostgreSQL.
+
+Several PostgreSQL instances on one host: one agent instance each, minipgagent@<instance>.service, with its
+settings in /etc/bfm/minipgagent/<instance>/ and its state in /var/lib/minipgagent/<instance>/.
 
 # --------------------------------------------------------------------------------------------------- watcher
 
@@ -90,6 +94,7 @@ install -p -m 0755 %{SOURCE2} %{buildroot}%{_bindir}/minipgagent
 install -p -m 0755 %{SOURCE3} %{buildroot}%{_bindir}/bfm-watcher
 install -p -m 0755 %{SOURCE4} %{buildroot}%{_bindir}/bfm-make-certs
 install -p -m 0644 %{SOURCE5} %{buildroot}%{_unitdir}/minipgagent.service
+install -p -m 0644 %{SOURCE11} %{buildroot}%{_unitdir}/minipgagent@.service
 install -p -m 0644 %{SOURCE6} %{buildroot}%{_unitdir}/bfm-watcher.service
 install -p -m 0600 %{SOURCE7} %{buildroot}%{_sysconfdir}/bfm/minipgagent/agent.properties
 install -p -m 0640 %{SOURCE8} %{buildroot}%{_sysconfdir}/bfm/watcher.yml
@@ -123,6 +128,10 @@ fi
 if [ $1 -eq 0 ]; then
     # removal, not upgrade. KillMode=process keeps PostgreSQL running.
     systemctl --no-reload disable --now minipgagent.service >/dev/null 2>&1 || :
+    for u in $(systemctl list-units --all --plain --no-legend 'minipgagent@*.service' 2>/dev/null \
+            | awk '{print $1}'); do
+        systemctl --no-reload disable --now "$u" >/dev/null 2>&1 || :
+    done
 fi
 
 %postun -n minipgagent
@@ -165,6 +174,7 @@ systemctl daemon-reload >/dev/null 2>&1 || :
 %config(noreplace) %attr(0440,root,root) %{_sysconfdir}/sudoers.d/minipgagent
 %attr(0700,postgres,postgres) %dir /var/lib/minipgagent
 %{_unitdir}/minipgagent.service
+%{_unitdir}/minipgagent@.service
 
 %files watcher
 %doc %{bfm_home}/README.md
@@ -178,5 +188,7 @@ systemctl daemon-reload >/dev/null 2>&1 || :
 %{_unitdir}/bfm-watcher.service
 
 %changelog
+* Sat Oct 31 2026 BFM <bfm@localhost> - 0.1.0-2
+- minipgagent@.service for several PostgreSQL instances per host; agents bind to one cluster
 * Wed Oct 28 2026 BFM <bfm@localhost> - 0.1.0-1
 - First packages: agent and watcher for Rocky / RHEL 8 and 9

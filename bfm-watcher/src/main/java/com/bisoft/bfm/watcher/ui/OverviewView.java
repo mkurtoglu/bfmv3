@@ -157,7 +157,7 @@ public class OverviewView extends Div {
                 .setHeader("Timeline").setAutoWidth(true).setTextAlign(ColumnTextAlign.END);
         Grid.Column<NodeRow> sync = grid.addColumn(r -> r.sync() == null ? "—" : Terms.capitalize(r.sync()))
                 .setHeader("Sync").setAutoWidth(true);
-        Grid.Column<NodeRow> agent = grid.addComponentColumn(r -> Ui.chip(r.agentOnline() ? "Online" : "Unreachable",
+        Grid.Column<NodeRow> agent = grid.addComponentColumn(r -> Ui.chip(agentLabel(r),
                 r.agentOnline() ? Ui.Tone.OK : Ui.Tone.CRIT)).setHeader("Agent").setAutoWidth(true);
         // The actions stay on screen whatever the other columns do: in an incident they are what is needed.
         actionsColumn = grid.addComponentColumn(this::actions).setHeader("Actions").setAutoWidth(true)
@@ -237,7 +237,8 @@ public class OverviewView extends Div {
     private Component actions(NodeRow r) {
         boolean noPrimaryRunning = last != null && last.nodes().stream().noneMatch(n -> "Primary".equals(n.role()));
         return NodeActions.menu(console, user, admin, new NodeActions.Node(r.name(), r.isPrimary(), r.agentOnline(),
-                "Replica".equals(r.role()), noPrimaryRunning), () -> toggle(r), this::refresh);
+                "Replica".equals(r.role()), noPrimaryRunning,
+                console.watcher().identity().foreignData().contains(r.name())), () -> toggle(r), this::refresh);
     }
 
     private void renderNodeCards(Overview o) {
@@ -257,7 +258,7 @@ public class OverviewView extends Div {
                     Ui.text("pg-note", (r.isPrimary() ? "WAL " + (r.lsn() == null ? "—" : r.lsn())
                             : "Lag " + lagText(r)) + " · timeline " + (r.timeline() == null ? "—" : r.timeline())
                             + (r.sync() == null ? "" : " · " + Terms.capitalize(r.sync()))
-                            + (r.agentOnline() ? "" : " · agent unreachable")));
+                            + (r.agentOnline() ? "" : " · agent " + agentLabel(r).toLowerCase())));
             if (r.error() != null) {
                 card.add(Ui.text("pg-note", r.error()));
             }
@@ -426,6 +427,13 @@ public class OverviewView extends Div {
         }
         if ("Primary down".equals(o.health())) {
             banners.add(primaryDownBanner(o));
+        } else if ("Primary unverified".equals(o.health())) {
+            banners.add(Ui.banner(o.primary() + " cannot be checked: " + console.watcher().identity()
+                    .problem(o.primary()) + ". The watcher may be looking at the wrong agent while " + o.primary()
+                    + " runs fine, so it starts no failover and renews no lease"
+                    + (o.selfFence() ? " (with self-fencing on, " + o.primary() + " stops itself when its lease"
+                    + " runs out)" : "") + ". Correct the agent-url of " + o.primary()
+                    + " in watcher.yml (or that agent's settings) and restart the watcher.", Ui.Tone.CRIT));
         } else if (o.maintenance()) {
             banners.add(Ui.banner("Maintenance mode is on. Automatic failover is paused; manual switchover and"
                     + " re-initialize stay available.", Ui.Tone.WARN));
@@ -558,6 +566,14 @@ public class OverviewView extends Div {
         };
     }
 
+    /** "Wrong agent" for a node left alone for its identity: it answered, only not as this cluster's node. */
+    private String agentLabel(NodeRow r) {
+        if (r.agentOnline()) {
+            return "Online";
+        }
+        return console.watcher().identity().problem(r.name()) != null ? "Wrong agent" : "Unreachable";
+    }
+
     private void renderStats(Overview o) {
         stats.removeAll();
         NodeRow p = o.primaryRow();
@@ -570,8 +586,12 @@ public class OverviewView extends Div {
                 down ? Ui.Tone.CRIT : o.primary() == null ? Ui.Tone.WARN : null));
         String vipSub;
         Ui.Tone vipTone = null;
+        boolean unverified = "Primary unverified".equals(o.health());
         if (o.vipAddress() == null) {
             vipSub = "agents run with vip.enabled=false";
+        } else if (o.vipHolder() == null && unverified) {
+            vipSub = "unknown: " + o.primary() + " cannot be checked";
+            vipTone = Ui.Tone.WARN;
         } else if (o.vipHolder() == null) {
             vipSub = "not up on any node: clients on the VIP cannot connect";
             vipTone = Ui.Tone.CRIT;
@@ -584,8 +604,10 @@ public class OverviewView extends Div {
         stats.add(Ui.stat("Virtual IP", o.vipAddress() == null ? "not managed" : o.vipAddress(), vipSub, vipTone));
         long alert = notifications.current().lagAlertBytes();
         boolean lagging = o.maxLagBytes() != null && o.maxLagBytes() > alert;
+        boolean anyStreaming = o.nodes().stream().anyMatch(n -> !n.isPrimary() && n.streaming());
         stats.add(Ui.stat("Max replay lag", ConsoleService.bytes(o.maxLagBytes()), o.maxLagNode() == null
-                ? "no streaming replica" : o.maxLagBytes() == 0 ? "every replica has replayed everything"
+                ? (anyStreaming ? "unknown: the primary's position is not known" : "no streaming replica")
+                : o.maxLagBytes() == 0 ? "every replica has replayed everything"
                 : o.maxLagNode() + (o.maxLagDelayMs() == null ? "" : " · " + Ui.seconds(o.maxLagDelayMs())
                 + " behind") + (lagging ? " · alert at " + Lsn.bytes(alert) : ""), lagging ? Ui.Tone.WARN : null));
         stats.add(Ui.stat("Primary lease", o.lease() == null || !o.lease().granted() ? "—"
@@ -604,7 +626,9 @@ public class OverviewView extends Div {
         NodeRow p = o.primaryRow();
         String vip = o.vipAddress();
         String holder = o.vipHolder();
-        if (vip != null && holder == null) {
+        if (vip != null && holder == null && "Primary unverified".equals(o.health())) {
+            t.add(Ui.text("pg-topo-vip warn", "VIP " + vip + " · unknown"));
+        } else if (vip != null && holder == null) {
             t.add(Ui.text("pg-topo-vip crit", "VIP " + vip + " · down"));
         } else if (vip != null && p != null && holder.equals(p.name())) {
             t.add(Ui.text("pg-topo-vip", "VIP " + vip), Ui.div("pg-topo-link"));
@@ -634,6 +658,14 @@ public class OverviewView extends Div {
         topology.add(t, Ui.text("pg-note", "Dashed: other data center. "
                 + ("DC_LOCAL".equals(o.scope()) ? "The VIP never moves to another DC on its own; promotion there"
                 + " needs a manual switchover." : "Automatic failover may promote in any DC.")));
+        if (o.clusterId() != null) {
+            // What the agents are bound to and what every data directory must hold; needed to re-bind an agent.
+            Div ids = new Div();
+            ids.addClassName("pg-note");
+            ids.setText("Cluster id " + o.clusterId() + " · PostgreSQL system identifier "
+                    + (o.systemIdentifier() == null ? "not recorded yet" : o.systemIdentifier()));
+            topology.add(ids);
+        }
     }
 
     private static Div node(NodeRow r, String cls, String sub) {

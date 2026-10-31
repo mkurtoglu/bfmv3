@@ -78,10 +78,17 @@ public final class NodeRepairOperation extends Operation {
             progress.failed("check", primary + " is not running as primary");
             throw new Abort("primary " + primary + " is not running");
         }
-        NodeStatus me = statusOrNull(node);
+        NodeStatus me = rawStatus(node);
         if (me == null) {
             progress.failed("check", "agent unreachable");
             throw new Abort("the agent on " + node + " does not answer");
+        }
+        String problem = ctx.identity().get().problem(me);
+        // Another database in this node's data directory can be replaced by a re-initialize an operator asked
+        // for; another cluster's agent is never touched.
+        if (problem != null && (kind != Kind.REINIT || ctx.identity().get().otherCluster(me))) {
+            progress.failed("check", problem);
+            throw new Abort(node + " is left alone: " + problem);
         }
         if (me.busyOperation() != null) {
             progress.failed("check", "busy with " + me.busyOperation());

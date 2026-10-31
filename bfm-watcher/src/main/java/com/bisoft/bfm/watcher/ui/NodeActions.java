@@ -18,9 +18,13 @@ import java.util.Map;
  */
 final class NodeActions {
 
-    /** What the menu needs to know about the node. */
+    /**
+     * What the menu needs to know about the node.
+     *
+     * @param otherDatabase its agent is this cluster's, but its data directory holds another database
+     */
     record Node(String name, boolean isPrimary, boolean agentOnline, boolean runsAsReplica,
-                boolean noPrimaryRunning) {
+                boolean noPrimaryRunning, boolean otherDatabase) {
     }
 
     private NodeActions() {
@@ -56,10 +60,16 @@ final class NodeActions {
                             after)));
             reinit.addClassName("pg-danger");
         }
-        if (admin && n.noPrimaryRunning() && n.agentOnline() && !n.runsAsReplica()) {
+        if (admin && n.noPrimaryRunning() && (n.agentOnline() && !n.runsAsReplica() || n.otherDatabase())) {
+            String text = n.otherDatabase()
+                    ? n.name() + " holds another database than this cluster's (" + console.watcher().identity()
+                    .problem(n.name()) + "). Starting it as primary makes that database the cluster's: the other"
+                    + " nodes are left alone until they are re-initialized from it. The VIP comes up on " + n.name()
+                    + " first, then PostgreSQL starts there as primary."
+                    : "No node runs as primary. The VIP comes up on " + n.name() + " first, then PostgreSQL starts"
+                    + " there as primary.";
             sub.addItem("Start as primary…", e -> Ui.confirmTyped(n.name(), "Start " + n.name() + " as primary",
-                    "No node runs as primary. The VIP comes up on " + n.name() + " first, then PostgreSQL starts"
-                            + " there as primary.", "Start", true,
+                    text, "Start", true,
                     () -> start(() -> console.watcher().startPrimary(n.name(), user), n.name() + " as primary",
                             after)));
         }

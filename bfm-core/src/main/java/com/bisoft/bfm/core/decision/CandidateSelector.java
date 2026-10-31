@@ -102,7 +102,8 @@ public final class CandidateSelector {
             return "in data center " + v.config().dc() + ", automatic failover stays in " + old.dc();
         }
         if (!v.reachable()) {
-            return "agent unreachable";
+            return v.error() != null && v.error().startsWith(com.bisoft.bfm.core.state.ClusterIdentity.WRONG_IDENTITY)
+                    ? v.error() : "agent unreachable";
         }
         if (v.fenced()) {
             return "fenced";

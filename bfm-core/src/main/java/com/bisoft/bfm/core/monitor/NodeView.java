@@ -46,7 +46,8 @@ public record NodeView(NodeConfig config, NodeStatus status, String error, long 
     /** Short state for the UI: Running, Streaming, Stopped, Fenced, Unreachable, ... */
     public String stateLabel() {
         if (status == null) {
-            return "Agent unreachable";
+            return error != null && error.startsWith(com.bisoft.bfm.core.state.ClusterIdentity.WRONG_IDENTITY)
+                    ? "Wrong identity" : "Agent unreachable";
         }
         if (status.fenced()) {
             return status.pgRunning() ? "Fenced (running)" : "Fenced";

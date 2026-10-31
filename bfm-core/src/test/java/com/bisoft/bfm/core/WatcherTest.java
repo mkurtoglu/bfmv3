@@ -10,6 +10,7 @@ import com.bisoft.bfm.core.event.EventType;
 import com.bisoft.bfm.core.ops.OperationProgress;
 import com.bisoft.bfm.core.ops.PreCheck;
 import com.bisoft.bfm.core.ops.SwitchoverOperation;
+import com.bisoft.bfm.core.state.ClusterIdentity;
 import com.bisoft.bfm.core.state.ClusterState;
 import com.bisoft.bfm.core.state.LocalStateStore;
 import com.bisoft.bfm.core.state.RoleChange;
@@ -750,5 +751,185 @@ class WatcherTest {
         ticks(5);
         assertEquals("pg-a1", watcher.state().primary());
         assertTrue(event(EventType.FAILOVER_BLOCKED).message().contains("behind the primary"));
+    }
+
+    // ---------------------------------------------------------------- identity: several clusters on shared hosts
+
+    private static final String OTHER_CLUSTER = "0b7e5a2c-0000-4000-8000-00000000c4a1";
+    private static final String OTHER_SYSID = "7999999999999999999";
+
+    /** The node answers like an agent of another cluster would: bound to it, with that cluster's database. */
+    private void belongsToAnotherCluster(FakeCluster.Node n) {
+        n.boundCluster = OTHER_CLUSTER;
+        n.boundClusterName = "crm";
+        n.systemIdentifier = OTHER_SYSID;
+    }
+
+    private List<String> commandsTo(String node) {
+        return cluster.log.stream().filter(l -> l.startsWith(node + ":")).toList();
+    }
+
+    @Test
+    void agentsAreBoundToTheClusterAndItsSystemIdentifierIsRecorded() {
+        threeNodes();
+        start(standalone());
+        ticks(2);
+        String id = ClusterIdentity.existingClusterId(store);
+        assertNotNull(id);
+        assertEquals(FakeCluster.SYSID, ClusterIdentity.systemIdentifier(store));
+        for (String n : List.of("pg-a1", "pg-a2", "pg-a3")) {
+            assertEquals(id, cluster.node(n).boundCluster, n + " bound on first contact");
+            assertEquals("prod-main", cluster.node(n).boundClusterName);
+        }
+        assertTrue(watcher.events(50).stream().anyMatch(e -> e.message().contains("is bound to cluster prod-main")));
+        assertTrue(watcher.identity().problems().isEmpty());
+    }
+
+    @Test
+    void anotherClustersAgentBehindAWrongPortIsNeverTouched() {
+        threeNodes();
+        // pg-a3's URL points at crm's agent, whose PostgreSQL runs as crm's primary.
+        FakeCluster.Node crm = cluster.node("pg-a3");
+        belongsToAnotherCluster(crm);
+        crm.role = PgRole.PRIMARY;
+        crm.upstreamHost = null;
+        long crmEpoch = crm.epoch;
+        start(standalone());
+        ticks(12);
+
+        assertEquals("pg-a1", watcher.state().primary());
+        assertEquals(List.of(), commandsTo("pg-a3"), "no fence, no follow, no slot");
+        assertTrue(crm.pgRunning);
+        assertEquals(PgRole.PRIMARY, crm.role, "crm's primary keeps running");
+        assertEquals(crmEpoch, crm.epoch, "not even the epoch moved");
+        assertEquals(OTHER_CLUSTER, crm.boundCluster);
+        assertFalse(cluster.node("pg-a1").slots.contains(NodeConfig.defaultSlot("pg-a3")),
+                "no slot that would hold WAL for a node of another cluster");
+        assertEquals("Wrong identity", watcher.view().node("pg-a3").orElseThrow().stateLabel());
+        assertTrue(event(EventType.WRONG_IDENTITY).message().contains("belongs to cluster crm"));
+        assertFalse(watcher.identity().foreignData().contains("pg-a3"), "nothing at all is offered for it");
+        assertFalse(hasEvent(EventType.ROGUE_PRIMARY_FENCED));
+        assertFalse(hasEvent(EventType.EPOCH_CONFLICT));
+    }
+
+    @Test
+    void aPrimaryThatTurnsOutToBeAnotherClustersBlocksFailoverInsteadOfStartingOne() {
+        threeNodes();
+        start(standalone());
+        ticks(2);
+        // An operator "fixes" pg-a1's agent URL to the wrong port: the watcher now reaches crm's agent there.
+        belongsToAnotherCluster(cluster.node("pg-a1"));
+        ticks(6);
+
+        assertEquals("pg-a1", watcher.state().primary());
+        assertFalse(hasEvent(EventType.FAILOVER_STARTED), "pg-a1 may well run fine; a failover would split it");
+        assertEquals(PgRole.REPLICA, cluster.node("pg-a2").role);
+        assertTrue(event(EventType.FAILOVER_BLOCKED).message().contains("left alone"));
+        assertTrue(watcher.failoverBlockedReason().contains("belongs to cluster crm"));
+        assertTrue(watcher.switchoverChecks("pg-a2", false).stream()
+                .anyMatch(c -> c.level() == PreCheck.Level.FAIL && c.detail().contains("belongs to cluster crm")));
+    }
+
+    @Test
+    void aNodeHoldingAnotherDatabaseIsNeitherFollowedNorRewoundOnlyReinitialized() {
+        threeNodes();
+        start(standalone());
+        ticks(2);
+        // Someone ran initdb on pg-a3: its data directory is a new, unrelated database.
+        FakeCluster.Node c = cluster.node("pg-a3");
+        c.pgRunning = false;
+        c.clusterState = "shut down";
+        c.systemIdentifier = OTHER_SYSID;
+        cluster.log.clear();
+        ticks(18);
+        assertEquals(List.of(), commandsTo("pg-a3"), "the automatic repair leaves it alone");
+        assertTrue(event(EventType.WRONG_IDENTITY).message().contains("holds another database"));
+        assertTrue(watcher.identity().foreignData().contains("pg-a3"), "the console offers re-initialize");
+
+        OperationProgress.Snapshot rejoin = watcher.rejoin("pg-a3", "admin");
+        awaitIdle();
+        assertEquals(OperationProgress.State.FAILED, watcher.operation(rejoin.id()).orElseThrow().state());
+        assertEquals(List.of(), commandsTo("pg-a3"), "pg_rewind would mix two databases");
+
+        OperationProgress.Snapshot reinit = watcher.reinit("pg-a3", "admin");
+        awaitIdle();
+        assertEquals(OperationProgress.State.SUCCEEDED, watcher.operation(reinit.id()).orElseThrow().state());
+        assertEquals(FakeCluster.SYSID, c.systemIdentifier, "rebuilt from the primary");
+        tick();
+        assertTrue(watcher.identity().problems().isEmpty());
+        assertTrue(c.isStreaming());
+    }
+
+    @Test
+    void startingANodeWithAnotherDatabaseAsPrimaryMakesItTheClustersDatabase() {
+        threeNodes();
+        start(standalone());
+        ticks(2);
+        watcher.setControls(null, true, null, null, "admin");
+        cluster.node("pg-a1").stop(watcher.state().epoch(), "fast", true);
+        // The operator rebuilt pg-a2 as a new database (a restore from a dump, say) and wants it to be primary.
+        FakeCluster.Node b = cluster.node("pg-a2");
+        b.pgRunning = false;
+        b.clusterState = "shut down";
+        b.standbySignal = false;
+        b.systemIdentifier = OTHER_SYSID;
+        tick();
+        assertNotNull(watcher.identity().problem("pg-a2"));
+
+        OperationProgress.Snapshot s = watcher.startPrimary("pg-a2", "admin");
+        awaitIdle();
+        assertEquals(OperationProgress.State.SUCCEEDED, watcher.operation(s.id()).orElseThrow().state(),
+                watcher.operation(s.id()).orElseThrow().toString());
+        assertEquals(OTHER_SYSID, ClusterIdentity.systemIdentifier(store));
+        assertEquals("pg-a2", watcher.state().primary());
+        assertTrue(watcher.events(50).stream().anyMatch(e -> e.message().contains("system identifier changed")));
+        tick();
+        assertNotNull(watcher.identity().problem("pg-a3"), "the old database is left alone");
+        assertFalse(cluster.log.contains("pg-a3: follow 10.0.0.2"), "never pointed at a primary of another database");
+    }
+
+    @Test
+    void theAutomaticRestartNeverStartsANodeHoldingAnotherDatabase() {
+        threeNodes();
+        start(standalone());
+        ticks(2);
+        FakeCluster.Node a = cluster.node("pg-a1");
+        a.pgRunning = false;
+        a.clusterState = "shut down";
+        a.systemIdentifier = OTHER_SYSID;
+        cluster.log.clear();
+        ticks(6);
+        assertFalse(a.pgRunning);
+        assertFalse(hasEvent(EventType.PRIMARY_RESTARTED));
+        assertFalse(hasEvent(EventType.FAILOVER_STARTED));
+        assertEquals(List.of(), commandsTo("pg-a1"));
+    }
+
+    @Test
+    void anotherNodesCertificateOnThePrimaryBlocksFailover() {
+        threeNodes();
+        start(standalone());
+        ticks(2);
+        cluster.node("pg-a1").wrongCertificate = "pg-b1";
+        ticks(6);
+        assertEquals("pg-a1", watcher.state().primary());
+        assertFalse(hasEvent(EventType.FAILOVER_STARTED));
+        assertFalse(hasEvent(EventType.PRIMARY_UNREACHABLE), "reached an agent, only not pg-a1's");
+        assertTrue(event(EventType.WRONG_IDENTITY).message().contains("certificate for pg-b1"));
+        assertEquals("Wrong identity", watcher.view().node("pg-a1").orElseThrow().stateLabel());
+
+        // The wrong agent stops answering: that proves nothing about pg-a1, so it is no reason to fail over.
+        cluster.node("pg-a1").wrongCertificate = null;
+        cluster.node("pg-a1").agentUp = false;
+        ticks(6);
+        assertFalse(hasEvent(EventType.FAILOVER_STARTED));
+        assertFalse(watcher.events(20).stream().anyMatch(e -> e.type() == EventType.NODE_BACK
+                && e.message().contains("answers as a node")));
+        assertTrue(watcher.identity().problem("pg-a1").endsWith("its agent does not answer now"));
+        cluster.node("pg-a1").agentUp = true;
+        tick();
+        assertTrue(watcher.identity().problems().isEmpty());
+        assertTrue(watcher.events(20).stream().anyMatch(e -> e.type() == EventType.NODE_BACK
+                && e.message().contains("pg-a1 answers as a node of prod-main again")));
     }
 }

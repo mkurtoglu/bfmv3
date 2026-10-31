@@ -1,0 +1,25 @@
+[Unit]
+Description=MiniPG agent %i (PostgreSQL role changes and VIP)
+Documentation=https://github.com/mkurtoglu/bfmv3
+After=network-online.target
+Wants=network-online.target
+
+# One instance per PostgreSQL instance on this host: settings in /etc/bfm/minipgagent/%i/agent.properties,
+# state in /var/lib/minipgagent/%i/ (the default when state.dir is not set). Each instance needs its own
+# listen.port, certificate, VIP and sudo rule (/etc/sudoers.d/minipgagent-%i).
+
+[Service]
+User=postgres
+Group=postgres
+Environment=MINIPGAGENT_INSTANCE=%i
+EnvironmentFile=-/etc/bfm/minipgagent/%i/agent.env
+ExecStart=/usr/bin/minipgagent /etc/bfm/minipgagent/%i/agent.properties
+Restart=always
+RestartSec=2
+# The agent starts and stops PostgreSQL itself; disable that instance's PostgreSQL unit.
+# KillMode=process keeps PostgreSQL running when the agent is restarted or stopped.
+KillMode=process
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

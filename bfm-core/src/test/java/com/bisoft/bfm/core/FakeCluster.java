@@ -2,6 +2,7 @@ package com.bisoft.bfm.core;
 
 import com.bisoft.bfm.common.Lsn;
 import com.bisoft.bfm.common.json.JsonMap;
+import com.bisoft.bfm.common.model.AgentIdentity;
 import com.bisoft.bfm.common.model.ApiResult;
 import com.bisoft.bfm.common.model.LeaseInfo;
 import com.bisoft.bfm.common.model.NodeStatus;
@@ -31,6 +32,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class FakeCluster implements AgentClientFactory {
 
     public static final String VIP = "192.168.0.50";
+    /** The system identifier every node's data directory has unless a test gives it another database. */
+    public static final String SYSID = "7000000000000000001";
 
     public final ManualTime time;
     private final Map<String, Node> nodes = new LinkedHashMap<>();
@@ -77,6 +80,14 @@ public final class FakeCluster implements AgentClientFactory {
         public long checkpointLsn;
         public final Set<String> slots = new TreeSet<>();
         private final Map<String, OperationStatus> ops = new HashMap<>();
+        /** The PostgreSQL system identifier of this node's data directory (reported running or stopped). */
+        public String systemIdentifier = SYSID;
+        /** The cluster this agent is bound to (null: unbound), as the real agent keeps it in state.dir/binding. */
+        public String boundCluster;
+        public String boundClusterName;
+        public String hostId;
+        private volatile String sentCluster;
+        private volatile String sentClusterName;
 
         Node(String name, String host, String dc) {
             this.name = name;
@@ -89,17 +100,47 @@ public final class FakeCluster implements AgentClientFactory {
             return name;
         }
 
+        @Override
+        public void useCluster(String clusterId, String clusterName) {
+            sentCluster = clusterId;
+            sentClusterName = clusterName;
+        }
+
         public boolean vipHeld() {
             return name.equals(vipHolder.get(vip));
         }
 
+        /** Set: the watcher's TLS check finds another node's certificate here and sends nothing. */
+        public String wrongCertificate;
+
         private void reachable() {
+            if (wrongCertificate != null) {
+                throw AgentCallException.unreachable(name, "wrong identity: the agent at " + host
+                        + ":8008 presents a certificate for " + wrongCertificate + ", not for node " + name);
+            }
             if (!agentUp) {
                 throw AgentCallException.unreachable(name, "unreachable: connection refused");
             }
         }
 
+        /** The real agent's binding check, run before the epoch is looked at. */
+        private void bind() {
+            String sent = sentCluster;
+            if (boundCluster != null && sent != null && !boundCluster.equals(sent)) {
+                throw conflict("this agent belongs to cluster " + boundClusterName + " (" + boundCluster + ") as "
+                        + name + "; the command is for cluster " + sentClusterName + " (" + sent + ")");
+            }
+            if (boundCluster != null && sent == null) {
+                throw conflict("this agent belongs to cluster " + boundCluster + "; the command names no cluster");
+            }
+            if (boundCluster == null && sent != null) {
+                boundCluster = sent;
+                boundClusterName = sentClusterName;
+            }
+        }
+
         private void epoch(long e) {
+            bind();
             if (e < epoch) {
                 throw new AgentCallException(name, 409, "stale epoch " + e + " (agent is at " + epoch + ")");
             }
@@ -138,7 +179,8 @@ public final class FakeCluster implements AgentClientFactory {
                 }
                 boolean primary = pgRunning && role == PgRole.PRIMARY;
                 return new NodeStatus(name, "test", time.millis(), pgRunning, pgRunning ? role : PgRole.UNKNOWN,
-                        pgRunning ? timeline : null, "7000000000000000001", 160004,
+                        pgRunning ? timeline : null, pgRunning || clusterState != null ? systemIdentifier : null,
+                        160004,
                         primary ? Lsn.format(lsn) : null,
                         !primary && pgRunning ? Lsn.format(lsn) : null,
                         !primary && pgRunning ? Lsn.format(lsn) : null, 0L,
@@ -147,7 +189,8 @@ public final class FakeCluster implements AgentClientFactory {
                         !primary && pgRunning && upstreamHost != null ? 5432 : null,
                         peers, slotInfos, vip, vipHeld(), epoch, leaseInfo(), fenced, fencedReason,
                         pgRunning ? null : clusterState, Lsn.format(checkpointLsn), timeline,
-                        null, up == null && !primary && pgRunning ? "no upstream" : null);
+                        null, up == null && !primary && pgRunning ? "no upstream" : null,
+                        new AgentIdentity(boundCluster, boundClusterName, null, hostId, host));
             }
         }
 
@@ -457,6 +500,7 @@ public final class FakeCluster implements AgentClientFactory {
                 vipHolder.remove(vip, name);
                 lsn = up.lsn;
                 timeline = up.timeline;
+                systemIdentifier = up.systemIdentifier;
                 upstreamHost = h;
                 standbySignal = true;
                 role = PgRole.REPLICA;

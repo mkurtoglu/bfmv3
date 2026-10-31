@@ -30,6 +30,7 @@ import com.bisoft.bfm.core.ops.OperationProgress;
 import com.bisoft.bfm.core.ops.PreCheck;
 import com.bisoft.bfm.core.ops.StartPrimaryOperation;
 import com.bisoft.bfm.core.ops.SwitchoverOperation;
+import com.bisoft.bfm.core.state.ClusterIdentity;
 import com.bisoft.bfm.core.state.ClusterState;
 import com.bisoft.bfm.core.state.ClusterStateRepo;
 import com.bisoft.bfm.core.state.StateConflictException;
@@ -125,6 +126,14 @@ public class Watcher implements AutoCloseable {
     private volatile long leaderSinceNanos;
     private final Set<String> activeAlerts = new HashSet<>();
 
+    // identity: which agents and data directories are this cluster's
+    private volatile String clusterId;
+    private volatile ClusterIdentity.Check identity = ClusterIdentity.Check.NONE;
+    private final Map<String, Long> nextBindNanos = new ConcurrentHashMap<>();
+    private final Map<String, String> seenBinding = new ConcurrentHashMap<>();
+    /** The last identity problem of each node, kept while its agent does not answer at all. */
+    private final Map<String, String> lastProblem = new ConcurrentHashMap<>();
+
     public Watcher(ClusterConfig cfg, StateStore store, AgentClientFactory factory, TimeSource time) {
         this.cfg = cfg;
         this.store = store;
@@ -154,7 +163,7 @@ public class Watcher implements AutoCloseable {
                         lastRenewalNanos = time.nanos();
                         renewedOnce = true;
                     }
-                });
+                }, () -> identity);
     }
 
     private static Thread daemon(Runnable r, String name) {
@@ -195,15 +204,16 @@ public class Watcher implements AutoCloseable {
 
     /** One round: poll, observe, and, when leading, act. Public for tests. */
     public synchronized void tick() {
-        ClusterView v = poller.poll();
+        ClusterView raw = poller.poll();
+        StateStore.Leadership lead = store.leadership();
+        ClusterState st = readState();
+        ClusterView v = trusted(raw, st, lead.leader());
         view = v;
         trackStates(v);
-        ClusterState st = readState();
         trackPrimary(v, st);
         recordLag(v, st);
         publishObservation(v, st);
 
-        StateStore.Leadership lead = store.leadership();
         trackLeadership(lead);
         if (!lead.leader()) {
             return;
@@ -213,6 +223,7 @@ public class Watcher implements AutoCloseable {
             bootstrap(v);
             return;
         }
+        bindAgents(raw, st);
         alerts(v, st);
         if (roleOperationRunning()) {
             return;
@@ -389,12 +400,155 @@ public class Watcher implements AutoCloseable {
         lastLeaderId = lead.leaderId();
     }
 
+    // ---------------------------------------------------------------- identity
+
+    /**
+     * The poll as the rest of the watcher may act on it: a node whose agent belongs to another cluster, or whose
+     * data directory holds another database, appears as unreachable with the reason in its error, so no automatic
+     * step and no operation touches it. The console shows the reason.
+     */
+    private ClusterView trusted(ClusterView raw, ClusterState st, boolean leader) {
+        ClusterIdentity.Check check = refreshIdentity(raw, st, leader);
+        if (check.problems().isEmpty()) {
+            return raw;
+        }
+        List<NodeView> nodes = new ArrayList<>();
+        for (NodeView n : raw.nodes()) {
+            String problem = check.problem(n.name());
+            nodes.add(problem == null ? n : new NodeView(n.config(), null, ClusterIdentity.WRONG_IDENTITY + problem,
+                    n.observedAtMillis(), 0));
+        }
+        return new ClusterView(nodes, raw.observedAtMillis());
+    }
+
+    private ClusterIdentity.Check refreshIdentity(ClusterView raw, ClusterState st, boolean leader) {
+        String id = clusterId;
+        if (id == null) {
+            try {
+                id = leader ? ClusterIdentity.clusterId(store) : ClusterIdentity.existingClusterId(store);
+            } catch (RuntimeException e) {
+                LOG.log(Level.FINE, "cannot read the cluster id", e);
+            }
+            if (id != null) {
+                clusterId = id;
+                for (AgentClient a : agents.values()) {
+                    a.useCluster(id, cfg.name());
+                }
+            }
+        }
+        String sysid;
+        try {
+            sysid = ClusterIdentity.systemIdentifier(store);
+            if (sysid == null && leader && st != null && st.primary() != null) {
+                sysid = recordSystemIdentifier(raw, st.primary(), id);
+            }
+        } catch (RuntimeException e) {
+            LOG.log(Level.FINE, "cannot read the system identifier", e);
+            sysid = identity.systemId();
+        }
+        ClusterIdentity.Check probe = new ClusterIdentity.Check(id, sysid, Map.of(), Set.of());
+        Map<String, String> problems = new LinkedHashMap<>();
+        Set<String> foreignData = new HashSet<>();
+        for (NodeView n : raw.nodes()) {
+            String p;
+            if (n.status() != null) {
+                p = probe.problem(n.status());
+                if (p != null && !probe.otherCluster(n.status())) {
+                    foreignData.add(n.name());
+                }
+            } else if (n.error() != null && n.error().startsWith(ClusterIdentity.WRONG_IDENTITY)) {
+                p = n.error().substring(ClusterIdentity.WRONG_IDENTITY.length()); // another node's certificate
+            } else {
+                // Silence after a wrong answer proves nothing: the address still leads to the wrong agent until
+                // the right one answers there. Counting it as a lost node could start a failover.
+                String before = lastProblem.get(n.name());
+                p = before == null ? null : before.endsWith(STILL_SILENT) ? before : before + STILL_SILENT;
+            }
+            if (p != null) {
+                problems.put(n.name(), p);
+                lastProblem.put(n.name(), p);
+            } else {
+                lastProblem.remove(n.name());
+            }
+        }
+        ClusterIdentity.Check check = new ClusterIdentity.Check(id, sysid, problems, foreignData);
+        identity = check;
+        return check;
+    }
+
+    private static final String STILL_SILENT = "; its agent does not answer now";
+
+    /** The first time the recorded primary is seen running, its system identifier becomes the cluster's. */
+    private String recordSystemIdentifier(ClusterView raw, String primary, String id) {
+        NodeView p = raw.node(primary).orElse(null);
+        if (p == null || !p.runningPrimary() || p.status().systemIdentifier() == null
+                || ClusterIdentity.boundElsewhere(id, p.status())) {
+            return null;
+        }
+        String sysid = p.status().systemIdentifier();
+        if (ClusterIdentity.recordSystemIdentifierIfAbsent(store, sysid)) {
+            events.publish(EventType.OPERATION, primary, "Recorded the PostgreSQL system identifier " + sysid
+                    + " of primary " + primary + "; a node holding another database is left alone from now on", actor);
+        }
+        return ClusterIdentity.systemIdentifier(store);
+    }
+
+    /**
+     * Binds agents that are not bound to any cluster yet (installed by hand, or before binding existed) to this
+     * one, once their data directory is known to hold this cluster's database. Any command does that; an empty
+     * slot request is the one that changes nothing else. Says so in the event log once the agent reports it.
+     */
+    private void bindAgents(ClusterView raw, ClusterState st) {
+        ClusterIdentity.Check check = identity;
+        if (check.clusterId() == null) {
+            return;
+        }
+        long now = time.nanos();
+        for (NodeView n : raw.nodes()) {
+            NodeStatus s = n.status();
+            if (s == null) {
+                continue;
+            }
+            String bound = s.identity().clusterId();
+            String before = seenBinding.put(n.name(), bound == null ? "" : bound);
+            if (check.clusterId().equals(bound)) {
+                if ("".equals(before)) {
+                    events.publish(EventType.OPERATION, n.name(), "The MiniPG agent on " + n.name() + " is bound to"
+                            + " cluster " + cfg.name() + " (" + check.clusterId() + "); it refuses commands for any"
+                            + " other cluster from now on", actor);
+                }
+                continue;
+            }
+            if (bound != null || check.problem(n.name()) != null || check.systemId() == null
+                    || !check.systemId().equals(s.systemIdentifier()) || n.busy()) {
+                continue;
+            }
+            Long next = nextBindNanos.get(n.name());
+            if (next != null && now - next < 0) {
+                continue;
+            }
+            nextBindNanos.put(n.name(), now + TimeUnit.MINUTES.toNanos(10));
+            try {
+                agents.get(n.name()).ensureSlots(st.epoch(), List.of());
+            } catch (AgentCallException e) {
+                LOG.fine("binding " + n.name() + " failed: " + e.detail());
+            }
+        }
+    }
+
+    /** This cluster's id and system identifier as of the last poll, and the nodes left alone for theirs. */
+    public ClusterIdentity.Check identity() {
+        return identity;
+    }
+
     // ---------------------------------------------------------------- bootstrap
 
     private void bootstrap(ClusterView v) {
         bootstrapPolls++;
         List<NodeView> primaries = v.runningPrimaries();
-        boolean allAnswered = v.nodes().stream().allMatch(NodeView::reachable);
+        // A node left alone for its identity did answer; waiting for it would not change what it is.
+        Map<String, String> wrong = identity.problems();
+        boolean allAnswered = v.nodes().stream().allMatch(n -> n.reachable() || wrong.containsKey(n.name()));
         long epoch = v.maxAgentEpoch() + 1;
         String note;
         if (primaries.size() > 1) {
@@ -468,7 +622,11 @@ public class Watcher implements AutoCloseable {
     }
 
     private void announceEpoch(long epoch) {
+        Map<String, String> problems = identity.problems();
         for (AgentClient a : agents.values()) {
+            if (problems.containsKey(a.node())) {
+                continue;
+            }
             try {
                 a.ensureSlots(epoch, List.of());
             } catch (AgentCallException e) {
@@ -587,6 +745,14 @@ public class Watcher implements AutoCloseable {
             unreachableReported = false;
             restartAttempted = false;
             blockedReason = null;
+        }
+        String wrong = identity.problem(primary);
+        if (wrong != null) {
+            // Not a lost primary: the watcher is looking at the wrong agent or the wrong data. Failing over would
+            // start a second primary next to one that may run fine.
+            primaryFailures = 0;
+            blocked(primary, primary + " is left alone: " + wrong);
+            return false;
         }
         NodeView pv = v.node(primary).orElse(null);
         PrimaryHealth h = PrimaryHealth.of(pv);
@@ -794,6 +960,19 @@ public class Watcher implements AutoCloseable {
         NodeView p = st.primary() == null ? null : v.node(st.primary()).orElse(null);
         for (NodeView n : v.nodes()) {
             String name = n.name();
+            String wrong = identity.problem(name);
+            // Cleared only once the node answers as this cluster's again; an agent that stops answering says
+            // nothing about its identity.
+            if (wrong != null || n.reachable()) {
+                condition("identity/" + name, wrong != null,
+                        () -> events.publish(EventType.WRONG_IDENTITY, name, name + " is left alone: " + wrong
+                                + ". Nothing is done to it until this is fixed.", actor),
+                        () -> events.publish(EventType.NODE_BACK, name, name + " answers as a node of " + cfg.name()
+                                + " again", actor));
+            }
+            if (wrong != null) {
+                continue;
+            }
             // fenced
             condition("fenced/" + name, n.fenced(),
                     () -> events.publish(EventType.AGENT_FENCED, name, name + " is fenced: " + n.status().fencedReason(),
@@ -1118,7 +1297,7 @@ public class Watcher implements AutoCloseable {
     }
 
     private ClusterView pollNow() {
-        ClusterView v = poller.poll();
+        ClusterView v = trusted(poller.poll(), readState(), store.leadership().leader());
         view = v;
         return v;
     }

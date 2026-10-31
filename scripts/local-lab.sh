@@ -8,10 +8,17 @@
 #   scripts/local-lab.sh revive NODE power it back on (agent only; the watcher rejoins it)
 #   scripts/local-lab.sh vip-fail NODE on|off   make "ip addr add" fail on a node
 #   scripts/local-lab.sh status      cluster state through the REST API
+#   scripts/local-lab.sh restart-watcher   restart the watcher with the current settings (LAB_WRONG_AGENT)
 #   scripts/local-lab.sh down        stop everything
 #
 # Settings: PGBIN (PostgreSQL 14+ bin directory), LAB (lab directory, default /tmp/bfm-lab), LAB_ENVIRONMENT
 # (label shown in the console, default lab; try production to see its marker).
+#
+# A second cluster on the same machine (each with its own directory, ports and console):
+#   LAB=/tmp/bfm-lab-crm LAB_CLUSTER=crm LAB_PREFIX=crm LAB_PORT_OFFSET=100 LAB_CONSOLE_PORT=8081 \
+#     LAB_VIP=192.168.0.60 LAB_DR_VIP=10.20.0.60 scripts/local-lab.sh up
+# A mistyped agent port: LAB_WRONG_AGENT=pg-dr1=18110 scripts/local-lab.sh restart-watcher points pg-dr1 at
+# another agent's port; the console shows it as "Wrong identity" and leaves it alone.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,11 +30,20 @@ AGENT_JAR="$ROOT/bfm-agent/target/minipgagent.jar"
 WATCHER_JAR="$ROOT/bfm-watcher/target/bfm-watcher.jar"
 TOKEN=lab-token
 ADMIN_PW=lab-admin-pw
-NODES=(pg-a1 pg-a2 pg-dr1)
-declare -A PGPORT=([pg-a1]=55432 [pg-a2]=55433 [pg-dr1]=55434)
-declare -A APORT=([pg-a1]=18008 [pg-a2]=18009 [pg-dr1]=18010)
-declare -A DC=([pg-a1]=DC1 [pg-a2]=DC1 [pg-dr1]=DR)
-declare -A VIP=([pg-a1]=192.168.0.50 [pg-a2]=192.168.0.50 [pg-dr1]=10.20.0.50)
+CLUSTER=${LAB_CLUSTER:-prod-main}
+P=${LAB_PREFIX:-pg}
+OFF=${LAB_PORT_OFFSET:-0}
+CONSOLE_PORT=${LAB_CONSOLE_PORT:-8080}
+CONSOLE="http://localhost:$CONSOLE_PORT"
+NODES=("$P-a1" "$P-a2" "$P-dr1")
+declare -A PGPORT=(["$P-a1"]=$((55432 + OFF)) ["$P-a2"]=$((55433 + OFF)) ["$P-dr1"]=$((55434 + OFF)))
+declare -A APORT=(["$P-a1"]=$((18008 + OFF)) ["$P-a2"]=$((18009 + OFF)) ["$P-dr1"]=$((18010 + OFF)))
+declare -A DC=(["$P-a1"]=DC1 ["$P-a2"]=DC1 ["$P-dr1"]=DR)
+declare -A VIP=(["$P-a1"]=${LAB_VIP:-192.168.0.50} ["$P-a2"]=${LAB_VIP:-192.168.0.50}
+                ["$P-dr1"]=${LAB_DR_VIP:-10.20.0.50})
+# node=port: the watcher reaches that node's agent on another port (a deliberate mistake)
+WRONG_NODE=${LAB_WRONG_AGENT:-}; WRONG_NODE=${WRONG_NODE%%=*}
+WRONG_PORT=${LAB_WRONG_AGENT:-}; WRONG_PORT=${WRONG_PORT#*=}
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -71,12 +87,12 @@ watcher_yml() {
   viewer_hash=$(echo "lab-viewer-pw" | java -jar "$WATCHER_JAR" hash-password)
   cat <<EOF
 server:
-  port: 8080
+  port: $CONSOLE_PORT
 bfm:
   watcher-id: w1
   data-dir: $LAB/watcher
   cluster:
-    name: prod-main
+    name: $CLUSTER
     environment: ${LAB_ENVIRONMENT:-lab}
     scope: DC_LOCAL
     timing:
@@ -85,9 +101,11 @@ bfm:
     nodes:
 EOF
   for n in "${NODES[@]}"; do
+    local port=${APORT[$n]}
+    [ -n "${LAB_WRONG_AGENT:-}" ] && [ "$n" = "$WRONG_NODE" ] && port=$WRONG_PORT
     cat <<EOF
       - name: $n
-        agent-url: http://127.0.0.1:${APORT[$n]}
+        agent-url: http://127.0.0.1:$port
         pg-host: 127.0.0.1
         pg-port: ${PGPORT[$n]}
         dc: ${DC[$n]}
@@ -124,9 +142,10 @@ up() {
     mkdir -p "$LAB/$n/state"
     agent_props "$n" >"$LAB/$n/agent.properties"
   done
-  if [ ! -d "$LAB/pg-a1/data" ]; then
-    "$PGBIN/initdb" -D "$LAB/pg-a1/data" -U postgres --auth=trust --no-sync >/dev/null
-    cat >>"$LAB/pg-a1/data/postgresql.conf" <<EOF
+  local first=${NODES[0]}
+  if [ ! -d "$LAB/$first/data" ]; then
+    "$PGBIN/initdb" -D "$LAB/$first/data" -U postgres --auth=trust --no-sync >/dev/null
+    cat >>"$LAB/$first/data/postgresql.conf" <<EOF
 listen_addresses = '127.0.0.1'
 unix_socket_directories = '$LAB/sock'
 wal_level = replica
@@ -141,12 +160,22 @@ EOF
   for n in "${NODES[@]}"; do
     start_agent "$n"
   done
+  start_watcher
+  echo "Then run: $0 bootstrap"
+}
+
+start_watcher() {
   watcher_yml >"$LAB/watcher.yml"
   nohup java -jar "$WATCHER_JAR" --spring.config.additional-location="file:$LAB/watcher.yml" \
     >"$LAB/watcher.log" 2>&1 &
   echo $! >"$LAB/watcher.pid"
-  echo "Watcher starting on http://localhost:8080 (admin / $ADMIN_PW, viewer / lab-viewer-pw)."
-  echo "Then run: $0 bootstrap"
+  echo "Watcher of $CLUSTER starting on $CONSOLE (admin / $ADMIN_PW, viewer / lab-viewer-pw)."
+}
+
+restart_watcher() {
+  [ -f "$LAB/watcher.pid" ] && kill "$(cat "$LAB/watcher.pid")" 2>/dev/null || true
+  sleep 2
+  start_watcher
 }
 
 api() {
@@ -156,7 +185,7 @@ api() {
 wait_op() {
   local id=$1 state
   for _ in $(seq 1 120); do
-    state=$(api "http://localhost:8080/api/v1/operations/$id" | grep -o '"state":"[A-Z]*"' | head -1 | cut -d'"' -f4)
+    state=$(api "$CONSOLE/api/v1/operations/$id" | grep -o '"state":"[A-Z]*"' | head -1 | cut -d'"' -f4)
     [ "$state" != RUNNING ] && { echo "  $state"; return; }
     sleep 1
   done
@@ -168,11 +197,11 @@ op_id() {
 }
 
 bootstrap() {
-  echo "Starting pg-a1 as primary"
-  wait_op "$(api -X POST http://localhost:8080/api/v1/nodes/pg-a1/start-primary | op_id)"
-  for n in pg-a2 pg-dr1; do
+  echo "Starting ${NODES[0]} as primary"
+  wait_op "$(api -X POST "$CONSOLE/api/v1/nodes/${NODES[0]}/start-primary" | op_id)"
+  for n in "${NODES[1]}" "${NODES[2]}"; do
     echo "Building $n with pg_basebackup"
-    wait_op "$(api -X POST "http://localhost:8080/api/v1/nodes/$n/reinit" | op_id)"
+    wait_op "$(api -X POST "$CONSOLE/api/v1/nodes/$n/reinit" | op_id)"
   done
 }
 
@@ -213,7 +242,8 @@ case "${1:-}" in
   crash) crash "${2:-}" ;;
   revive) revive "${2:-}" ;;
   vip-fail) vip_fail "${2:-}" "${3:-}" ;;
-  status) api http://localhost:8080/api/v1/cluster ;;
+  status) api "$CONSOLE/api/v1/cluster" ;;
+  restart-watcher) restart_watcher ;;
   down) down ;;
-  *) sed -n '2,13p' "$0"; exit 64 ;;
+  *) sed -n '2,20p' "$0"; exit 64 ;;
 esac

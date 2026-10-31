@@ -187,7 +187,8 @@ public class SwitchoverView extends Div implements BeforeEnterObserver {
         add(kv, "Primary", o.primary() + " → " + t);
         add(kv, "VIP", tr == null || tr.vipAddress() == null ? "not managed"
                 : sameVip ? tr.vipAddress() + " moves from " + o.primary() + " to " + t
-                : (pr == null ? "" : pr.vipAddress() + " stays down; ") + tr.vipAddress() + " comes up on " + t);
+                : (pr == null || pr.vipAddress() == null ? "" : pr.vipAddress() + " stays down; ") + tr.vipAddress()
+                + " comes up on " + t);
         add(kv, "Safety", "The VIP comes up first; no promote without it");
         add(kv, "Promotion", "Only after " + t + " has replayed the final WAL position of " + o.primary()
                 + ": nothing written before the stop is lost");

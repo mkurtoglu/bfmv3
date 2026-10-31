@@ -12,7 +12,11 @@ minipgagent /path/to/other.properties
 
 Everything the agent reads lives in `/etc/bfm/minipgagent/`: this file, the certificates, and `agent.env` for
 the environment (`MINIPGAGENT_JAVA_OPTS` for JVM options, and the secrets below). Its state — epoch, fence
-flag, lease, operation logs — is in `/var/lib/minipgagent`.
+flag, lease, cluster binding, operation logs — is in `/var/lib/minipgagent`.
+
+With several PostgreSQL instances on one host, each gets its own agent instance,
+`minipgagent@<instance>.service`, reading `/etc/bfm/minipgagent/<instance>/agent.properties` and keeping its
+state in `/var/lib/minipgagent/<instance>/`; see [install.md](install.md#10-several-clusters-on-one-host).
 
 ---
 
@@ -27,6 +31,8 @@ mutual TLS, VIP `192.168.0.50/24` on `eth0`.
 node.name=pg-a1
 listen.address=0.0.0.0
 listen.port=8008
+# Empty: bound to the first watcher group that sends a command (kept in state.dir/binding).
+#cluster.id=
 
 # ---------------------------------------------------------------- mutual TLS
 # Only a caller holding a certificate from the BFM CA may call this agent.
@@ -39,7 +45,8 @@ tls.truststore.password.file=/etc/bfm/minipgagent/ca.pass
 #api.token.file=/etc/bfm/minipgagent/agent.token
 
 # ---------------------------------------------------------------- agent state
-# Epoch, fence flag, the primary lease and the logs of background operations. Survives a restart.
+# Epoch, fence flag, the primary lease, the cluster binding and the logs of background operations. Survives a
+# restart. Locked while the agent runs.
 state.dir=/var/lib/minipgagent
 
 # ---------------------------------------------------------------- PostgreSQL
@@ -143,7 +150,9 @@ Required settings have no default; the agent refuses to start without them.
 | --- | --- | --- |
 | `node.name` | **required** | This node's name. Must match `nodes[].name` in `watcher.yml`; the replication slot is derived from it (`pg-a1` → `pg_a1`). |
 | `listen.address` | `0.0.0.0` | Address the agent API binds to. |
-| `listen.port` | `8008` | Port of the agent API. Must match the port in `agent-url`. |
+| `listen.port` | `8008` | Port of the agent API. Must match the port in `agent-url`. One port per agent instance on a host (8008, 8009, …). |
+| `cluster.id` | — | The cluster this agent belongs to (on the Overview page below the topology, and in the tooltip of the cluster name in the header). Empty: the agent binds to the first watcher group that sends it a command naming a cluster, and keeps that in `state.dir/binding`. Either way, from then on it refuses every command for another cluster with 409 *"this agent belongs to cluster erp (…) as pg-a1; the command is for cluster crm (…)"*. A value here replaces the stored binding. |
+| `instance.name` | from `minipgagent@<instance>` | The agent instance on this host, `[a-z0-9-]{1,32}`. The template unit sets it (`MINIPGAGENT_INSTANCE`); it picks the default `state.dir` and shows in the console. |
 
 ### Mutual TLS and token
 
@@ -169,7 +178,12 @@ The `.p12` and `.pass` files live in `/etc/bfm/minipgagent/`, belong to `postgre
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `state.dir` | `/var/lib/minipgagent` | Cluster epoch, fence flag, the persisted primary lease, and the mark of a rewind or rebuild that did not finish (`operation`). Deleting it makes the node forget that it was fenced or half rewritten, so leave it alone. |
+| `state.dir` | `/var/lib/minipgagent`, or `/var/lib/minipgagent/<instance>` for an agent instance | Cluster epoch, fence flag, the persisted primary lease, the cluster binding (`binding`), and the mark of a rewind or rebuild that did not finish (`operation`). Deleting it makes the node forget that it was fenced or half rewritten, so leave it alone. The agent holds an exclusive lock on `state.dir/lock` while it runs: a second agent pointed at the same directory (a copied `agent.properties`) refuses to start. |
+
+**Re-binding an agent.** The binding is what keeps a watcher from steering another cluster's PostgreSQL through a
+mistyped port, so it changes only by hand: stop the agent, delete `state.dir/binding` (or set `cluster.id`), start
+it. Needed when a cluster's watchers were rebuilt from scratch (they generate a new cluster id) or a node moves to
+another cluster.
 
 ### PostgreSQL
 
@@ -234,6 +248,7 @@ down for hours and this node keeps serving. Fencing also happens on the watcher'
 | `watchdog.enabled` | `false` | Arms `/dev/watchdog` while this node is primary. If the agent's JVM hangs or is killed, the kernel resets the machine, which takes the primary down with it. |
 | `watchdog.device` | `/dev/watchdog` | The device. Needs a watchdog driver and write access for `postgres`. |
 | `watchdog.interval.ms` | `5000` | How often it is petted. Keep it well below the device's own timeout. |
+| `watchdog.lock` | `/var/lib/minipgagent/watchdog.lock` | Host-wide lock: the reset takes every instance on the host down, so only one agent per host may arm the watchdog. A second one with `watchdog.enabled=true` refuses to start. |
 
 ### Timers
 
@@ -283,11 +298,15 @@ pg.start.command=/usr/local/sbin/pgstart.sh {data} {port} {timeout}
 | `fence.action must be 'stop' or 'vip-only'` | Typo in `fence.action`. |
 | `Missing required setting vip.address` / `vip.interface` | `vip.enabled=true` without them. Set `vip.enabled=false` if the cluster has no VIP. |
 | `Cannot read tls.keystore.password.file: …` | The `.pass` file is missing or `postgres` cannot read it. |
+| `state directory /var/lib/minipgagent/erp is in use by PID 4711 (…); another agent instance is already running with it` | Two agents share one `state.dir`. Give each instance its own (the default does). |
+| `the hardware watchdog of this host is in use by PID 4711 (…)` | Another agent on this host has `watchdog.enabled=true`. Only one may. |
+| `instance.name must be 1 to 32 of a-z, 0-9 and '-'` | The instance name in `minipgagent@<instance>` or `instance.name`. |
 
-And one refusal that comes later, on a start or rewind command:
+And refusals that come later, on a command:
 
 | Message | Cause |
 | --- | --- |
+| `this agent belongs to cluster erp (…) as pg-a1; the command is for cluster crm (…) (check the agent URL and port)` | A watcher of another cluster reached this agent: its `agent-url` has the wrong host or port. Nothing was done and the epoch did not move. That watcher shows the node as *Wrong identity* and leaves it alone. |
 | `demote (pg_rewind) was interrupted; the data directory may be incomplete, re-initialize this node` (or `reinit (pg_basebackup) …`) | The agent was restarted, or the command failed, while it was rewriting the data directory. It will not start or rewind what may be half written; **Re-initialize** the node from the console (automatic with *Auto re-initialize*). The same text shows in the node's error column. |
 
 Check after a change:

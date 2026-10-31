@@ -45,12 +45,14 @@ public class MainLayout extends AppLayout {
 
     private final ConsoleService console;
     private final Span watchers = new Span();
+    private final Span clusterName;
     private final Anchor health = new Anchor("", "");
     private final Map<ColorScheme.Value, MenuItem> schemeItems = new EnumMap<>(ColorScheme.Value.class);
     private Registration poll;
 
     public MainLayout(ConsoleService console, AuthenticationContext auth, BfmProperties props) {
         this.console = console;
+        this.clusterName = Ui.text("pg-cluster-name", console.watcher().config().name());
         setPrimarySection(Section.NAVBAR);
 
         Div brandText = Ui.div("pg-brand-text", Ui.text("pg-brand-name", "BFM"),
@@ -59,7 +61,7 @@ public class MainLayout extends AppLayout {
         Div brand = new Div(Ui.logo(), brandText);
         brand.addClassName("pg-brand");
 
-        HorizontalLayout cluster = new HorizontalLayout(Ui.text("pg-cluster-name", console.watcher().config().name()));
+        HorizontalLayout cluster = new HorizontalLayout(clusterName);
         cluster.setSpacing(false);
         cluster.getStyle().set("gap", "8px").set("align-items", "center");
         String env = props.cluster() == null ? null : props.cluster().environment();
@@ -175,6 +177,10 @@ public class MainLayout extends AppLayout {
         watchers.addClassName("pg-wide-only");
 
         Overview o = console.overview();
+        if (o.clusterId() != null) {
+            clusterName.getElement().setAttribute("title", "Cluster id " + o.clusterId()
+                    + (o.systemIdentifier() == null ? "" : "\nPostgreSQL system identifier " + o.systemIdentifier()));
+        }
         health.removeAll();
         health.add(Ui.chip(o.health(), OverviewView.healthTone(o.health())));
         health.getElement().setAttribute("title", o.healthReasons().isEmpty() ? "Cluster status"

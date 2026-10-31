@@ -102,13 +102,20 @@ public record BfmProperties(
     public record Agent(@DefaultValue Tls tls, Path tokenFile, @DefaultValue("180s") Duration commandTimeout) {
     }
 
-    /** PKCS#12 stores shared by agent calls and, with Raft, by the watchers among themselves. */
+    /**
+     * PKCS#12 stores shared by agent calls and, with Raft, by the watchers among themselves.
+     *
+     * @param verifyNodeName require each agent's certificate to name its node (common name or DNS name), so a
+     *                       mistyped agent port reaches no other cluster's agent; turn off only for certificates
+     *                       issued without node names
+     */
     public record Tls(
             @DefaultValue("true") boolean enabled,
             Path keystore,
             Path keystorePasswordFile,
             Path truststore,
-            Path truststorePasswordFile) {
+            Path truststorePasswordFile,
+            @DefaultValue("true") boolean verifyNodeName) {
     }
 
     /**

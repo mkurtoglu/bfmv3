@@ -5,6 +5,7 @@ import com.bisoft.bfm.core.TimeSource;
 import com.bisoft.bfm.core.Watcher;
 import com.bisoft.bfm.core.agent.AgentClientFactory;
 import com.bisoft.bfm.core.agent.HttpAgentClient;
+import com.bisoft.bfm.core.agent.NodeNameTrustManager;
 import com.bisoft.bfm.core.notify.NotificationDispatcher;
 import com.bisoft.bfm.core.notify.SecretBox;
 import com.bisoft.bfm.core.state.LocalStateStore;
@@ -83,8 +84,16 @@ public class WatcherConfiguration {
         BfmProperties.Tls tls = props.agent().tls();
         SSLContext ctx = null;
         if (tls.enabled()) {
-            ctx = TlsSupport.context(tls.keystore(), secret(tls.keystorePasswordFile()), tls.truststore(),
-                    secret(tls.truststorePasswordFile()));
+            if (tls.verifyNodeName()) {
+                TrustManager[] tm = NodeNameTrustManager.wrap(TlsSupport.trustManagers(tls.truststore(),
+                        secret(tls.truststorePasswordFile())), props.toClusterConfig().nodes());
+                KeyManager[] km = tls.keystore() == null ? null
+                        : TlsSupport.keyManagers(tls.keystore(), secret(tls.keystorePasswordFile()));
+                ctx = TlsSupport.context(km, tm);
+            } else {
+                ctx = TlsSupport.context(tls.keystore(), secret(tls.keystorePasswordFile()), tls.truststore(),
+                        secret(tls.truststorePasswordFile()));
+            }
         }
         String token = props.agent().tokenFile() == null ? null : new String(secret(props.agent().tokenFile()));
         if (ctx == null && token == null) {

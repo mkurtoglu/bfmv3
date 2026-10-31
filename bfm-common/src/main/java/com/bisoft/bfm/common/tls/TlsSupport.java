@@ -47,6 +47,17 @@ public final class TlsSupport {
         }
     }
 
+    /** A TLS context from key and trust managers already built (for example, wrapped with extra checks). */
+    public static SSLContext context(KeyManager[] keyManagers, TrustManager[] trustManagers) {
+        try {
+            SSLContext ctx = SSLContext.getInstance("TLS");
+            ctx.init(keyManagers, trustManagers, null);
+            return ctx;
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("Cannot build TLS context: " + e.getMessage(), e);
+        }
+    }
+
     /** Key managers for this process's certificate (PKCS#12). */
     public static KeyManager[] keyManagers(Path keyStore, char[] password) {
         try {
@@ -58,11 +69,11 @@ public final class TlsSupport {
         }
     }
 
-    /** Trust managers for the CA (PKCS#12). */
+    /** Trust managers for the CA (PKCS#12); the JDK's default trust when {@code trustStore} is null. */
     public static TrustManager[] trustManagers(Path trustStore, char[] password) {
         try {
             TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-            tmf.init(load(trustStore, password));
+            tmf.init(trustStore == null ? null : load(trustStore, password));
             return tmf.getTrustManagers();
         } catch (GeneralSecurityException | IOException e) {
             throw new IllegalStateException("Cannot read trust store " + trustStore + ": " + e.getMessage(), e);

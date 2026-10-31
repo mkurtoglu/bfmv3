@@ -6,6 +6,7 @@ import com.bisoft.bfm.core.agent.AgentCallException;
 import com.bisoft.bfm.core.event.EventType;
 import com.bisoft.bfm.core.monitor.ClusterView;
 import com.bisoft.bfm.core.monitor.NodeView;
+import com.bisoft.bfm.core.state.ClusterIdentity;
 import com.bisoft.bfm.core.state.ClusterState;
 
 import java.util.List;
@@ -17,6 +18,11 @@ import java.util.concurrent.TimeUnit;
  * agent still answers, and the operator's way to bring up the first primary of a new cluster.
  *
  * <p>The VIP comes up first; without it PostgreSQL is not started. It refuses while any other node runs as primary.
+ *
+ * <p>A node whose data directory holds another database than the one recorded for the cluster is never started
+ * automatically. An operator may start it: that database becomes the cluster's (its system identifier is recorded,
+ * and nodes holding the old one are left alone until they are re-initialized). An agent of another cluster is
+ * never started.
  */
 public final class StartPrimaryOperation extends Operation {
 
@@ -49,6 +55,20 @@ public final class StartPrimaryOperation extends Operation {
             throw new Abort(primaries.get(0).name() + " already runs as primary");
         }
         NodeView me = view.node(node).orElseThrow();
+        ClusterIdentity.Check identity = ctx.identity().get();
+        String wrong = identity.problem(node);
+        String adopt = null;
+        if (wrong != null) {
+            NodeStatus raw = rawStatus(node);
+            String still = raw == null ? wrong : identity.problem(raw);
+            if (still != null && (raw == null || automatic || identity.otherCluster(raw)
+                    || raw.systemIdentifier() == null)) {
+                progress.failed("check", still);
+                throw new Abort(node + " is left alone: " + still);
+            }
+            adopt = still == null ? null : raw.systemIdentifier();
+            me = new NodeView(me.config(), raw, null, me.observedAtMillis(), 0);
+        }
         if (!me.reachable()) {
             progress.failed("check", "agent unreachable");
             throw new Abort("the agent on " + node + " does not answer");
@@ -64,7 +84,8 @@ public final class StartPrimaryOperation extends Operation {
             progress.failed("check", recorded + " still runs PostgreSQL");
             throw new Abort(recorded + " is the recorded primary and PostgreSQL still runs there");
         }
-        progress.done("check", "no node runs as primary");
+        progress.done("check", "no node runs as primary" + (adopt == null ? "" : "; the database on " + node
+                + " (system identifier " + adopt + ") becomes the cluster's, replacing " + identity.systemId()));
 
         progress.running("epoch");
         ClusterState s = beginRoleOperation(c -> c.operation() == null
@@ -74,6 +95,13 @@ public final class StartPrimaryOperation extends Operation {
                 view.maxAgentEpoch(), node);
         long epoch = s.epoch();
         progress.done("epoch", "epoch " + (before == null ? 0 : before.epoch()) + " -> " + epoch);
+        if (adopt != null) {
+            ClusterIdentity.replaceSystemIdentifier(ctx.store(), adopt);
+            event(EventType.OPERATION, node, "The cluster's PostgreSQL system identifier changed from "
+                    + identity.systemId() + " to " + adopt + ": " + node + " is started as primary with the database it"
+                    + " holds. Nodes holding the old database are left alone until they are re-initialized.");
+            pollNow();
+        }
         announceEpoch(epoch);
         try {
             // Another node is recorded as primary: treat it like a failover would, so it cannot be running as a

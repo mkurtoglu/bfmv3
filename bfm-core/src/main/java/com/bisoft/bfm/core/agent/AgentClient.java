@@ -15,6 +15,13 @@ public interface AgentClient {
 
     String node();
 
+    /**
+     * Names the cluster in every command from now on, so an agent bound to another cluster refuses it before it
+     * changes anything (and an unbound agent binds to this one). Clients that cannot carry it ignore the call.
+     */
+    default void useCluster(String clusterId, String clusterName) {
+    }
+
     NodeStatus status();
 
     ApiResult grantLease(long epoch, long ttlMs, boolean fenceOnExpiry);

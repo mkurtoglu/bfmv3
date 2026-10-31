@@ -1,6 +1,7 @@
 package com.bisoft.bfm.agent;
 
 import com.bisoft.bfm.agent.http.AgentHttpServer;
+import com.bisoft.bfm.agent.state.ExclusiveLock;
 
 import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
@@ -21,15 +22,42 @@ public final class AgentMain {
         }
         Path config = Path.of(args.length > 0 ? args[0] : "/etc/bfm/minipgagent/agent.properties");
         AgentConfig cfg = AgentConfig.load(config);
+        // Held for the life of the process: two agents must never share one state directory, and only one agent
+        // on a host may drive the hardware watchdog.
+        ExclusiveLock stateLock;
+        ExclusiveLock watchdogLock = null;
+        try {
+            stateLock = ExclusiveLock.acquire(cfg.stateDir.resolve("lock"), "state directory " + cfg.stateDir);
+            if (cfg.watchdogEnabled) {
+                watchdogLock = ExclusiveLock.acquire(cfg.watchdogLock, "the hardware watchdog of this host");
+            }
+        } catch (IllegalStateException e) {
+            LOG.severe(e.getMessage());
+            System.err.println("minipgagent: " + e.getMessage());
+            System.exit(2);
+            return;
+        }
         AgentService svc = new AgentService(cfg);
         AgentHttpServer http = new AgentHttpServer(cfg, svc);
         svc.start();
         http.start();
-        LOG.info("minipgagent " + VERSION + " started for node " + cfg.nodeName);
+        LOG.info("minipgagent " + VERSION + " started for node " + cfg.nodeName
+                + (cfg.instanceName == null ? "" : ", instance " + cfg.instanceName)
+                + (svc.boundClusterId() == null ? ", not bound to a cluster yet" : ", cluster " + svc.boundClusterId()));
+        ExclusiveLock[] held = {stateLock, watchdogLock};
         CountDownLatch done = new CountDownLatch(1);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             http.stop();
             svc.stop();
+            for (ExclusiveLock l : held) {
+                try {
+                    if (l != null) {
+                        l.close();
+                    }
+                } catch (java.io.IOException ignored) {
+                    // the process is ending; the kernel drops the lock anyway
+                }
+            }
             done.countDown();
         }, "minipgagent-shutdown"));
         done.await();

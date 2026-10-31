@@ -41,7 +41,13 @@ public record NodeStatus(
         String controlCheckpointLsn,
         Integer controlTimeline,
         String busyOperation,
-        String error) implements JsonWritable {
+        String error,
+        AgentIdentity identity) implements JsonWritable {
+
+    /** Agents older than the identity field report none; treat them as unknown, never as a match. */
+    public NodeStatus {
+        identity = identity == null ? AgentIdentity.UNKNOWN : identity;
+    }
 
     public boolean isPrimary() {
         return pgRunning && role == PgRole.PRIMARY;
@@ -100,6 +106,7 @@ public record NodeStatus(
                 .put("controlTimeline", controlTimeline)
                 .put("busyOperation", busyOperation)
                 .put("error", error)
+                .put("identity", identity)
                 .raw();
     }
 
@@ -136,6 +143,7 @@ public record NodeStatus(
                 m.str("controlCheckpointLsn"),
                 m.intOrNull("controlTimeline"),
                 m.str("busyOperation"),
-                m.str("error"));
+                m.str("error"),
+                AgentIdentity.from(m.obj("identity")));
     }
 }

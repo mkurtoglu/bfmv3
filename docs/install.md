@@ -160,6 +160,10 @@ This writes `ca.crt`, `ca.key`, `ca.p12` + `ca.pass`, and `NAME.p12` + `NAME.pas
 
 - The addresses become the certificate's SAN and **must match the `agent-url` the watcher uses**. An agent
   reached as `https://10.0.0.11:8008` needs `10.0.0.11` in its certificate.
+- The name becomes the certificate's common name and **must be the node name**. The watcher checks it in the
+  TLS handshake, so a mistyped port that reaches another node's agent is refused before anything is sent
+  (the node shows as *Wrong identity*). Certificates issued some other way without the node name in the CN
+  or a DNS SAN need `bfm.agent.tls.verify-node-name: false`.
 - Add the DNS name operators type in the address bar to the watcher's certificate (`bfm.example.com` above),
   so browsers accept the console.
 - Copy `NAME.p12`, `NAME.pass`, `ca.p12` and `ca.pass` to the matching host, owned by the service user,
@@ -349,6 +353,7 @@ bfm:
       keystore-password-file: /etc/bfm/w1.pass
       truststore: /etc/bfm/ca.p12
       truststore-password-file: /etc/bfm/ca.pass
+      verify-node-name: true   # each agent's certificate must name its node
 
   users:
     - name: admin
@@ -467,7 +472,58 @@ which is what makes a split brain impossible when the watchers cannot reach it.
 
 ---
 
-## 10. Day-2
+## 10. Several clusters on one host
+
+One server can carry PostgreSQL instances of several clusters (say `erp` on port 5432 and `crm` on 5433), each
+with its own agent instance. Each cluster has its own watcher (or watcher group) for now; one watcher for many
+clusters is the next step of [the multi-cluster design](design/multi-cluster.md).
+
+| What | `erp` on db01 | `crm` on db01 |
+| --- | --- | --- |
+| Agent unit | `minipgagent@erp.service` | `minipgagent@crm.service` |
+| Settings | `/etc/bfm/minipgagent/erp/agent.properties` | `/etc/bfm/minipgagent/crm/agent.properties` |
+| State (default) | `/var/lib/minipgagent/erp/` | `/var/lib/minipgagent/crm/` |
+| Agent port | `listen.port=8008` | `listen.port=8009` |
+| PostgreSQL | `pg.port=5432`, `pg.data=/var/lib/pgsql/16/erp` | `pg.port=5433`, `pg.data=/var/lib/pgsql/16/crm` |
+| Certificate (CN = node name) | `erp-db01.p12` | `crm-db01.p12` |
+| VIP and sudo rule | `192.168.0.50` in `/etc/sudoers.d/minipgagent-erp` | `192.168.0.60` in `/etc/sudoers.d/minipgagent-crm` |
+
+```bash
+mkdir -m 750 /etc/bfm/minipgagent/crm && chown root:postgres /etc/bfm/minipgagent/crm
+cp /etc/bfm/minipgagent/agent.properties /etc/bfm/minipgagent/crm/   # then edit: node.name, ports, data, VIP
+cp /etc/sudoers.d/minipgagent /etc/sudoers.d/minipgagent-crm          # then edit: crm's VIP and interface
+visudo -cf /etc/sudoers.d/minipgagent-crm
+systemctl enable --now minipgagent@crm
+```
+
+The single-instance layout (`minipgagent.service`, `/etc/bfm/minipgagent/agent.properties`,
+`/var/lib/minipgagent`) stays valid for one of them.
+
+What keeps the clusters apart:
+
+- **Binding.** Each agent belongs to one cluster. It binds to the first watcher group that sends it a command
+  (or to `cluster.id` in its settings) and refuses every command for another cluster: *"this agent belongs to
+  cluster erp (…) as erp-db01; the command is for cluster crm (…)"*. The event log says when an agent binds.
+- **Certificate name.** The watcher refuses an agent whose certificate names another node (above, §3).
+- **System identifier.** The watcher records the PostgreSQL system identifier of its primary. A node whose data
+  directory holds another database is never promoted, followed, rewound or fenced; only **Re-initialize**
+  (which replaces it with the cluster's data) works on it. **Start as primary** on such a node is the one way
+  to make its database the cluster's — the event log records the change.
+- **Locks.** Two agents can never share a state directory, and only one agent per host may arm the hardware
+  watchdog (its reset takes every instance down). Keep `watchdog.enabled=false` on hosts with several instances
+  unless you accept that.
+
+A node that fails any of these checks shows as **Wrong identity** with the reason, raises a critical event, and
+is left alone — it does not count as down, so a mistyped port on the primary *blocks* automatic failover
+instead of starting one next to a primary that may run fine. Fix the `agent-url` (or the agent's settings) and
+it comes back by itself.
+
+Place the nodes of one cluster on different hosts: two nodes of the same cluster on one host give no
+protection against losing that host.
+
+---
+
+## 11. Day-2
 
 **Upgrades.** `dnf upgrade ./minipgagent-*.rpm ./bfm-watcher-*.rpm` replaces the jars, keeps `/etc/bfm/*` (`%config(noreplace)`) and
 **does not restart the services** — a restart would interrupt a running `pg_basebackup`, `pg_rewind` or
@@ -505,7 +561,7 @@ yourself. `/etc/bfm` and `/var/lib/minipgagent*` are kept.
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | What you see | What it means | What to do |
 | --- | --- | --- |
@@ -516,6 +572,10 @@ yourself. `/etc/bfm` and `/var/lib/minipgagent*` are kept.
 | Failover blocked: *"still reach pg-a1"* | Replicas can still reach the primary, so it is not down from their side | Expected for a watcher-side network problem. Investigate the watcher's path to the primary |
 | Failover blocked: *"N MB behind the primary, limit 16 MB"* | No replica is close enough | Raise `max-lag` knowingly, or switch over manually once a replica catches up |
 | Failover blocked: *"in data center DR"* | `scope: DC_LOCAL` | Promote in the other DC with a manual switchover (a deliberate decision) |
+| Node shows *Wrong identity: its agent belongs to cluster crm* | The node's `agent-url` reaches another cluster's agent (wrong port or host) | Fix `agent-url` in `watcher.yml` and restart the watcher. Nothing was done to that agent |
+| *Wrong identity: … presents a certificate for X, not for node Y* | The certificate check (§3) found another node's agent there | Fix `agent-url`, or reissue the certificate with the node name as CN |
+| *Wrong identity: it holds another database (system identifier …)* | The data directory was replaced (`initdb`, a restore) | **Re-initialize** the node; or, if that database should become the cluster's, **Start as primary** on it |
+| Every node shows *its agent belongs to cluster …* after the watchers were rebuilt | New watchers generate a new cluster id; the agents are bound to the old one | On each node: stop the agent, delete `/var/lib/minipgagent/<instance>/binding` (or set `cluster.id`), start it |
 | `stale epoch N (agent is at M)` | Another watcher steered this cluster, or an old watcher came back | Make sure only one watcher (group) manages this cluster; the console shows an epoch conflict and pauses automatic actions |
 | `pg_rewind failed` | No `wal_log_hints` / checksums, or the rewind role cannot connect | Check §2.1 and §2.3; turn on *Auto re-initialize* to let BFM rebuild with `pg_basebackup` instead |
 | Browser warns about the certificate | The CA is not trusted, or the name is not in the SAN | Add `ca.crt` to the operators' trust store; reissue the watcher certificate with the DNS name |

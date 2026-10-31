@@ -16,6 +16,8 @@ import java.util.Properties;
 public final class AgentConfig {
 
     public final String nodeName;
+    public final String clusterId;
+    public final String instanceName;
     public final String listenAddress;
     public final int listenPort;
 
@@ -64,12 +66,20 @@ public final class AgentConfig {
     public final boolean watchdogEnabled;
     public final Path watchdogDevice;
     public final long watchdogIntervalMs;
+    public final Path watchdogLock;
 
     public final int commandTimeoutSec;
     public final long probeIntervalMs;
 
     private AgentConfig(Properties p) {
         nodeName = req(p, "node.name");
+        clusterId = blankToNull(p.getProperty("cluster.id"));
+        // minipgagent@<instance>.service passes the instance name in the environment
+        String instance = blankToNull(p.getProperty("instance.name"));
+        instanceName = instance != null ? instance : blankToNull(System.getenv("MINIPGAGENT_INSTANCE"));
+        if (instanceName != null && !instanceName.matches("[a-z0-9-]{1,32}")) {
+            throw new IllegalArgumentException("instance.name must be 1 to 32 of a-z, 0-9 and '-': " + instanceName);
+        }
         listenAddress = p.getProperty("listen.address", "0.0.0.0");
         listenPort = Integer.parseInt(p.getProperty("listen.port", "8008"));
 
@@ -87,7 +97,9 @@ public final class AgentConfig {
             throw new IllegalArgumentException("Without TLS an api.token is required");
         }
 
-        stateDir = Path.of(p.getProperty("state.dir", "/var/lib/minipgagent"));
+        // One state directory per instance: two agents sharing one would share an epoch, a fence and a lease.
+        stateDir = Path.of(p.getProperty("state.dir", instanceName == null ? "/var/lib/minipgagent"
+                : "/var/lib/minipgagent/" + instanceName));
 
         pgBin = Path.of(req(p, "pg.bin"));
         pgData = Path.of(req(p, "pg.data"));
@@ -130,6 +142,8 @@ public final class AgentConfig {
         watchdogEnabled = Boolean.parseBoolean(p.getProperty("watchdog.enabled", "false"));
         watchdogDevice = Path.of(p.getProperty("watchdog.device", "/dev/watchdog"));
         watchdogIntervalMs = Long.parseLong(p.getProperty("watchdog.interval.ms", "5000"));
+        // Host-wide, whatever the instance: only one agent per host may drive the watchdog.
+        watchdogLock = Path.of(p.getProperty("watchdog.lock", "/var/lib/minipgagent/watchdog.lock"));
 
         commandTimeoutSec = Integer.parseInt(p.getProperty("command.timeout.seconds", "30"));
         probeIntervalMs = Long.parseLong(p.getProperty("probe.interval.ms", "1000"));
