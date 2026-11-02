@@ -126,4 +126,52 @@ class VipManagerTest {
         assertFalse(VipManager.containsAddress(WITHOUT, "192.168.0.50"));
         assertFalse(VipManager.containsAddress("inet 192.168.0.500/24", "192.168.0.50"));
     }
+
+    /** A host whose network answers ARP probes for the neighbour 192.168.0.1 only when {@code dadSees} is set. */
+    private FakeRunner probing(AtomicBoolean held, boolean dadSees) {
+        FakeRunner base = host(held, false, false);
+        return new FakeRunner(argv -> {
+            String cmd = String.join(" ", argv);
+            if (cmd.contains("arping -D") && cmd.endsWith("192.168.0.1")) {
+                return FakeRunner.exit(argv, dadSees ? 1 : 0, "");
+            }
+            return base.run(argv, java.time.Duration.ofSeconds(1), java.util.Map.of());
+        });
+    }
+
+    @Test
+    void blindDuplicateCheckRefusesTheVip() {
+        // cloud test 2026-11-02: arping -D answered "free" for everything, so two servers held the VIP
+        var p = TestConfigs.base(dir);
+        p.setProperty("vip.dad.probe", "192.168.0.1");
+        AtomicBoolean held = new AtomicBoolean();
+        VipManager blind = new VipManager(com.bisoft.bfm.agent.AgentConfig.of(p), probing(held, false));
+        AgentException e = assertThrows(AgentException.class, blind::acquire);
+        assertEquals(409, e.httpStatus());
+        assertTrue(e.getMessage().contains("cannot see other hosts"), e.getMessage());
+        assertFalse(held.get(), "the VIP was not added");
+        assertTrue(blind.lastDadError().contains("192.168.0.1"));
+
+        VipManager seeing = new VipManager(com.bisoft.bfm.agent.AgentConfig.of(p), probing(held, true));
+        assertTrue(seeing.acquire().contains("up on eth0"));
+        assertNull(seeing.lastDadError());
+
+        // a network that answers now and then (the cloud test saw 0 to 2 of 8 probes answered) is blind too
+        java.util.concurrent.atomic.AtomicInteger n = new java.util.concurrent.atomic.AtomicInteger();
+        FakeRunner seeing2 = probing(new AtomicBoolean(), true);
+        VipManager flaky = new VipManager(com.bisoft.bfm.agent.AgentConfig.of(p), new FakeRunner(argv -> {
+            String cmd = String.join(" ", argv);
+            if (cmd.contains("arping -D") && cmd.endsWith("192.168.0.1")) {
+                return FakeRunner.exit(argv, n.incrementAndGet() == 2 ? 0 : 1, "");
+            }
+            return seeing2.run(argv, java.time.Duration.ofSeconds(1), java.util.Map.of());
+        }));
+        assertTrue(flaky.dadSelfTest() != null, "one unanswered run of three is enough to distrust the check");
+
+        // without a probe address nothing is self-tested (and nothing refused)
+        assertFalse(new VipManager(TestConfigs.config(dir), host(new AtomicBoolean(), false, false)).dadSelfTested());
+        p.setProperty("vip.dad.enabled", "false");
+        assertNull(new VipManager(com.bisoft.bfm.agent.AgentConfig.of(p), probing(new AtomicBoolean(), false))
+                .dadSelfTest());
+    }
 }

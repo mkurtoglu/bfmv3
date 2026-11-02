@@ -86,6 +86,14 @@ public class AgentService {
     }
 
     public void start() {
+        if (vip.dadSelfTested()) {
+            String blind = vip.dadSelfTest();
+            if (blind != null) {
+                LOG.severe("VIP: " + blind);
+            }
+        } else if (vip.enabled() && cfg.vipDadEnabled) {
+            LOG.warning("VIP: the duplicate address check is not self-tested; set vip.dad.probe to a live neighbour");
+        }
         refresh();
         if (interrupted.present()) {
             LOG.warning(interrupted.refusal());
@@ -221,6 +229,10 @@ public class AgentService {
         if (vipError != null) {
             error = error == null ? vipError : error + "; " + vipError;
         }
+        String dad = vip.lastDadError();
+        if (dad != null) {
+            error = error == null ? dad : error + "; " + dad;
+        }
         if (interrupted.present()) {
             error = error == null ? interrupted.refusal() : error + "; " + interrupted.refusal();
         }
@@ -300,7 +312,8 @@ public class AgentService {
     }
 
     public ApiResult vipCheck() {
-        String busy = vip.checkFree();
+        String blind = vip.dadSelfTest();
+        String busy = blind != null ? blind : vip.checkFree();
         boolean held = vip.enabled() && vip.isHeld();
         return new ApiResult(busy == null || held, busy == null ? "VIP free" : busy, null,
                 JsonMap.create().put("held", held).put("free", busy == null).put("address", vip.address()));

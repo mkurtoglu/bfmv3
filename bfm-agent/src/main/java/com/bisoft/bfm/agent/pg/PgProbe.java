@@ -45,64 +45,93 @@ public class PgProbe {
         return ControlData.parse(r.stdout());
     }
 
+    /**
+     * Everything one probe reads, in a single statement and so a single psql process and connection per probe (it
+     * used to be four on a primary: about three new connections a second per node; cloud test 2026-11-02, user decision
+     * "one psql per probe"). Every row starts with its kind; functions that fail or cost during recovery, or on a
+     * primary, sit behind CASE so they are only evaluated where they apply. Ten text columns.
+     */
+    static final String PROBE_SQL = "SELECT 'base', pg_is_in_recovery()::text, current_setting('server_version_num'),"
+            + " (SELECT system_identifier::text FROM pg_control_system()), NULL, NULL, NULL, NULL, NULL, NULL"
+            + " UNION ALL SELECT 'wal',"
+            + " CASE WHEN pg_is_in_recovery() THEN NULL ELSE pg_current_wal_lsn()::text END,"
+            + " CASE WHEN pg_is_in_recovery() THEN NULL"
+            + " ELSE ('x' || substr(pg_walfile_name(pg_current_wal_lsn()), 1, 8))::bit(32)::int::text END,"
+            + " NULL, NULL, NULL, NULL, NULL, NULL, NULL"
+            + " UNION ALL SELECT 'rep', application_name, coalesce(host(client_addr), ''), state, sync_state,"
+            + " sent_lsn::text, write_lsn::text, flush_lsn::text, replay_lsn::text,"
+            + " (extract(epoch FROM replay_lag) * 1000)::bigint::text FROM pg_stat_replication"
+            + " UNION ALL SELECT 'slot', slot_name::text, slot_type, active::text, restart_lsn::text,"
+            + " CASE WHEN restart_lsn IS NULL OR pg_is_in_recovery() THEN NULL"
+            + " ELSE pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)::bigint::text END, NULL, NULL, NULL, NULL"
+            + " FROM pg_replication_slots"
+            + " UNION ALL SELECT 'rcv', pg_last_wal_receive_lsn()::text, pg_last_wal_replay_lsn()::text,"
+            + " CASE WHEN pg_last_xact_replay_timestamp() IS NULL THEN NULL"
+            + " ELSE (extract(epoch FROM now() - pg_last_xact_replay_timestamp()) * 1000)::bigint::text END,"
+            + " (SELECT status FROM pg_stat_wal_receiver), (SELECT sender_host FROM pg_stat_wal_receiver),"
+            + " (SELECT sender_port FROM pg_stat_wal_receiver)::text,"
+            + " (SELECT received_tli FROM pg_stat_wal_receiver)::text,"
+            + " (SELECT timeline_id FROM pg_control_checkpoint())::text,"
+            + " CASE WHEN pg_is_in_recovery()"
+            + " THEN (SELECT max(name) FROM pg_ls_waldir() WHERE name ~ '^[0-9A-F]{8}[.]history$') END"
+            + " WHERE pg_is_in_recovery()"
+            + " ORDER BY 1, 2";
+
     public PgSnapshot collect() {
         if (!isRunning()) {
             return PgSnapshot.stopped(controlData(), null);
         }
         try {
-            List<String> base = psql.query(
-                    "SELECT pg_is_in_recovery(), current_setting('server_version_num'),"
-                            + " (SELECT system_identifier FROM pg_control_system())", T).get(0);
-            boolean inRecovery = "t".equals(base.get(0));
-            Integer version = parseInt(base.get(1));
-            String sysId = base.get(2);
-            return inRecovery ? replica(version, sysId) : primary(version, sysId);
+            return snapshot(psql.query(PROBE_SQL, T));
         } catch (PgException | RuntimeException e) {
             return new PgSnapshot(true, PgRole.UNKNOWN, null, null, null, null, null, null, null, null, null, null,
                     List.of(), List.of(), ControlData.UNKNOWN, e.getMessage());
         }
     }
 
-    private PgSnapshot primary(Integer version, String sysId) throws PgException {
-        List<String> row = psql.query(
-                "SELECT pg_current_wal_lsn(),"
-                        + " ('x' || substr(pg_walfile_name(pg_current_wal_lsn()), 1, 8))::bit(32)::int", T).get(0);
+    /** The snapshot of a running server from the rows of {@link #PROBE_SQL}. */
+    static PgSnapshot snapshot(List<List<String>> rows) {
+        List<String> base = null;
+        List<String> wal = null;
+        List<String> rcv = null;
         List<ReplicationPeer> peers = new ArrayList<>();
-        for (List<String> r : psql.query(
-                "SELECT application_name, coalesce(host(client_addr), ''), state, sync_state,"
-                        + " sent_lsn, write_lsn, flush_lsn, replay_lsn,"
-                        + " (extract(epoch FROM replay_lag) * 1000)::bigint"
-                        + " FROM pg_stat_replication ORDER BY application_name", T)) {
-            peers.add(new ReplicationPeer(r.get(0), r.get(1), r.get(2), r.get(3), r.get(4), r.get(5), r.get(6),
-                    r.get(7), parseLong(r.get(8))));
-        }
         List<SlotInfo> slots = new ArrayList<>();
-        for (List<String> r : psql.query(
-                "SELECT slot_name, slot_type, active, restart_lsn,"
-                        + " CASE WHEN restart_lsn IS NULL THEN NULL"
-                        + " ELSE pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)::bigint END"
-                        + " FROM pg_replication_slots ORDER BY slot_name", T)) {
-            slots.add(new SlotInfo(r.get(0), r.get(1), "t".equals(r.get(2)), r.get(3), parseLong(r.get(4))));
+        for (List<String> r : rows) {
+            switch (r.get(0)) {
+                case "base" -> base = r;
+                case "wal" -> wal = r;
+                case "rcv" -> rcv = r;
+                case "rep" -> peers.add(new ReplicationPeer(r.get(1), r.get(2), r.get(3), r.get(4), r.get(5), r.get(6),
+                        r.get(7), r.get(8), parseLong(r.get(9))));
+                case "slot" -> slots.add(new SlotInfo(r.get(1), r.get(2), truth(r.get(3)), r.get(4),
+                        parseLong(r.get(5))));
+                default -> {
+                    // a kind of a newer agent: ignored
+                }
+            }
         }
-        return new PgSnapshot(true, PgRole.PRIMARY, parseInt(row.get(1)), sysId, version, row.get(0), null, null,
-                null, null, null, null, peers, slots, ControlData.UNKNOWN, null);
+        if (base == null) {
+            throw new IllegalStateException("the probe returned no base row");
+        }
+        boolean inRecovery = truth(base.get(1));
+        Integer version = parseInt(base.get(2));
+        String sysId = base.get(3);
+        if (!inRecovery) {
+            return new PgSnapshot(true, PgRole.PRIMARY, wal == null ? null : parseInt(wal.get(2)), sysId, version,
+                    wal == null ? null : wal.get(1), null, null, null, null, null, null, peers, slots,
+                    ControlData.UNKNOWN, null);
+        }
+        List<String> r = rcv == null ? java.util.Arrays.asList(new String[10]) : rcv;
+        Integer timeline = replicaTimeline(parseInt(r.get(7)), parseInt(r.get(8)), r.get(9));
+        // a replica reports no replication peers or slots, as before (they belong to the primary's view)
+        return new PgSnapshot(true, PgRole.REPLICA, timeline, sysId, version, null, r.get(1), r.get(2),
+                parseLong(r.get(3)), r.get(4), r.get(5), parseInt(r.get(6)), List.of(), List.of(),
+                ControlData.UNKNOWN, null);
     }
 
-    private PgSnapshot replica(Integer version, String sysId) throws PgException {
-        List<String> r = psql.query(
-                "SELECT pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn(),"
-                        + " CASE WHEN pg_last_xact_replay_timestamp() IS NULL THEN NULL"
-                        + " ELSE (extract(epoch FROM now() - pg_last_xact_replay_timestamp()) * 1000)::bigint END,"
-                        + " (SELECT status FROM pg_stat_wal_receiver),"
-                        + " (SELECT sender_host FROM pg_stat_wal_receiver),"
-                        + " (SELECT sender_port FROM pg_stat_wal_receiver),"
-                        + " (SELECT received_tli FROM pg_stat_wal_receiver),"
-                        + " (SELECT timeline_id FROM pg_control_checkpoint()),"
-                        + " (SELECT max(name) FROM pg_ls_waldir() WHERE name ~ '^[0-9A-F]{8}[.]history$')", T).get(0);
-        Integer timeline = replicaTimeline(parseInt(r.get(6)), parseInt(r.get(7)), r.get(8));
-        return new PgSnapshot(true, PgRole.REPLICA, timeline, sysId, version, null, r.get(0), r.get(1),
-                parseLong(r.get(2)), r.get(3), r.get(4), parseInt(r.get(5)), List.of(), List.of(),
-                ControlData.UNKNOWN, null);
+    /** A boolean as psql prints it: {@code t} for a boolean column, {@code true} for boolean::text. */
+    static boolean truth(String s) {
+        return "t".equals(s) || "true".equals(s);
     }
 
     /**

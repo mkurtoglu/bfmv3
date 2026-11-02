@@ -292,6 +292,10 @@ and the leader acts for every cluster; when it goes, another one takes over with
    `secret.key` in `/var/lib/bfm-watcher/` (owner `bfm`, mode 600); then run `bfm-watcher setup` with
    *Certificates* `files`, the same peers and its own id.
 3. Open 9870/tcp between the watchers.
+4. On every database host, add the new watchers to `tls.allowed.clients` in the agent's `agent.properties`
+   (`tls.allowed.clients=w1,w2,w3`) and restart the agent (`systemctl restart minipgagent@<instance>`;
+   PostgreSQL keeps running). An agent enrolled while there was one watcher only accepts `w1`'s certificate and
+   refuses the others with 403. Agents enrolled after this step get all three ids.
 
 Every watcher runs every cluster; the header shows *Watchers 3/3 · leader w1*. The wizards and operations run on
 the leader; a follower's console links to it. With three watchers, turn on **self-fencing** for each cluster

@@ -21,6 +21,9 @@ public class VipManager {
 
     private final AgentConfig cfg;
     private final ProcessRunner runner;
+    private volatile String lastDadError;
+    /** Consecutive answered self-test runs needed. */
+    static final int DAD_SELF_TEST_RUNS = 3;
 
     public VipManager(AgentConfig cfg, ProcessRunner runner) {
         this.cfg = cfg;
@@ -66,6 +69,46 @@ public class VipManager {
         return "duplicate address check failed: " + r.summary();
     }
 
+    /**
+     * Checks that the duplicate check can see other hosts at all: {@code arping -D} against a live neighbour
+     * ({@code vip.dad.probe}) must get an answer. On a network that does not answer ARP probes (cloud VPCs; cloud test
+     * 2026-11-02: two servers held the VIP and every address read as free) the check passes for anything, so the agent
+     * refuses to bring the VIP up rather than rely on it (user decision 2026-11-02).
+     *
+     * @return null when the check works or cannot be tested (no probe address), otherwise why it cannot be trusted
+     */
+    public String dadSelfTest() {
+        if (!dadSelfTested()) {
+            return null;
+        }
+        // three runs in a row must see the neighbour: on the cloud test's network 0 to 2 of 8 probes were answered, so
+        // one lucky answer proves nothing. On a working network the neighbour answers at once and this costs little.
+        String why = null;
+        for (int i = 0; i < DAD_SELF_TEST_RUNS && why == null; i++) {
+            ProcessResult r = run(cfg.vipDadProbeCommand);
+            if (!r.timedOut() && r.exitCode() == 1) {
+                continue; // the neighbour answered: duplicates are visible here
+            }
+            why = r.ok()
+                    ? "the duplicate address check cannot see other hosts on " + cfg.vipInterface + ": arping -D reports "
+                            + cfg.vipDadProbe + " (a live neighbour) as free; set vip.dad.enabled=false only if the VIP "
+                            + "is protected otherwise"
+                    : "duplicate address self-test failed: " + r.summary();
+        }
+        lastDadError = why;
+        return why;
+    }
+
+    /** The result of the last self-test (null = passed or not run). */
+    public String lastDadError() {
+        return lastDadError;
+    }
+
+    /** Whether a self-test runs at all (a probe address is configured). */
+    public boolean dadSelfTested() {
+        return cfg.vipEnabled && cfg.vipDadEnabled && cfg.vipDadProbe != null;
+    }
+
     /** Adds the VIP and announces it. Throws when the address could not be brought up here. */
     public String acquire() {
         if (!cfg.vipEnabled) {
@@ -74,6 +117,10 @@ public class VipManager {
         if (isHeld()) {
             String garp = announce();
             return "VIP " + cfg.vipAddress + " already up on " + cfg.vipInterface + garp;
+        }
+        String blind = dadSelfTest();
+        if (blind != null) {
+            throw AgentException.conflict(blind);
         }
         String busy = checkFree();
         if (busy != null) {
@@ -116,7 +163,8 @@ public class VipManager {
         List<String> argv = CommandTemplate.expand(template, Map.of(
                 "vip", cfg.vipAddress == null ? "" : cfg.vipAddress,
                 "prefix", Integer.toString(cfg.vipPrefix),
-                "iface", cfg.vipInterface == null ? "" : cfg.vipInterface));
+                "iface", cfg.vipInterface == null ? "" : cfg.vipInterface,
+                "probe", cfg.vipDadProbe == null ? "" : cfg.vipDadProbe));
         return runner.run(argv, Duration.ofSeconds(cfg.commandTimeoutSec));
     }
 

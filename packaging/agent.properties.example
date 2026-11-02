@@ -28,6 +28,8 @@ tls.keystore=/etc/bfm/minipgagent/pg-a1.p12
 tls.keystore.password.file=/etc/bfm/minipgagent/pg-a1.pass
 tls.truststore=/etc/bfm/minipgagent/ca.p12
 tls.truststore.password.file=/etc/bfm/minipgagent/ca.pass
+# Only the watchers' certificates may call this agent (their ids); empty = any certificate of the CA.
+tls.allowed.clients=w1
 # Optional second check; required when TLS is off (lab only). Also read from MINIPGAGENT_API_TOKEN.
 #api.token.file=/etc/bfm/minipgagent/agent.token
 
@@ -70,6 +72,8 @@ vip.prefix=24
 vip.interface=eth0
 # Duplicate address detection before bringing the VIP up: if another host answers, nothing is added.
 vip.dad.enabled=true
+# A live neighbour (the default gateway): arping -D must see it, or the VIP stays down (blind duplicate check).
+#vip.dad.probe=192.168.0.1
 #vip.add.command=sudo -n /usr/sbin/ip addr add {vip}/{prefix} dev {iface}
 #vip.del.command=sudo -n /usr/sbin/ip addr del {vip}/{prefix} dev {iface}
 #vip.show.command=/usr/sbin/ip -o -4 addr show dev {iface}

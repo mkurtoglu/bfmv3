@@ -41,6 +41,9 @@ tls.keystore=/etc/bfm/minipgagent/pg-a1.p12
 tls.keystore.password.file=/etc/bfm/minipgagent/pg-a1.pass
 tls.truststore=/etc/bfm/minipgagent/ca.p12
 tls.truststore.password.file=/etc/bfm/minipgagent/ca.pass
+# Only these certificate names may call: the watchers' ids. minipgagent setup writes it from the enrollment;
+# empty = any certificate of the CA, which includes the other database hosts' agents.
+tls.allowed.clients=w1
 # Optional second check on top of TLS; required when tls.enabled=false (lab only).
 #api.token.file=/etc/bfm/minipgagent/agent.token
 
@@ -79,12 +82,15 @@ vip.address=192.168.0.50
 vip.prefix=24
 vip.interface=eth0
 vip.dad.enabled=true
+# A live neighbour (the default gateway): arping -D must see it, or the duplicate check is blind and the VIP stays down.
+vip.dad.probe=192.168.0.1
 # Defaults; they must match /etc/sudoers.d/minipgagent word for word.
 #vip.add.command=sudo -n /usr/sbin/ip addr add {vip}/{prefix} dev {iface}
 #vip.del.command=sudo -n /usr/sbin/ip addr del {vip}/{prefix} dev {iface}
 #vip.show.command=/usr/sbin/ip -o -4 addr show dev {iface}
 #vip.dad.command=sudo -n /usr/sbin/arping -D -q -c 2 -w 3 -I {iface} {vip}
 #vip.garp.command=sudo -n /usr/sbin/arping -U -q -c 3 -I {iface} {vip}
+#vip.dad.probe.command=sudo -n /usr/sbin/arping -D -q -c 2 -w 3 -I {iface} {probe}
 
 # ---------------------------------------------------------------- self-fencing
 # What this node does to itself when the primary lease runs out (only when the watcher grants a fencing
@@ -163,6 +169,7 @@ Required settings have no default; the agent refuses to start without them.
 | `tls.keystore.password` / `.file` | — | Its password, inline or in a file. |
 | `tls.truststore` | required when TLS is on | PKCS#12 store with the BFM CA: callers are accepted only if their certificate is signed by it. |
 | `tls.truststore.password` / `.file` | — | Its password. |
+| `tls.allowed.clients` | empty | Comma-separated certificate CNs that may call the agent: the watchers' ids (a watcher's certificate is named after its id). Any other certificate, even one signed by the BFM CA, gets 403 and a log line with its CN — without this list another database host's agent certificate, from the same CA, could promote or fence this node. `minipgagent setup` writes it from the enrollment. **When you add watchers** (one to three), add their ids here on every agent and restart it, or the new watchers are refused. Needs `tls.enabled=true`. |
 | `api.token` / `.file` | — | Optional bearer token checked on top of TLS; **required when `tls.enabled=false`**. |
 
 Each secret can be given three ways, and the first one found wins:
@@ -221,6 +228,8 @@ another cluster.
 | `vip.prefix` | `24` | Prefix length used in `ip addr add`. |
 | `vip.interface` | required when enabled | Interface on **this** node (`eth0`, `ens192`, `bond0`…). |
 | `vip.dad.enabled` | `true` | Duplicate address detection with `arping -D` before bringing the VIP up: if another host answers, nothing is added and nothing is promoted. |
+| `vip.dad.probe` | — | A live neighbour on the VIP's interface, usually the default gateway (`minipgagent setup` proposes it). At start and before every VIP acquire the agent runs `arping -D` against it three times; each run must get an answer. If not, the duplicate check cannot see other hosts on this network (cloud networks that do not answer ARP probes: there every address reads as free and two nodes can hold the VIP), so the agent refuses to bring the VIP up and `/v1/status` says why. Empty: no self-test, and the agent logs a warning at start. The sudo rule must allow the probe command (setup writes it). |
+| `vip.dad.probe.command` | `sudo -n /usr/sbin/arping -D -q -c 2 -w 3 -I {iface} {probe}` | The self-test. |
 | `vip.add.command` | `sudo -n /usr/sbin/ip addr add {vip}/{prefix} dev {iface}` | Bring the VIP up. |
 | `vip.del.command` | `sudo -n /usr/sbin/ip addr del {vip}/{prefix} dev {iface}` | Take it down. |
 | `vip.show.command` | `/usr/sbin/ip -o -4 addr show dev {iface}` | Read the interface's addresses (no sudo needed). |

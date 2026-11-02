@@ -57,7 +57,8 @@ public class EnrollmentService {
     /** What a database host gets for a valid token. */
     public record Enrollment(String clusterId, String cluster, String environment, String node, String dc,
                              String agentHost, int agentPort, String pgHost, int pgPort, List<Peer> peers,
-                             String systemIdentifier, String certificate, String caCertificate) {
+                             String systemIdentifier, String certificate, String caCertificate,
+                             List<String> watchers) {
     }
 
     public record Peer(String name, String pgHost, int pgPort) {
@@ -228,7 +229,7 @@ public class EnrollmentService {
         }
         return new Enrollment(c.id(), c.name(), c.environment(), n.name(), n.dc(), agent.getHost(),
                 agent.getPort() == -1 ? 8008 : agent.getPort(), n.pgHost(), n.pgPort(), peers,
-                c.systemIdentifier(), chain, ca.certificatePem());
+                c.systemIdentifier(), chain, ca.certificatePem(), hub.watcherIds());
     }
 
     /** The certificate names a node needs: the agent URL's host, its PostgreSQL address and its host name. */

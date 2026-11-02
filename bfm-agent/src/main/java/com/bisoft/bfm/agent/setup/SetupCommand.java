@@ -134,7 +134,7 @@ public final class SetupCommand {
     /** @param agentPort where the watcher reaches the agent, or null when unknown (a bundle) */
     record Join(String clusterId, String cluster, String environment, String node, String dc, Integer agentPort,
                 List<Readiness.Peer> peers, String systemIdentifier, Path nodeStore, String nodePass,
-                Path caStore, String caPass) {
+                Path caStore, String caPass, List<String> watchers) {
     }
 
     int run() throws Exception {
@@ -264,7 +264,7 @@ public final class SetupCommand {
                 out.println("   (dry run: the token is not spent; the console's settings for the node are not known"
                         + " yet)");
                 return new Join(null, "(from the token)", null, "(from the token)", null, 8008, List.of(), null,
-                        nodeStore, nodePass, caStore, caPass);
+                        nodeStore, nodePass, caStore, caPass, List.of());
             }
             out.println("   Creating this node's key (RSA 3072) and asking " + url + " to certify it…");
             Keytool.createKeyPair(nodeStore, nodePass, "node", "minipgagent");
@@ -283,7 +283,8 @@ public final class SetupCommand {
             }
             return new Join(r.requireStr("clusterId"), r.requireStr("cluster"), r.str("environment"),
                     r.requireStr("node"), r.str("dc"), r.integer("agentPort", 8008), peers,
-                    r.str("systemIdentifier"), nodeStore, nodePass, caStore, caPass);
+                    r.str("systemIdentifier"), nodeStore, nodePass, caStore, caPass,
+                    r.has("watchers") ? r.strList("watchers") : List.of());
         }
         String bundle = opt.getProperty("bundle");
         if (bundle == null) {
@@ -308,7 +309,8 @@ public final class SetupCommand {
             }
         }
         return new Join(clusterId.isBlank() ? null : clusterId, clusterName, null, node, null, null, list, null,
-                nodeStore, read(dir.resolve(node + ".pass")).trim(), caStore, read(dir.resolve("ca.pass")).trim());
+                nodeStore, read(dir.resolve(node + ".pass")).trim(), caStore, read(dir.resolve("ca.pass")).trim(),
+                List.of());
     }
 
     private Map<String, String> network(Join join, PgInstance pg) {
@@ -357,9 +359,30 @@ public final class SetupCommand {
         } else {
             out.println("   ! " + vip + " answers already (the current primary holds it?)");
         }
+        // the duplicate check is only worth something if arping -D sees other hosts here: a live neighbour must answer
+        // it (cloud test 2026-11-02: on a cloud network every address read as free and two servers held the VIP)
+        String gw = Network.defaultGateway(host.runner.run(List.of("ip", "-4", "route", "show", "default"),
+                Duration.ofSeconds(10)).stdout());
+        String probe = ask.ask("vip.dad.probe", "A live neighbour on " + iface
+                + " for the duplicate address self-test (none: no self-test):", gw == null ? "none" : gw);
+        if (probe == null || probe.isBlank() || probe.equalsIgnoreCase("none")) {
+            out.println("   ! no self-test: the agent cannot tell a network that hides duplicates (cloud) from a free VIP");
+            probe = null;
+        } else {
+            ProcessResult seen = host.runner.run(List.of("arping", "-D", "-q", "-c", "2", "-w", "3", "-I", iface, probe),
+                    Duration.ofSeconds(10));
+            if (!seen.timedOut() && seen.exitCode() == 1) {
+                out.println("   ✔ arping -D sees " + probe + ": duplicates are visible on " + iface);
+            } else if (seen.ok()) {
+                out.println("   ! arping -D reports " + probe + " as free: this network hides duplicates, so the agent"
+                        + " will refuse to bring the VIP up (vip.dad.enabled=false only if the VIP is protected"
+                        + " otherwise)");
+            }
+        }
         net.put("vip", vip);
         net.put("iface", iface);
         net.put("prefix", prefix);
+        net.put("probe", probe);
         return net;
     }
 
@@ -461,6 +484,10 @@ public final class SetupCommand {
         props.put("tls.keystore.password.file", dir.resolve("node.pass").toString());
         props.put("tls.truststore", dir.resolve("ca.p12").toString());
         props.put("tls.truststore.password.file", dir.resolve("ca.pass").toString());
+        if (!join.watchers().isEmpty()) {
+            // only the watchers' certificates may call this agent, not the other database hosts' (same CA)
+            props.put("tls.allowed.clients", String.join(",", join.watchers()));
+        }
         props.put("state.dir", host.path("/var/lib/minipgagent/" + instance).toString());
         props.put("pg.bin", pg.binDir().toString());
         props.put("pg.data", pg.dataDir().toString());
@@ -475,6 +502,9 @@ public final class SetupCommand {
             props.put("vip.address", net.get("vip"));
             props.put("vip.prefix", net.get("prefix"));
             props.put("vip.interface", net.get("iface"));
+            if (net.get("probe") != null) {
+                props.put("vip.dad.probe", net.get("probe"));
+            }
         }
         // A watchdog reset takes every instance on the host down; setup never turns it on.
         props.put("watchdog.enabled", "false");
@@ -508,7 +538,7 @@ public final class SetupCommand {
         }
 
         if (net.get("vip") != null) {
-            String rule = Sudoers.rule(net.get("vip"), net.get("prefix"), net.get("iface"));
+            String rule = Sudoers.rule(net.get("vip"), net.get("prefix"), net.get("iface"), net.get("probe"));
             Path sudoers = host.path("/etc/sudoers.d/minipgagent-" + instance);
             plan.write(sudoers, rule, "440", "root", net.get("vip") + "/" + net.get("prefix") + " on "
                     + net.get("iface") + " only");

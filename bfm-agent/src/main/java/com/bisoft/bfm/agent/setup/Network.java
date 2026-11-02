@@ -40,6 +40,13 @@ public final class Network {
         return out;
     }
 
+    /** The default gateway from {@code ip -4 route show default} ("default via 10.0.0.1 dev eth0 ..."), or null. */
+    public static String defaultGateway(String ipRouteOutput) {
+        Matcher m = Pattern.compile("^default via (\\d{1,3}(?:\\.\\d{1,3}){3})\\b", Pattern.MULTILINE)
+                .matcher(ipRouteOutput == null ? "" : ipRouteOutput);
+        return m.find() ? m.group(1) : null;
+    }
+
     static boolean sameNetwork(String a, String b, int prefix) throws UnknownHostException {
         byte[] x = InetAddress.getByName(a).getAddress();
         byte[] y = InetAddress.getByName(b).getAddress();

@@ -27,6 +27,11 @@ public final class AgentConfig {
     public final Path trustStore;
     public final char[] trustStorePassword;
     public final String apiToken;
+    /**
+     * Certificate CNs allowed to call the API (the watchers' ids); empty = any certificate signed by the trust
+     * store's CA, which includes the other database hosts' agent certificates.
+     */
+    public final java.util.Set<String> allowedClients;
 
     public final Path stateDir;
 
@@ -58,6 +63,9 @@ public final class AgentConfig {
     public final String vipShowCommand;
     public final boolean vipDadEnabled;
     public final String vipDadCommand;
+    /** A live neighbour's address for the duplicate-check self-test, or null (no self-test). */
+    public final String vipDadProbe;
+    public final String vipDadProbeCommand;
     public final String vipGarpCommand;
 
     public final String fenceAction;
@@ -90,6 +98,11 @@ public final class AgentConfig {
         trustStorePassword = secret(p, "tls.truststore.password", "MINIPGAGENT_TRUSTSTORE_PASSWORD");
         char[] token = secret(p, "api.token", "MINIPGAGENT_API_TOKEN");
         apiToken = token.length == 0 ? null : new String(token);
+        allowedClients = java.util.Set.copyOf(java.util.Arrays.stream(p.getProperty("tls.allowed.clients", "")
+                .split(",")).map(String::trim).filter(x -> !x.isEmpty()).toList());
+        if (!allowedClients.isEmpty() && !tlsEnabled) {
+            throw new IllegalArgumentException("tls.allowed.clients needs tls.enabled=true");
+        }
         if (tlsEnabled && (keyStore == null || trustStore == null)) {
             throw new IllegalArgumentException("tls.enabled=true needs tls.keystore and tls.truststore");
         }
@@ -132,6 +145,12 @@ public final class AgentConfig {
         vipDadEnabled = Boolean.parseBoolean(p.getProperty("vip.dad.enabled", "true"));
         vipDadCommand = p.getProperty("vip.dad.command", "sudo -n /usr/sbin/arping -D -q -c 2 -w 3 -I {iface} {vip}");
         vipGarpCommand = p.getProperty("vip.garp.command", "sudo -n /usr/sbin/arping -U -q -c 3 -I {iface} {vip}");
+        vipDadProbe = blankToNull(p.getProperty("vip.dad.probe"));
+        if (vipDadProbe != null && (!vipDadProbe.matches("\\d{1,3}(\\.\\d{1,3}){3}") || vipDadProbe.equals(vipAddress))) {
+            throw new IllegalArgumentException("vip.dad.probe must be the IPv4 address of a live neighbour (not the VIP)");
+        }
+        vipDadProbeCommand = p.getProperty("vip.dad.probe.command",
+                "sudo -n /usr/sbin/arping -D -q -c 2 -w 3 -I {iface} {probe}");
 
         fenceAction = p.getProperty("fence.action", "stop");
         if (!fenceAction.equals("stop") && !fenceAction.equals("vip-only")) {

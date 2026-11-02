@@ -26,7 +26,9 @@ PostgreSQL 13 or newer (the agent reloads `primary_conninfo` without a restart);
 - **No VIP, no promote.** The VIP is brought up on the new primary with `sudo ip addr add` first. If the
   address still answers from another host (`arping -D`) or the command fails, the replica is not promoted
   and stays a replica. The agent enforces this itself: `/v1/pg/promote` refuses while the VIP is not on the
-  local interface.
+  local interface. The duplicate check is only trusted where it can see other hosts: with `vip.dad.probe` the
+  agent first checks that `arping -D` sees a live neighbour (the gateway), three times in a row, and keeps the
+  VIP down otherwise (on networks that do not answer ARP probes every address reads as free).
 - **A node never starts as primary on its own.** Without `standby.signal`, the agent starts PostgreSQL only
   when the watcher explicitly allows it. Disable the PostgreSQL systemd unit and let the agent start it.
   (With `pg.autostart.replica=true` the agent starts a stopped *replica* when it comes up, so a rebooted
@@ -315,7 +317,9 @@ split on whitespace before placeholders are filled; no shell is involved.
 
 ### API
 
-All calls are JSON over HTTPS with mutual TLS (optional bearer token as a second check). Every command that
+All calls are JSON over HTTPS with mutual TLS (optional bearer token as a second check). `tls.allowed.clients`
+limits the callers to the watchers' certificates (their ids), so another database host's agent certificate from
+the same CA cannot command this node; `minipgagent setup` sets it from the enrollment. Every command that
 changes the node carries `epoch` and `clusterId`; a bound agent refuses another cluster's commands before it
 looks at the epoch.
 

@@ -125,4 +125,21 @@ class AgentUnitTest {
         assertFalse(Files.exists(file));
         assertFalse(new LeaseGuard(nanos2::get, wall::get, file).info().granted());
     }
+
+    @Test
+    void dadProbeAndAllowedClientsAreChecked() {
+        var p = TestConfigs.base(dir);
+        p.setProperty("vip.dad.probe", "192.168.0.50");
+        assertThrows(IllegalArgumentException.class, () -> AgentConfig.of(p), "the VIP itself is no neighbour");
+        p.setProperty("vip.dad.probe", "gateway; reboot");
+        assertThrows(IllegalArgumentException.class, () -> AgentConfig.of(p));
+        p.setProperty("vip.dad.probe", "192.168.0.1");
+        assertEquals("192.168.0.1", AgentConfig.of(p).vipDadProbe);
+        p.setProperty("tls.allowed.clients", "w1, w2,,");
+        assertThrows(IllegalArgumentException.class, () -> AgentConfig.of(p), "needs TLS");
+        // the watchers' certificates are named after their ids (WatcherSetup), the agents' after their nodes
+        assertEquals("w1", com.bisoft.bfm.agent.http.AgentHttpServer.cn("CN=w1"));
+        assertEquals("pg-a2", com.bisoft.bfm.agent.http.AgentHttpServer.cn("CN=pg-a2,OU=bfm,O=Example"));
+        assertEquals(null, com.bisoft.bfm.agent.http.AgentHttpServer.cn("OU=bfm"));
+    }
 }

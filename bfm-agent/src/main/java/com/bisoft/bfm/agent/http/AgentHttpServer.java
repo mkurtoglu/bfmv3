@@ -114,9 +114,16 @@ public class AgentHttpServer {
         int status = 200;
         Object reply;
         try {
+            String caller = callerCn(ex);
             if (!authorized(ex)) {
                 status = 401;
                 reply = ApiResult.fail("unauthorized");
+            } else if (!cfg.allowedClients.isEmpty() && (caller == null || !cfg.allowedClients.contains(caller))) {
+                // tls.allowed.clients (user decision 2026-11-02): another database host's agent certificate, signed by
+                // the same CA, must not be able to promote or fence this node
+                LOG.warning("refused a call from certificate CN=" + caller + " (not in tls.allowed.clients)");
+                status = 403;
+                reply = ApiResult.fail("this client certificate may not call the agent");
             } else {
                 String path = ex.getRequestURI().getPath();
                 String key = ex.getRequestMethod() + " " + path;
@@ -153,6 +160,36 @@ public class AgentHttpServer {
         try (OutputStream os = ex.getResponseBody()) {
             os.write(bytes);
         }
+    }
+
+    /** The CN of the caller's client certificate, or null (no TLS, no certificate, no CN). */
+    static String callerCn(HttpExchange ex) {
+        if (!(ex instanceof com.sun.net.httpserver.HttpsExchange hx) || hx.getSSLSession() == null) {
+            return null;
+        }
+        try {
+            java.security.cert.Certificate[] chain = hx.getSSLSession().getPeerCertificates();
+            if (chain.length == 0 || !(chain[0] instanceof java.security.cert.X509Certificate x)) {
+                return null;
+            }
+            return cn(x.getSubjectX500Principal().getName());
+        } catch (javax.net.ssl.SSLPeerUnverifiedException e) {
+            return null;
+        }
+    }
+
+    /** The CN of an RFC 2253 distinguished name, or null. */
+    public static String cn(String dn) {
+        try {
+            for (javax.naming.ldap.Rdn rdn : new javax.naming.ldap.LdapName(dn).getRdns()) {
+                if ("CN".equalsIgnoreCase(rdn.getType())) {
+                    return String.valueOf(rdn.getValue());
+                }
+            }
+        } catch (javax.naming.InvalidNameException e) {
+            return null;
+        }
+        return null;
     }
 
     private boolean authorized(HttpExchange ex) {

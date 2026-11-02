@@ -224,6 +224,17 @@ public final class ClusterHub implements AutoCloseable {
         }
     }
 
+    /**
+     * The ids of every watcher of this group (the Raft peers, or this watcher alone): the CNs of the certificates the
+     * watchers call the agents with, so an enrolled agent can refuse every other certificate of the CA.
+     */
+    public List<String> watcherIds() {
+        if (props.raft().enabled() && !props.raft().peers().isEmpty()) {
+            return props.raft().peers().stream().map(BfmProperties.Peer::id).toList();
+        }
+        return List.of(props.watcherId());
+    }
+
     private static List<String> names(List<BfmProperties.Cluster> list) {
         return list.stream().map(BfmProperties.Cluster::name).toList();
     }
