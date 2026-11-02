@@ -100,6 +100,8 @@ public class Watcher implements AutoCloseable {
     private volatile String blockedReason;
     private final Map<String, StateSince> stateSince = new java.util.concurrent.ConcurrentHashMap<>();
     private volatile long nextFailoverNanos;
+    /** A role operation was submitted and its thread has not finished (including what it does after run()). */
+    private volatile boolean roleSettling;
     private final Map<String, Long> vipCooldownUntil = new ConcurrentHashMap<>();
     private final Map<String, Long> nextRepairNanos = new ConcurrentHashMap<>();
     private final Map<String, Long> badSinceNanos = new HashMap<>();
@@ -589,7 +591,12 @@ public class Watcher implements AutoCloseable {
 
     private boolean roleOperationRunning() {
         OperationProgress op = roleOp;
-        return op != null && !op.finished();
+        return roleSettling || op != null && !op.finished();
+    }
+
+    /** No role operation runs or is still settling (tests wait for this). */
+    boolean roleIdle() {
+        return !roleOperationRunning();
     }
 
     /** An operation recorded in the state that no thread here runs any more (watcher restart, leader change). */
@@ -665,15 +672,28 @@ public class Watcher implements AutoCloseable {
                 throw new StateConflictException(roleOp.type() + " is already running");
             }
             roleOp = op.progress();
+            roleSettling = true;
             remember(op.progress());
         }
-        roleExecutor.execute(() -> {
-            op.run();
-            if (op instanceof FailoverOperation && op.progress().snapshot().state()
-                    == OperationProgress.State.FAILED) {
-                nextFailoverNanos = time.nanos() + TimeUnit.MILLISECONDS.toNanos(cfg.timing().failoverRetryMs());
+        Runnable task = () -> {
+            try {
+                op.run();
+                if (op instanceof FailoverOperation && op.progress().snapshot().state()
+                        == OperationProgress.State.FAILED) {
+                    nextFailoverNanos = time.nanos() + TimeUnit.MILLISECONDS.toNanos(cfg.timing().failoverRetryMs());
+                }
+            } finally {
+                // the operation counts as running until the retry wait is recorded: its progress is already marked
+                // failed when run() returns, and a tick in between would start the next failover without waiting
+                roleSettling = false;
             }
-        });
+        };
+        try {
+            roleExecutor.execute(task);
+        } catch (RuntimeException e) {
+            roleSettling = false; // not started (the watcher is closing): nothing to wait for
+            throw e;
+        }
         return op.progress().snapshot();
     }
 

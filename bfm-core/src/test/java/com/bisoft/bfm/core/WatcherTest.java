@@ -77,7 +77,7 @@ class WatcherTest {
 
     private void awaitIdle() {
         long deadline = System.currentTimeMillis() + 10_000;
-        while (watcher.operations().stream().anyMatch(OperationProgress.Snapshot::running)) {
+        while (watcher.operations().stream().anyMatch(OperationProgress.Snapshot::running) || !watcher.roleIdle()) {
             if (System.currentTimeMillis() > deadline) {
                 throw new AssertionError("operation did not finish: " + watcher.operations().get(0));
             }
