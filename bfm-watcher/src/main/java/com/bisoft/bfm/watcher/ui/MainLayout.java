@@ -34,6 +34,8 @@ import com.bisoft.bfm.watcher.service.ClusterHub.ClusterContext;
 import com.bisoft.bfm.watcher.service.ConsoleService.Overview;
 import com.bisoft.bfm.watcher.service.FleetService;
 import com.bisoft.bfm.watcher.service.Terms;
+import com.bisoft.bfm.watcher.i18n.LanguageSetup;
+import com.bisoft.bfm.watcher.i18n.Messages;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.Cookie;
 
@@ -53,9 +55,8 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
 
     static final String SCHEME_COOKIE = "bfm-scheme";
     private static final String LAST_CLUSTER = "bfm.last-cluster";
-    private static final String[][] PAGES = {
-            {"overview", "Overview"}, {"replication", "Replication"}, {"switchover", "Switchover"},
-            {"operations", "Operations"}, {"events", "Events"}, {"notifications", "Notifications"}};
+    private static final String[] PAGES = {"overview", "replication", "switchover", "operations", "events",
+            "notifications"};
     private static final VaadinIcon[] ICONS = {VaadinIcon.DASHBOARD, VaadinIcon.CLUSTER, VaadinIcon.EXCHANGE,
             VaadinIcon.TASKS, VaadinIcon.LIST, VaadinIcon.ENVELOPE};
 
@@ -84,7 +85,7 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
         setPrimarySection(Section.NAVBAR);
 
         Div brandText = Ui.div("pg-brand-text", Ui.text("pg-brand-name", "BFM"),
-                Ui.text("pg-brand-sub pg-wide-only", "PostgreSQL Failover Manager"));
+                Ui.text("pg-brand-sub pg-wide-only", Ui.t("app.subtitle")));
         brandText.getStyle().set("display", "flex").set("flex-direction", "column");
         Div brand = new Div(Ui.logo(), brandText);
         brand.addClassName("pg-brand");
@@ -101,24 +102,25 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
         health.addClassName("pg-health-chip");
         cluster.add(environment, health);
 
-        Span user = Ui.text("pg-note", auth.getPrincipalName().orElse("") + " · " + Terms.role(admin));
+        Span user = Ui.text("pg-note", auth.getPrincipalName().orElse("") + " · " + Ui.tr(Terms.role(admin)));
         user.addClassName("pg-wide-only");
         Button logout = new Button(VaadinIcon.SIGN_OUT.create(), e -> auth.logout());
-        logout.setAriaLabel("Log out");
-        logout.setTooltipText("Log out");
+        logout.setAriaLabel(Ui.t("nav.logout"));
+        logout.setTooltipText(Ui.t("nav.logout"));
         logout.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
 
         fleetSummary.addClassName("pg-note");
         fleetSummary.addClassName("pg-wide-only");
         fleetSummary.setVisible(hub.multi());
-        HorizontalLayout right = new HorizontalLayout(fleetSummary, watchers, user, schemeMenu(), logout);
+        HorizontalLayout right = new HorizontalLayout(fleetSummary, watchers, user, languageMenu(), schemeMenu(), logout);
         right.setAlignItems(FlexComponent.Alignment.CENTER);
-        right.getStyle().set("margin-left", "auto").set("padding-right", "16px").set("flex-wrap", "nowrap");
+        // logical properties: the header mirrors itself in Arabic
+        right.getStyle().set("margin-inline-start", "auto").set("padding-inline-end", "16px").set("flex-wrap", "nowrap");
 
         HorizontalLayout bar = new HorizontalLayout(new DrawerToggle(), brand, cluster, right);
         bar.setAlignItems(FlexComponent.Alignment.CENTER);
         bar.setWidthFull();
-        bar.getStyle().set("padding-left", "8px");
+        bar.getStyle().set("padding-inline-start", "8px");
         addToNavbar(bar);
 
         nav.getStyle().set("padding", "12px");
@@ -156,19 +158,19 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
         navBuilt = true;
         nav.removeAll();
         if (hub.names().size() != 1) {
-            nav.addItem(new SideNavItem("Fleet", "fleet", VaadinIcon.GRID_BIG.create()));
+            nav.addItem(new SideNavItem(Ui.t("nav.fleet"), "fleet", VaadinIcon.GRID_BIG.create()));
         }
-        nav.addItem(new SideNavItem("Hosts", "hosts", VaadinIcon.SERVER.create()));
-        nav.addItem(new SideNavItem("Agent certificates", "certificates", VaadinIcon.KEY.create()));
+        nav.addItem(new SideNavItem(Ui.t("nav.hosts"), "hosts", VaadinIcon.SERVER.create()));
+        nav.addItem(new SideNavItem(Ui.t("nav.certificates"), "certificates", VaadinIcon.KEY.create()));
         if (admin) {
-            nav.addItem(new SideNavItem("Add cluster", "clusters/new", VaadinIcon.PLUS_CIRCLE.create()));
+            nav.addItem(new SideNavItem(Ui.t("nav.addCluster"), "clusters/new", VaadinIcon.PLUS_CIRCLE.create()));
         }
         if (current == null) {
             return;
         }
         SideNavItem group = hub.multi() ? new SideNavItem(current.name()) : null;
         for (int i = 0; i < PAGES.length; i++) {
-            SideNavItem item = new SideNavItem(PAGES[i][1], ClusterRoutes.path(current.name(), PAGES[i][0]),
+            SideNavItem item = new SideNavItem(Ui.t("nav." + PAGES[i]), ClusterRoutes.path(current.name(), PAGES[i]),
                     ICONS[i].create());
             if (group != null) {
                 group.addItem(item);
@@ -183,8 +185,8 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
     }
 
     private void buildSwitcher() {
-        switcher.setAriaLabel("Cluster");
-        switcher.setPlaceholder("Cluster");
+        switcher.setAriaLabel(Ui.t("nav.cluster"));
+        switcher.setPlaceholder(Ui.t("nav.cluster"));
         switcher.setWidth("190px");
         switcher.addClassName("pg-switcher");
         switcher.getStyle().set("--vaadin-combo-box-overlay-width", "340px");
@@ -192,7 +194,7 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
             FleetService.ClusterSummary s = summaries.get(name);
             Div row = Ui.div("pg-row", Ui.text(null, name));
             if (s != null) {
-                row.add(Ui.chip(s.health(), OverviewPage.healthTone(s.health())));
+                row.add(Ui.chip(Ui.tr(s.health()), OverviewPage.healthTone(s.health())));
                 if (s.environment() != null && !s.environment().isBlank()) {
                     row.add(Ui.env(s.environment()));
                 }
@@ -207,18 +209,38 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
         });
     }
 
+    // ---------------------------------------------------------------- language
+
+    /** English, Türkçe, العربية: each name in its own language, so anyone finds theirs. */
+    private MenuBar languageMenu() {
+        MenuBar mb = new MenuBar();
+        mb.addThemeVariants(MenuBarVariant.LUMO_TERTIARY_INLINE);
+        MenuItem root = mb.addItem(VaadinIcon.GLOBE.create());
+        root.setAriaLabel(Ui.t("nav.language"));
+        root.getElement().setAttribute("title", Ui.t("nav.language"));
+        SubMenu sub = root.getSubMenu();
+        java.util.Locale now = Ui.locale();
+        for (java.util.Locale l : Messages.LOCALES) {
+            MenuItem item = sub.addItem(Ui.t("lang." + l.getLanguage()), e -> LanguageSetup.choose(UI.getCurrent(), l));
+            item.setCheckable(true);
+            item.setChecked(l.getLanguage().equals(now.getLanguage()));
+            item.getElement().setAttribute("lang", l.getLanguage());
+        }
+        return mb;
+    }
+
     // ---------------------------------------------------------------- light / dark
 
     private MenuBar schemeMenu() {
         MenuBar mb = new MenuBar();
         mb.addThemeVariants(MenuBarVariant.LUMO_TERTIARY_INLINE);
         MenuItem root = mb.addItem(VaadinIcon.ADJUST.create());
-        root.setAriaLabel("Colour scheme");
-        root.getElement().setAttribute("title", "Light or dark");
+        root.setAriaLabel(Ui.t("scheme.label"));
+        root.getElement().setAttribute("title", Ui.t("scheme.title"));
         SubMenu sub = root.getSubMenu();
-        add(sub, ColorScheme.Value.LIGHT_DARK, "Match the system");
-        add(sub, ColorScheme.Value.LIGHT, "Light");
-        add(sub, ColorScheme.Value.DARK, "Dark");
+        add(sub, ColorScheme.Value.LIGHT_DARK, Ui.t("scheme.system"));
+        add(sub, ColorScheme.Value.LIGHT, Ui.t("scheme.light"));
+        add(sub, ColorScheme.Value.DARK, Ui.t("scheme.dark"));
         return mb;
     }
 
@@ -267,7 +289,7 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
     private void refresh() {
         StateStore store = hub.store();
         if (store.mode() == StateStore.Mode.STANDALONE) {
-            watchers.setText("Watcher " + store.selfId() + " · standalone");
+            watchers.setText(Ui.t("header.standalone", store.selfId()));
         } else {
             var peers = store.peers();
             var lead = store.leadership();
@@ -286,8 +308,8 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
             long up = peers.stream().filter(p -> p.self() || (p.lastContactMs() != null
                     && p.lastContactMs() < fresh) || (seen.containsKey(p.id())
                     && now - seen.get(p.id()) < fresh)).count();
-            watchers.setText("Watchers " + up + "/" + peers.size() + " · leader "
-                    + (lead.leaderId() == null ? "none" : lead.leaderId()));
+            watchers.setText(Ui.t("header.watchers", up, peers.size(),
+                    lead.leaderId() == null ? Ui.t("header.noLeader") : lead.leaderId()));
         }
         watchers.setClassName("pg-note");
         watchers.addClassName("pg-wide-only");
@@ -298,8 +320,8 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
             all.forEach(s -> summaries.put(s.name(), s));
             long healthy = all.stream().filter(s -> "Healthy".equals(s.health())).count();
             long other = all.size() - healthy;
-            fleetSummary.setText("Fleet: " + healthy + " healthy" + (other == 0 ? "" : " · " + other
-                    + " need attention"));
+            fleetSummary.setText(other == 0 ? Ui.t("header.fleetHealthy", healthy)
+                    : Ui.t("header.fleetAttention", healthy, other));
             if (!switcher.isOpened()) {
                 switcher.setItems(all.stream().map(FleetService.ClusterSummary::name).toList());
                 switcher.setValue(current == null ? null : current.name());
@@ -325,13 +347,13 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
         Overview o = current.console().overview();
         health.setVisible(page != null || !hub.multi());
         health.setHref(ClusterRoutes.path(current.name(), "overview"));
-        health.add(Ui.chip(o.health(), OverviewPage.healthTone(o.health())));
-        health.getElement().setAttribute("title", o.healthReasons().isEmpty() ? "Cluster status"
-                : String.join("\n", o.healthReasons()));
-        health.getElement().setAttribute("aria-label", "Cluster status: " + o.health());
+        health.add(Ui.chip(Ui.tr(o.health()), OverviewPage.healthTone(o.health())));
+        health.getElement().setAttribute("title", o.healthReasons().isEmpty() ? Ui.t("header.clusterStatus")
+                : String.join("\n", o.healthReasons().stream().map(Ui::tr).toList()));
+        health.getElement().setAttribute("aria-label", Ui.t("header.clusterStatusIs", Ui.tr(o.health())));
         if (o.clusterId() != null) {
-            clusterName.getElement().setAttribute("title", "Cluster id " + o.clusterId()
-                    + (o.systemIdentifier() == null ? "" : "\nPostgreSQL system identifier " + o.systemIdentifier()));
+            clusterName.getElement().setAttribute("title", Ui.t("header.clusterId", o.clusterId())
+                    + (o.systemIdentifier() == null ? "" : "\n" + Ui.t("header.systemId", o.systemIdentifier())));
         }
     }
 

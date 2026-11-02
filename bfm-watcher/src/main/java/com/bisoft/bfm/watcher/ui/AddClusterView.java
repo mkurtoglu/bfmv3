@@ -20,7 +20,7 @@ import com.vaadin.flow.component.textfield.IntegerField;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.router.BeforeEnterEvent;
 import com.vaadin.flow.router.BeforeEnterObserver;
-import com.vaadin.flow.router.PageTitle;
+import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.QueryParameters;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.shared.Registration;
@@ -43,9 +43,8 @@ import java.util.Map;
  * installation spread over a day can be resumed (from the Fleet page) by any admin, on any watcher.
  */
 @Route(value = "clusters/new/:draft?", layout = MainLayout.class)
-@PageTitle("Add cluster · BFM")
 @RolesAllowed("ADMIN")
-public class AddClusterView extends Div implements BeforeEnterObserver {
+public class AddClusterView extends Div implements BeforeEnterObserver, HasDynamicTitle {
 
     private static final String[] STEPS = {"Basics", "Nodes", "Enroll", "Checks", "Start", "Review"};
 
@@ -454,5 +453,10 @@ public class AddClusterView extends Div implements BeforeEnterObserver {
             poll.remove();
         }
         super.onDetach(e);
+    }
+
+    @Override
+    public String getPageTitle() {
+        return Ui.t("title.addCluster");
     }
 }

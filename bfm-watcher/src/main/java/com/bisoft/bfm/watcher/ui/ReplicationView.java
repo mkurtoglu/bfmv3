@@ -17,7 +17,7 @@ public class ReplicationView extends ClusterRoute {
     private final BfmProperties props;
 
     public ReplicationView(ClusterHub hub, AuthenticationContext auth, BfmProperties props) {
-        super(hub, "Replication");
+        super(hub, "nav.replication");
         this.auth = auth;
         this.props = props;
     }

@@ -15,7 +15,7 @@ public class OperationsView extends ClusterRoute {
     private final BfmProperties props;
 
     public OperationsView(ClusterHub hub, BfmProperties props) {
-        super(hub, "Operations");
+        super(hub, "nav.operations");
         this.props = props;
     }
 

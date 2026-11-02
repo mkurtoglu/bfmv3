@@ -8,7 +8,7 @@ import com.vaadin.flow.component.html.Anchor;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H1;
 import com.vaadin.flow.component.select.Select;
-import com.vaadin.flow.router.PageTitle;
+import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.shared.Registration;
 import com.bisoft.bfm.common.Lsn;
@@ -27,9 +27,8 @@ import java.util.TreeSet;
 
 /** Every cluster in one line, worst first: is it healthy, where is its primary, when did it last change. */
 @Route(value = "fleet", layout = MainLayout.class)
-@PageTitle("Fleet · BFM")
 @PermitAll
-public class FleetView extends Div {
+public class FleetView extends Div implements HasDynamicTitle {
 
     private final FleetService fleet;
     private final ClusterWizardService wizard;
@@ -177,5 +176,10 @@ public class FleetView extends Div {
             poll.remove();
         }
         super.onDetach(e);
+    }
+
+    @Override
+    public String getPageTitle() {
+        return Ui.t("title.fleet");
     }
 }

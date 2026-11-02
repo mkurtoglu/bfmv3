@@ -7,7 +7,7 @@ import com.vaadin.flow.component.grid.GridVariant;
 import com.vaadin.flow.component.html.Anchor;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H1;
-import com.vaadin.flow.router.PageTitle;
+import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.shared.Registration;
 import com.bisoft.bfm.watcher.service.FleetService;
@@ -23,9 +23,8 @@ import java.util.List;
  * host takes both.
  */
 @Route(value = "hosts", layout = MainLayout.class)
-@PageTitle("Hosts · BFM")
 @PermitAll
-public class HostsView extends Div {
+public class HostsView extends Div implements HasDynamicTitle {
 
     private final FleetService fleet;
     private final Div list = new Div();
@@ -103,5 +102,10 @@ public class HostsView extends Div {
             poll.remove();
         }
         super.onDetach(e);
+    }
+
+    @Override
+    public String getPageTitle() {
+        return Ui.t("title.hosts");
     }
 }

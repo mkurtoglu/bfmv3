@@ -17,7 +17,7 @@ public class SwitchoverView extends ClusterRoute {
     private final BfmProperties props;
 
     public SwitchoverView(ClusterHub hub, AuthenticationContext auth, BfmProperties props) {
-        super(hub, "Switchover");
+        super(hub, "nav.switchover");
         this.auth = auth;
         this.props = props;
     }

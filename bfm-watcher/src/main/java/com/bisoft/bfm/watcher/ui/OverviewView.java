@@ -23,7 +23,7 @@ public class OverviewView extends ClusterRoute {
 
     public OverviewView(ClusterHub hub, AuthenticationContext auth, BfmProperties props, ClusterWizardService wizard,
                         ConsoleTls tls) {
-        super(hub, "Overview");
+        super(hub, "nav.overview");
         this.auth = auth;
         this.props = props;
         this.wizard = wizard;

@@ -22,6 +22,8 @@ import com.bisoft.bfm.core.ops.OperationProgress;
 import com.bisoft.bfm.core.ops.PreCheck;
 import com.bisoft.bfm.core.state.StateConflictException;
 import com.bisoft.bfm.core.state.StateUnavailableException;
+import com.bisoft.bfm.watcher.i18n.Messages;
+import com.vaadin.flow.server.VaadinService;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -39,10 +41,37 @@ final class Ui {
 
     private static final DateTimeFormatter HMS = DateTimeFormatter.ofPattern("HH:mm:ss");
     private static final DateTimeFormatter HM = DateTimeFormatter.ofPattern("HH:mm");
-    private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("EEE HH:mm", Locale.ENGLISH);
     private static final DateTimeFormatter FULL = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private Ui() {
+    }
+
+    // ---------------------------------------------------------------- languages
+
+    /** The page's language (English outside a request). */
+    static Locale locale() {
+        UI ui = UI.getCurrent();
+        return Messages.supported(ui == null ? null : ui.getLocale());
+    }
+
+    private static Messages messages() {
+        VaadinService service = VaadinService.getCurrent();
+        if (service != null && service.getInstantiator().getI18NProvider() instanceof Messages m) {
+            return m;
+        }
+        return FALLBACK;
+    }
+
+    private static final Messages FALLBACK = new Messages();
+
+    /** The view text {@code key} in the page's language, {@code {0}}... filled with {@code args}. */
+    static String t(String key, Object... args) {
+        return messages().getTranslation(key, locale(), args);
+    }
+
+    /** A text made outside the views (health, reasons, events, steps, errors) in the page's language. */
+    static String tr(String text) {
+        return messages().runtime(text, locale());
     }
 
     static Div card(String title) {
@@ -145,7 +174,7 @@ final class Ui {
 
     static Span env(String env) {
         Span s = text("pg-env " + envTone(env).name().toLowerCase(), env);
-        s.getElement().setAttribute("title", "Environment");
+        s.getElement().setAttribute("title", t("ui.environment"));
         return s;
     }
 
@@ -223,7 +252,7 @@ final class Ui {
                              Runnable action) {
         ConfirmDialog d = new ConfirmDialog();
         d.setHeader(header);
-        TextField field = new TextField("Type " + expected + " to confirm");
+        TextField field = new TextField(t("ui.typeToConfirm", expected));
         field.setWidthFull();
         Span err = text("pg-field-error", "");
         err.getElement().setAttribute("role", "alert");
@@ -236,7 +265,7 @@ final class Ui {
         }
         d.addConfirmListener(e -> {
             if (!expected.equals(field.getValue().trim())) {
-                error("Type " + expected + " exactly; nothing was started");
+                error(t("ui.typeExactly", expected));
                 return;
             }
             action.run();
@@ -263,7 +292,7 @@ final class Ui {
             return "—";
         }
         if (ms < 10_000) {
-            return String.format(Locale.ROOT, "%.1f s", ms / 1000.0);
+            return String.format(Locale.ROOT, "%.1f", ms / 1000.0) + " " + t("unit.s");
         }
         return span(ms);
     }
@@ -271,17 +300,17 @@ final class Ui {
     private static String span(long ms) {
         long s = ms / 1000;
         if (s < 60) {
-            return s + " s";
+            return s + " " + t("unit.s");
         }
         long m = s / 60;
         if (m < 60) {
-            return m + " min " + String.format(Locale.ROOT, "%02d", s % 60) + " s";
+            return m + " " + t("unit.min") + " " + String.format(Locale.ROOT, "%02d", s % 60) + " " + t("unit.s");
         }
         long h = m / 60;
         if (h < 24) {
-            return h + " h " + String.format(Locale.ROOT, "%02d", m % 60) + " min";
+            return h + " " + t("unit.h") + " " + String.format(Locale.ROOT, "%02d", m % 60) + " " + t("unit.min");
         }
-        return h / 24 + " d " + h % 24 + " h";
+        return h / 24 + " " + t("unit.d") + " " + h % 24 + " " + t("unit.h");
     }
 
     static String time(long millis, ZoneId zone) {
@@ -298,7 +327,9 @@ final class Ui {
     /** "10:39:12" today, "Tue 10:39" earlier. */
     static String shortTime(long millis, ZoneId zone) {
         ZonedDateTime t = Instant.ofEpochMilli(millis).atZone(zone);
-        return t.toLocalDate().equals(LocalDate.now(zone)) ? HMS.format(t) : DAY.format(t);
+        // the weekday in the page's language, the digits Latin in every language
+        return t.toLocalDate().equals(LocalDate.now(zone)) ? HMS.format(t)
+                : DateTimeFormatter.ofPattern("EEE HH:mm", locale()).format(t);
     }
 
     static String full(long millis, ZoneId zone) {
@@ -309,7 +340,7 @@ final class Ui {
         if (ms == null) {
             return "—";
         }
-        return ms < 10_000 ? String.format("%.1f s", ms / 1000.0) : (ms / 1000) + " s";
+        return (ms < 10_000 ? String.format(Locale.ROOT, "%.1f", ms / 1000.0) : String.valueOf(ms / 1000)) + " " + t("unit.s");
     }
 
     static Html logo() {
@@ -336,9 +367,9 @@ final class Ui {
             r.run();
             return true;
         } catch (NotLeaderException | StateConflictException | IllegalArgumentException | StateUnavailableException e) {
-            error(e.getMessage());
+            error(tr(e.getMessage()));
         } catch (AgentCallException e) {
-            error(e.getMessage());
+            error(tr(e.getMessage()));
         }
         return false;
     }

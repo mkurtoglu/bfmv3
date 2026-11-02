@@ -15,7 +15,7 @@ public class EventsView extends ClusterRoute {
     private final BfmProperties props;
 
     public EventsView(ClusterHub hub, BfmProperties props) {
-        super(hub, "Events");
+        super(hub, "nav.events");
         this.props = props;
     }
 

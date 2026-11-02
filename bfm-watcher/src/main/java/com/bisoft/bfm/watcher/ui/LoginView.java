@@ -4,18 +4,22 @@ import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.login.LoginForm;
 import com.vaadin.flow.router.BeforeEnterEvent;
 import com.vaadin.flow.router.BeforeEnterObserver;
-import com.vaadin.flow.router.PageTitle;
+import com.vaadin.flow.component.UI;
+import com.vaadin.flow.component.html.Span;
+import com.vaadin.flow.component.login.LoginI18n;
+import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.auth.AnonymousAllowed;
 import com.bisoft.bfm.watcher.config.BfmProperties;
+import com.bisoft.bfm.watcher.i18n.LanguageSetup;
+import com.bisoft.bfm.watcher.i18n.Messages;
 
 import java.util.Comparator;
 import java.util.List;
 
 @Route("login")
-@PageTitle("Sign in · BFM")
 @AnonymousAllowed
-public class LoginView extends Div implements BeforeEnterObserver {
+public class LoginView extends Div implements BeforeEnterObserver, HasDynamicTitle {
 
     private final LoginForm form = new LoginForm();
 
@@ -23,6 +27,14 @@ public class LoginView extends Div implements BeforeEnterObserver {
         addClassName("pg-login");
         form.setAction("login");
         form.setForgotPasswordButtonVisible(false);
+        LoginI18n i18n = LoginI18n.createDefault();
+        i18n.getForm().setTitle(Ui.t("login.title"));
+        i18n.getForm().setUsername(Ui.t("login.username"));
+        i18n.getForm().setPassword(Ui.t("login.password"));
+        i18n.getForm().setSubmit(Ui.t("login.submit"));
+        i18n.getErrorMessage().setTitle(Ui.t("login.errorTitle"));
+        i18n.getErrorMessage().setMessage(Ui.t("login.errorText"));
+        form.setI18n(i18n);
         Div brand = new Div(Ui.logo(), Ui.text("pg-brand-name", "BFM"));
         brand.addClassName("pg-brand");
         // Which cluster this console belongs to, before anyone types a password into the wrong one.
@@ -36,7 +48,7 @@ public class LoginView extends Div implements BeforeEnterObserver {
             }
         } else {
             // Several clusters: say how many and which environments, the strictest marker first.
-            cluster.add(Ui.text("pg-cluster-name", all.size() + " clusters"));
+            cluster.add(Ui.text("pg-cluster-name", Ui.t("login.clusters", all.size())));
             all.stream().map(BfmProperties.Cluster::environment).filter(e -> e != null && !e.isBlank())
                     .map(String::toLowerCase).distinct()
                     .sorted(Comparator.comparingInt((String e) -> switch (Ui.envTone(e)) {
@@ -46,9 +58,25 @@ public class LoginView extends Div implements BeforeEnterObserver {
                     }))
                     .forEach(e -> cluster.add(Ui.env(e)));
         }
+        // the language is chosen before signing in: each name in its own language
+        Div languages = Ui.div("pg-login-languages");
+        for (java.util.Locale l : Messages.LOCALES) {
+            Span link = Ui.text("pg-link" + (l.getLanguage().equals(Ui.locale().getLanguage()) ? " pg-current" : ""),
+                    Ui.t("lang." + l.getLanguage()));
+            link.getElement().setAttribute("lang", l.getLanguage());
+            link.getElement().setAttribute("role", "button");
+            link.getElement().setAttribute("tabindex", "0");
+            link.addClickListener(e -> LanguageSetup.choose(UI.getCurrent(), l));
+            languages.add(link);
+        }
         Div card = Ui.div("pg-login-card", brand,
-                Ui.text("pg-note", "PostgreSQL Failover Manager"), cluster, form);
+                Ui.text("pg-note", Ui.t("app.subtitle")), cluster, form, languages);
         add(card);
+    }
+
+    @Override
+    public String getPageTitle() {
+        return Ui.t("title.login");
     }
 
     @Override

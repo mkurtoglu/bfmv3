@@ -16,7 +16,7 @@ public class NotificationsView extends ClusterRoute {
     private final AuthenticationContext auth;
 
     public NotificationsView(ClusterHub hub, AuthenticationContext auth) {
-        super(hub, "Mail notifications");
+        super(hub, "title.mailNotifications");
         this.hub = hub;
         this.auth = auth;
     }

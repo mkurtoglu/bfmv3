@@ -9,7 +9,7 @@ import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H1;
 import com.vaadin.flow.component.html.Pre;
 import com.vaadin.flow.component.textfield.TextArea;
-import com.vaadin.flow.router.PageTitle;
+import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.spring.security.AuthenticationContext;
 import com.bisoft.bfm.core.config.NodeConfig;
@@ -29,9 +29,8 @@ import java.util.List;
  * that keeps its CA offline ({@code bfm-make-certs}) can leave this page alone.
  */
 @Route(value = "certificates", layout = MainLayout.class)
-@PageTitle("Agent certificates · BFM")
 @PermitAll
-public class CertificatesView extends Div {
+public class CertificatesView extends Div implements HasDynamicTitle {
 
     private final ClusterHub hub;
     private final WatcherCa ca;
@@ -151,5 +150,10 @@ public class CertificatesView extends Div {
         if (Ui.attempt(() -> t[0] = enrollment.issue(hub.require(r.cluster()), r.node(), user))) {
             EnrollDialog.open(t[0], consoleTls, zone);
         }
+    }
+
+    @Override
+    public String getPageTitle() {
+        return Ui.t("title.certificates");
     }
 }

@@ -25,6 +25,7 @@ abstract class ClusterRoute extends Div implements BeforeEnterObserver, HasDynam
     private ClusterContext cluster;
     private Component page;
 
+    /** @param title the page's title key ("nav.overview") */
     protected ClusterRoute(ClusterHub hub, String title) {
         this.hub = hub;
         this.title = title;
@@ -55,6 +56,6 @@ abstract class ClusterRoute extends Div implements BeforeEnterObserver, HasDynam
 
     @Override
     public String getPageTitle() {
-        return title + (cluster == null ? "" : " · " + cluster.name()) + " · BFM";
+        return Ui.t(title) + (cluster == null ? "" : " · " + cluster.name()) + " · BFM";
     }
 }
