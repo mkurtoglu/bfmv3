@@ -57,6 +57,7 @@ public class AgentHttpServer {
         routes.put("GET /v1/vip/check", b -> svc.vipCheck());
         routes.put("POST /v1/pg/promote", svc::promote);
         routes.put("POST /v1/pg/checkpoint", svc::checkpoint);
+        routes.put("POST /v1/pg/sync-standbys", svc::setSyncStandbys);
         routes.put("POST /v1/pg/stop", svc::stopPg);
         routes.put("POST /v1/pg/start", svc::startPg);
         routes.put("POST /v1/pg/follow", svc::follow);

@@ -114,7 +114,7 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
         fleetSummary.setVisible(hub.multi());
         HorizontalLayout right = new HorizontalLayout(fleetSummary, watchers, user, languageMenu(), schemeMenu(), logout);
         right.setAlignItems(FlexComponent.Alignment.CENTER);
-        // logical properties: the header mirrors itself in Arabic
+        // logical properties: the header mirrors itself in a right-to-left language
         right.getStyle().set("margin-inline-start", "auto").set("padding-inline-end", "16px").set("flex-wrap", "nowrap");
 
         HorizontalLayout bar = new HorizontalLayout(new DrawerToggle(), brand, cluster, right);
@@ -211,9 +211,10 @@ public class MainLayout extends AppLayout implements BeforeEnterObserver {
 
     // ---------------------------------------------------------------- language
 
-    /** English, Türkçe, العربية: each name in its own language, so anyone finds theirs. */
+    /** Each language's name in itself, so anyone finds theirs; hidden while the console has one language. */
     private MenuBar languageMenu() {
         MenuBar mb = new MenuBar();
+        mb.setVisible(Messages.severalLanguages());
         mb.addThemeVariants(MenuBarVariant.LUMO_TERTIARY_INLINE);
         MenuItem root = mb.addItem(VaadinIcon.GLOBE.create());
         root.setAriaLabel(Ui.t("nav.language"));

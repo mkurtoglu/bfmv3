@@ -38,6 +38,9 @@ public interface AgentClient {
 
     ApiResult checkpoint(long epoch);
 
+    /** {@code synchronous_standby_names} = {@code value} ("" or {@code ANY n ("node", ...)}), reloaded. */
+    ApiResult setSyncStandbys(long epoch, String value);
+
     /** Stops PostgreSQL; the reply's data carries the shutdown checkpoint LSN. */
     ApiResult stop(long epoch, String mode, boolean releaseVip);
 

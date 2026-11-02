@@ -40,6 +40,7 @@ public final class FailoverOperation extends Operation {
     private final Consumer<String> onVipFailure;
     private final Consumer<String> blocked;
     private volatile boolean vetoedByReplicas;
+    private volatile boolean waitsForSyncPositions;
 
     /**
      * @param oldPrimary    node the shared state names as primary
@@ -107,11 +108,14 @@ public final class FailoverOperation extends Operation {
             throw new Abort(oldPrimary + " is back; failover not needed");
         }
         OpContext.PrimaryInfo info = ctx.primaryInfo().get();
+        ClusterState current = ctx.repo().current();
+        Set<String> notPromotable = notPromotable(current);
         CandidateSelector.Result ranked = CandidateSelector.rank(ctx.cfg(), fresh, oldPrimary, info.timeline(),
-                info.lsn(), excluded);
+                info.lsn(), excluded, notPromotable);
         if (ranked.best().isEmpty() && !excluded.isEmpty()) {
             // A replica that recently failed to bring the VIP up is skipped only while there is another choice.
-            ranked = CandidateSelector.rank(ctx.cfg(), fresh, oldPrimary, info.timeline(), info.lsn(), Set.of());
+            ranked = CandidateSelector.rank(ctx.cfg(), fresh, oldPrimary, info.timeline(), info.lsn(), Set.of(),
+                    notPromotable);
         }
         if (ranked.best().isEmpty()) {
             String why = "no eligible replica (" + ranked.rejectedSummary() + ")";
@@ -120,6 +124,18 @@ public final class FailoverOperation extends Operation {
             throw new Abort(why);
         }
         CandidateSelector.Candidate target = ranked.best().get();
+        ClusterState.Replication replication = current == null ? ClusterState.Replication.ASYNC
+                : current.replication();
+        if (replication.synchronous() && replication.strict()) {
+            String gap = CandidateSelector.strictGap(fresh, oldPrimary, info.timeline(), replication.standbys(),
+                    replication.count(), target);
+            if (gap != null) {
+                waitsForSyncPositions = true;
+                progress.failed("choose", gap);
+                blocked.accept(gap);
+                throw new Abort(gap);
+            }
+        }
         String t = target.name();
         NodeConfig tc = target.config();
         progress.done("choose", t + " at " + Lsn.format(target.lsn())
@@ -272,10 +288,27 @@ public final class FailoverOperation extends Operation {
     }
 
     /**
+     * Nothing was done and the answer can change at the next poll: a replica still reached the old primary, or
+     * strict replication waits for the WAL position of a synchronous replica (being started, or coming back).
+     */
+    public boolean recheckAtNextPoll() {
+        return vetoedByReplicas || waitsForSyncPositions;
+    }
+
+    /**
      * Asks every reachable replica whether it still reaches the primary's PostgreSQL port or streams from it.
      *
      * @return null when every answer was "no" (and there was at least one), otherwise why the failover must wait
      */
+    /** The nodes automatic failover never promotes: the console's per-node choice, else the configuration's. */
+    private Set<String> notPromotable(ClusterState st) {
+        List<String> nodes = ctx.cfg().nodes().stream().map(NodeConfig::name).toList();
+        if (st == null) {
+            return nodes.stream().filter(n -> node(n).noFailover()).collect(java.util.stream.Collectors.toSet());
+        }
+        return st.notPromotable(nodes, n -> ctx.cfg().node(n).map(NodeConfig::noFailover).orElse(false));
+    }
+
     private String confirmWithReplicas(NodeConfig old) {
         int answered = 0;
         List<String> seen = new ArrayList<>();

@@ -5,6 +5,7 @@ import com.bisoft.bfm.common.json.Json;
 import com.bisoft.bfm.common.json.JsonMap;
 import com.bisoft.bfm.common.model.ApiResult;
 import com.bisoft.bfm.common.model.NodeStatus;
+import com.bisoft.bfm.common.model.ReplicationPeer;
 import com.bisoft.bfm.common.model.SlotInfo;
 import com.bisoft.bfm.core.agent.AgentCallException;
 import com.bisoft.bfm.core.agent.AgentClient;
@@ -56,6 +57,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 /**
  * The watcher: polls every agent, keeps the primary's lease, raises alerts and, on the leading watcher, decides and
@@ -250,6 +252,7 @@ public class Watcher implements AutoCloseable {
         if (st.primary() != null) {
             releaseStrayVips(v, st);
         }
+        startStoppedSyncStandbys(v, st); // before the failover decision, which ends the tick while the primary is down
         if (handlePrimary(v, st)) {
             return;
         }
@@ -259,6 +262,7 @@ public class Watcher implements AutoCloseable {
         restorePrimaryVip(v, st);
         fenceRogues(v, st);
         repairReplicas(v, st);
+        replication(v, st);
     }
 
     private ClusterState readState() {
@@ -680,10 +684,11 @@ public class Watcher implements AutoCloseable {
                 op.run();
                 if (op instanceof FailoverOperation f && op.progress().snapshot().state()
                         == OperationProgress.State.FAILED) {
-                    if (f.vetoedByReplicas()) {
+                    if (f.recheckAtNextPoll()) {
                         // A replica still reached the old primary: nothing was done, and the answer changes as soon
                         // as the replicas lose it (a WAL receiver keeps "streaming" until wal_receiver_timeout on a
-                        // silent network loss), so look again at the next poll. The reason is in the event log once;
+                        // silent network loss), so look again at the next poll. Likewise when strict replication
+                        // waits for a synchronous replica's WAL position. The reason is in the event log once;
                         // the empty attempt is not kept in the operations list. (Cloud test 2026-11-02: waiting
                         // failover-retry here made a partition take 105 s instead of about 70 s.)
                         nextFailoverNanos = time.nanos();
@@ -739,6 +744,279 @@ public class Watcher implements AutoCloseable {
     }
 
     // ---------------------------------------------------------------- lease
+
+    // ---------------------------------------------------------------- synchronous replication
+
+    /** How long fewer synchronous replicas than needed may stream in quorum mode before the wait is dropped. */
+    static final long SYNC_DEGRADE_AFTER_MS = 10_000;
+    /** Polls with enough caught-up synchronous replicas before a dropped wait is taken up again. */
+    static final int SYNC_RESTORE_POLLS = 2;
+    /** Least time between two writes of synchronous_standby_names to one node that keeps answering differently. */
+    static final long SYNC_RESEND_MS = 15_000;
+
+    private long syncShortSinceNanos = -1;
+    private int syncCaughtUpPolls;
+    private boolean syncWaitingReported;
+    private final Map<String, String> syncSent = new ConcurrentHashMap<>();
+    private final Map<String, Long> syncSentNanos = new ConcurrentHashMap<>();
+
+    /**
+     * The value every node's {@code synchronous_standby_names} should have: empty while commits do not wait,
+     * {@code FIRST 1 ("a")} for one standby (PostgreSQL then calls it sync), else {@code ANY n ("a", "b", ...)}.
+     * Every node gets the same value: PostgreSQL ignores it on a replica, and after a role change the new primary
+     * has it already (its own name in the list never matches a walsender).
+     */
+    public static String syncStandbysFor(ClusterState.Replication r) {
+        if (!r.waiting()) {
+            return "";
+        }
+        List<String> quoted = r.standbys().stream().map(n -> "\"" + n + "\"").toList();
+        if (quoted.size() == 1) {
+            return "FIRST 1 (" + quoted.get(0) + ")";
+        }
+        return "ANY " + Math.min(r.count(), quoted.size()) + " (" + String.join(", ", quoted) + ")";
+    }
+
+    /**
+     * The leader keeps the mode: in quorum mode it drops the wait when fewer synchronous replicas stream than a
+     * commit waits for (after {@link #SYNC_DEGRADE_AFTER_MS}) and takes it up again when enough are back and caught
+     * up; in strict mode it only reports that commits wait. Then every running node gets the value the mode asks
+     * for. A primary the watchers cannot reach is never changed: its commits wait, and with self-fencing it stops
+     * at the end of its lease.
+     */
+    private void replication(ClusterView v, ClusterState st) {
+        ClusterState.Replication r = st.replication();
+        NodeView p = v.node(st.primary()).orElse(null);
+        if (r.synchronous() && p != null && p.runningPrimary()) {
+            int streaming = streamingStandbys(p, r.standbysOf(st.primary()));
+            long now = time.nanos();
+            if (!r.strict() && !r.degraded()) {
+                if (streaming < r.count()) {
+                    if (syncShortSinceNanos < 0) {
+                        syncShortSinceNanos = now;
+                    } else if (now - syncShortSinceNanos >= TimeUnit.MILLISECONDS.toNanos(SYNC_DEGRADE_AFTER_MS)) {
+                        st = setDegraded(st, true, "Synchronous replication dropped: " + streaming + " of "
+                                + r.count() + " replicas streaming; commits no longer wait for a replica");
+                    }
+                } else {
+                    syncShortSinceNanos = -1;
+                }
+            } else if (!r.strict()) {
+                syncCaughtUpPolls = streaming >= r.count() ? syncCaughtUpPolls + 1 : 0;
+                if (syncCaughtUpPolls >= SYNC_RESTORE_POLLS) {
+                    st = setDegraded(st, false, "Synchronous replication back: " + streaming
+                            + " replicas streaming and caught up; commits wait for " + r.count() + " again");
+                }
+            } else if (streaming < r.count()) {
+                if (!syncWaitingReported) {
+                    syncWaitingReported = true;
+                    events.publish(EventType.SYNC_WAITING, st.primary(), "Strict replication: " + streaming
+                            + " of " + r.count() + " synchronous replicas streaming; commits on " + st.primary()
+                            + " wait until one is back", actor);
+                }
+            } else if (syncWaitingReported) {
+                syncWaitingReported = false;
+                events.publish(EventType.SYNC_RESTORED, st.primary(), "Strict replication: " + streaming
+                        + " synchronous replicas streaming again", actor);
+            }
+        }
+        applySyncStandbys(v, st);
+    }
+
+    /**
+     * Synchronous standbys the primary sends WAL to in state {@code streaming} (caught up; {@code catchup} is not
+     * yet): the ones PostgreSQL counts toward a synchronous commit.
+     */
+    private static int streamingStandbys(NodeView primary, List<String> standbys) {
+        if (primary.status().replicas() == null) {
+            return 0;
+        }
+        return (int) primary.status().replicas().stream()
+                .filter(r -> standbys.contains(r.applicationName()) && "streaming".equalsIgnoreCase(r.state()))
+                .map(ReplicationPeer::applicationName).distinct().count();
+    }
+
+    private ClusterState setDegraded(ClusterState st, boolean degraded, String why) {
+        try {
+            ClusterState after = repo.update(s -> s.replication().synchronous() && !s.replication().strict()
+                    && s.replication().degraded() != degraded, "state changed",
+                    s -> s.withReplication(new ClusterState.Replication(s.replication().mode(),
+                            s.replication().count(), degraded, s.replication().standbys())));
+            syncShortSinceNanos = -1;
+            syncCaughtUpPolls = 0;
+            events.publish(degraded ? EventType.SYNC_DEGRADED : EventType.SYNC_RESTORED, st.primary(), why, actor);
+            return after;
+        } catch (RuntimeException e) {
+            LOG.warning("cannot record the synchronous replication change: " + e.getMessage());
+            return st;
+        }
+    }
+
+    /** Least time between two starts of one stopped synchronous replica while the primary is down (strict mode). */
+    static final long STRICT_START_RETRY_MS = 30_000;
+    private final Map<String, Long> strictStartNanos = new ConcurrentHashMap<>();
+
+    /**
+     * Strict replication with the primary down: a synchronous replica whose agent answers but whose PostgreSQL is
+     * stopped has no WAL position the failover can trust (its last checkpoint lags what it received), and nothing
+     * else starts it while there is no primary to follow, so the failover would wait for an operator. The leader
+     * starts it as a replica (the agent refuses a data directory that would come up as a primary); its position
+     * is known at the next poll and the failover decides with it.
+     */
+    private void startStoppedSyncStandbys(ClusterView v, ClusterState st) {
+        ClusterState.Replication r = st.replication();
+        if (!r.synchronous() || !r.strict() || st.maintenance()) {
+            return;
+        }
+        NodeView p = v.node(st.primary()).orElse(null);
+        if (p != null && p.runningPrimary()) {
+            strictStartNanos.clear();
+            return;
+        }
+        long now = time.nanos();
+        for (String name : r.standbysOf(st.primary())) {
+            NodeView n = v.node(name).orElse(null);
+            if (n == null || !n.reachable() || n.status().pgRunning() || n.busy() || n.fenced()
+                    || n.status().controlClusterState() == null || nodeOperationRunning(name)) {
+                continue;
+            }
+            Long last = strictStartNanos.get(name);
+            if (last != null && now - last < TimeUnit.MILLISECONDS.toNanos(STRICT_START_RETRY_MS)) {
+                continue;
+            }
+            strictStartNanos.put(name, now);
+            events.publish(EventType.OPERATION, name, "Strict replication: starting " + name
+                    + " as a replica so the failover knows its WAL position", actor);
+            try {
+                agents.get(name).start(st.epoch(), false);
+            } catch (AgentCallException e) {
+                LOG.warning("cannot start " + name + " as a replica: " + e.detail());
+            }
+        }
+    }
+
+    /** Every reachable running node gets the value the mode asks for; the primary first, it is the one that waits. */
+    private void applySyncStandbys(ClusterView v, ClusterState st) {
+        String want = syncStandbysFor(st.replication());
+        List<NodeView> order = new ArrayList<>(v.nodes());
+        order.sort((a, b) -> Boolean.compare(!a.name().equals(st.primary()), !b.name().equals(st.primary())));
+        long now = time.nanos();
+        for (NodeView n : order) {
+            if (!n.reachable() || !n.status().pgRunning() || n.status().syncStandbys() == null) {
+                continue; // stopped, unreachable, or an agent that does not report the setting
+            }
+            if (want.equals(n.status().syncStandbys())) {
+                syncSent.remove(n.name());
+                continue;
+            }
+            Long last = syncSentNanos.get(n.name());
+            if (want.equals(syncSent.get(n.name())) && last != null
+                    && now - last < TimeUnit.MILLISECONDS.toNanos(SYNC_RESEND_MS)) {
+                continue;
+            }
+            syncSent.put(n.name(), want);
+            syncSentNanos.put(n.name(), now);
+            try {
+                agents.get(n.name()).setSyncStandbys(st.epoch(), want);
+            } catch (AgentCallException e) {
+                LOG.warning("synchronous_standby_names on " + n.name() + " not set: " + e.detail());
+            }
+        }
+    }
+
+    /**
+     * Sets how commits wait for replicas (an admin's choice; written to the event log).
+     *
+     * @param mode     quorum (drop the wait while the standbys are missing) or strict (keep waiting)
+     * @param count    how many of the standbys a commit waits for
+     * @param standbys the nodes a commit waits for; empty: asynchronous
+     */
+    public ClusterState setReplication(String mode, int count, List<String> standbys, String user) {
+        requireLeader();
+        ClusterState before = readState();
+        if (before == null) {
+            throw new StateConflictException("the cluster state is not created yet");
+        }
+        Set<String> names = cfg.nodes().stream().map(NodeConfig::name).collect(Collectors.toSet());
+        for (String n : standbys) {
+            if (!names.contains(n)) {
+                throw new IllegalArgumentException("no node named " + n);
+            }
+            if (!n.matches("[a-z0-9][a-z0-9_-]{0,62}")) {
+                throw new IllegalArgumentException("the node name " + n + " cannot be used as a synchronous standby"
+                        + " name (lower-case letters, digits, - and _)");
+            }
+        }
+        ClusterState.Replication next = new ClusterState.Replication(mode, Math.max(1, count), false, standbys);
+        if (next.synchronous()) {
+            int replicas = next.standbysOf(before.primary()).size();
+            if (replicas < 1) {
+                throw new IllegalArgumentException("commits would wait for the primary itself: choose a replica");
+            }
+            if (count < 1 || count > replicas) {
+                throw new IllegalArgumentException("the number of replicas a commit waits for is 1 to " + replicas);
+            }
+        }
+        ClusterState after = repo.update(s -> true, "", s -> s.withReplication(next).stamped(time.millis(), user));
+        ClusterState.Replication was = before.replication();
+        if (!describe(was).equals(describe(next))) {
+            events.publish(EventType.CONTROL_CHANGED, null, "replication mode " + describe(next) + " (was "
+                    + describe(was) + ") by " + user, user);
+        }
+        syncShortSinceNanos = -1;
+        syncCaughtUpPolls = 0;
+        syncWaitingReported = false;
+        syncSent.clear();
+        return after;
+    }
+
+    /** For example "quorum, ANY 1 of br-a1, br-a2" or "asynchronous". */
+    public static String describe(ClusterState.Replication r) {
+        return r.synchronous() ? r.mode() + ", ANY " + r.count() + " of " + String.join(", ", r.standbys())
+                : "asynchronous";
+    }
+
+    // ---------------------------------------------------------------- automatic failover per node
+
+    /** The nodes automatic failover never promotes (the console's choice, or the configuration's). */
+    public Set<String> notPromotable(ClusterState st) {
+        return st.notPromotable(cfg.nodes().stream().map(NodeConfig::name).toList(),
+                n -> cfg.node(n).map(NodeConfig::noFailover).orElse(false));
+    }
+
+    /**
+     * Whether automatic failover may promote {@code node} (an admin's choice; written to the event log).
+     * Automatic failover is on while some node may be promoted.
+     */
+    public ClusterState setNodeFailover(String node, boolean promotable, String user) {
+        requireLeader();
+        if (cfg.node(node).isEmpty()) {
+            throw new IllegalArgumentException("no node named " + node);
+        }
+        ClusterState before = readState();
+        if (before == null) {
+            throw new StateConflictException("the cluster state is not created yet");
+        }
+        List<String> nodes = cfg.nodes().stream().map(NodeConfig::name).toList();
+        ClusterState after = repo.update(s -> true, "", s -> {
+            Set<String> never = notPromotable(s);
+            if (promotable) {
+                never.remove(node);
+            } else {
+                never.add(node);
+            }
+            return s.withNoFailover(never, nodes).stamped(time.millis(), user);
+        });
+        if (notPromotable(before).contains(node) == promotable) {
+            events.publish(EventType.CONTROL_CHANGED, node, (promotable ? "automatic failover may promote "
+                    : "automatic failover never promotes ") + node + " by " + user, user);
+        }
+        if (promotable) {
+            nextFailoverNanos = time.nanos();
+            blockedReason = null;
+        }
+        return after;
+    }
 
     private void renewLease(ClusterView v, ClusterState st) {
         if (st.primary() == null || st.operation() != null) {
@@ -1294,11 +1572,20 @@ public class Watcher implements AutoCloseable {
         if (before == null) {
             throw new StateConflictException("the cluster state is not created yet");
         }
-        ClusterState after = repo.update(s -> true, "", s -> s.withControls(
-                autoFailover == null ? s.autoFailover() : autoFailover,
-                maintenance == null ? s.maintenance() : maintenance,
-                mailEnabled == null ? s.mailEnabled() : mailEnabled,
-                autoReinit == null ? s.autoReinit() : autoReinit).stamped(time.millis(), user));
+        List<String> nodes = cfg.nodes().stream().map(NodeConfig::name).toList();
+        ClusterState after = repo.update(s -> true, "", s -> {
+            ClusterState c = s.withControls(
+                    autoFailover == null ? s.autoFailover() : autoFailover,
+                    maintenance == null ? s.maintenance() : maintenance,
+                    mailEnabled == null ? s.mailEnabled() : mailEnabled,
+                    autoReinit == null ? s.autoReinit() : autoReinit);
+            if (autoFailover != null && autoFailover != s.autoFailover()) {
+                // on: every node the configuration allows; off: none
+                c = c.withNoFailover(autoFailover ? nodes.stream()
+                        .filter(n -> cfg.node(n).map(NodeConfig::noFailover).orElse(false)).toList() : nodes, nodes);
+            }
+            return c.stamped(time.millis(), user);
+        });
         List<String> changes = new ArrayList<>();
         diff(changes, "auto failover", before.autoFailover(), after.autoFailover());
         diff(changes, "maintenance mode", before.maintenance(), after.maintenance());

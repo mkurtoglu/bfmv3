@@ -52,7 +52,8 @@ public class PgProbe {
      * primary, sit behind CASE so they are only evaluated where they apply. Ten text columns.
      */
     static final String PROBE_SQL = "SELECT 'base', pg_is_in_recovery()::text, current_setting('server_version_num'),"
-            + " (SELECT system_identifier::text FROM pg_control_system()), NULL, NULL, NULL, NULL, NULL, NULL"
+            + " (SELECT system_identifier::text FROM pg_control_system()),"
+            + " current_setting('synchronous_standby_names'), NULL, NULL, NULL, NULL, NULL"
             + " UNION ALL SELECT 'wal',"
             + " CASE WHEN pg_is_in_recovery() THEN NULL ELSE pg_current_wal_lsn()::text END,"
             + " CASE WHEN pg_is_in_recovery() THEN NULL"
@@ -116,17 +117,19 @@ public class PgProbe {
         boolean inRecovery = truth(base.get(1));
         Integer version = parseInt(base.get(2));
         String sysId = base.get(3);
+        // "" when none is set; null from an older row layout
+        String syncNames = base.size() > 4 ? base.get(4) : null;
         if (!inRecovery) {
             return new PgSnapshot(true, PgRole.PRIMARY, wal == null ? null : parseInt(wal.get(2)), sysId, version,
                     wal == null ? null : wal.get(1), null, null, null, null, null, null, peers, slots,
-                    ControlData.UNKNOWN, null);
+                    ControlData.UNKNOWN, null, syncNames == null ? null : syncNames);
         }
         List<String> r = rcv == null ? java.util.Arrays.asList(new String[10]) : rcv;
         Integer timeline = replicaTimeline(parseInt(r.get(7)), parseInt(r.get(8)), r.get(9));
         // a replica reports no replication peers or slots, as before (they belong to the primary's view)
         return new PgSnapshot(true, PgRole.REPLICA, timeline, sysId, version, null, r.get(1), r.get(2),
                 parseLong(r.get(3)), r.get(4), r.get(5), parseInt(r.get(6)), List.of(), List.of(),
-                ControlData.UNKNOWN, null);
+                ControlData.UNKNOWN, null, syncNames);
     }
 
     /** A boolean as psql prints it: {@code t} for a boolean column, {@code true} for boolean::text. */

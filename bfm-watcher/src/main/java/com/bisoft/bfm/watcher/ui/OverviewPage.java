@@ -17,10 +17,12 @@ import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.html.UnorderedList;
 import com.vaadin.flow.component.icon.VaadinIcon;
+import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.data.renderer.ComponentRenderer;
 import com.vaadin.flow.shared.Registration;
 import com.vaadin.flow.spring.security.AuthenticationContext;
 import com.bisoft.bfm.core.event.ClusterEvent;
+import com.bisoft.bfm.core.state.ClusterState;
 import com.bisoft.bfm.core.state.RoleChange;
 import com.bisoft.bfm.watcher.service.ConsoleService;
 import com.bisoft.bfm.watcher.service.ConsoleService.ControlChange;
@@ -61,12 +63,24 @@ class OverviewPage extends Div {
     private final Div topology = new Div();
     private final UnorderedList events = new UnorderedList();
     private final Div watchers = new Div();
-    private final Checkbox autoFailover = new Checkbox(Ui.t("ov.autoFailover"));
     private final Checkbox mail = new Checkbox(Ui.t("ov.mailNotifications"));
     private final Checkbox maintenance = new Checkbox(Ui.t("ov.maintenanceMode"));
     private final Checkbox autoReinit = new Checkbox(Ui.t("ov.autoReinit"));
     private final Span scope = Ui.text("pg-note", "");
+    /** Which nodes automatic failover may promote (chosen per node in the Nodes table). */
+    private final Span afSummary = Ui.text(null, "");
+    /** How commits wait for replicas, and the state of it. */
+    private final Span syncSummary = Ui.text(null, "");
+    private final Span syncState = Ui.text("pg-note", "");
+    private final Button syncChange = new Button(Ui.t("ov.syncChange"));
+    /** Seconds between refreshes of this page, as this browser chose (0: off). */
+    private final Select<Integer> refreshEvery = RefreshChoice.select();
     private Grid.Column<NodeRow> actionsColumn;
+    private StableRows<NodeRow> nodeRows;
+    private final StableRows.Kept<Component> gridMenus = new StableRows.Kept<>();
+    private final StableRows.Kept<Component> cardMenus = new StableRows.Kept<>();
+    /** Node name → the card's parts that change: the head's name and chips, and the lines under it. */
+    private final java.util.LinkedHashMap<String, Div[]> cards = new java.util.LinkedHashMap<>();
     private Registration poll;
     private Overview last;
     private final ClusterAdmin clusterAdmin;
@@ -94,7 +108,9 @@ class OverviewPage extends Div {
         refresh.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
         grid.addClassName("pg-node-grid");
         Div nodesCard = Ui.card(null);
-        nodesCard.add(Ui.div("pg-spread", heading(Ui.t("ov.nodes")), Ui.div("pg-row", refreshed, refresh)), grid, nodeCards);
+        Div refreshRow = Ui.div("pg-row", refreshed, refreshEvery, refresh);
+        refreshRow.getStyle().set("flex-wrap", "wrap");
+        nodesCard.add(Ui.div("pg-spread", heading(Ui.t("ov.nodes")), refreshRow), grid, nodeCards);
 
         Div topoCard = Ui.card(Ui.t("ov.topology"));
         topoCard.add(topology);
@@ -173,30 +189,42 @@ class OverviewPage extends Div {
         grid.addColumn(this::lagText).setHeader(Ui.t("ov.col.lag")).setAutoWidth(true);
         Grid.Column<NodeRow> tl = grid.addColumn(r -> r.timeline() == null ? "—" : r.timeline().toString())
                 .setHeader(Ui.t("ov.col.timeline")).setAutoWidth(true).setTextAlign(ColumnTextAlign.END);
-        Grid.Column<NodeRow> sync = grid.addColumn(r -> r.sync() == null ? "—" : Ui.tr(Terms.capitalize(r.sync())))
-                .setHeader(Ui.t("ov.col.sync")).setAutoWidth(true);
+        // Which nodes a commit waits for, and which ones automatic failover may promote: chosen here per node.
+        // Fixed widths: auto width is measured before the cells render and left the text under the Actions column.
+        Grid.Column<NodeRow> syncCol = grid.addComponentColumn(this::syncCell).setHeader(Ui.t("ov.col.sync"))
+                .setWidth("150px").setFlexGrow(0);
+        Grid.Column<NodeRow> afCol = grid.addComponentColumn(this::failoverCell)
+                .setHeader(Ui.t("ov.col.autoFailover")).setWidth("170px").setFlexGrow(0);
         Grid.Column<NodeRow> agent = grid.addComponentColumn(r -> Ui.chip(agentLabel(r),
                 r.agentOnline() ? Ui.Tone.OK : Ui.Tone.CRIT)).setHeader(Ui.t("ov.col.agent")).setAutoWidth(true);
         // The actions stay on screen whatever the other columns do: in an incident they are what is needed.
-        actionsColumn = grid.addComponentColumn(this::actions).setHeader(Ui.t("ov.col.actions")).setAutoWidth(true)
+        // Kept across refreshes: a menu built again while it is open would close under the pointer.
+        actionsColumn = grid.addColumn(StableRows.Kept.renderer(gridMenus, NodeRow::name, this::menuSpec,
+                        this::actions)).setHeader(Ui.t("ov.col.actions")).setAutoWidth(true)
                 .setFlexGrow(0).setFrozenToEnd(true);
-        Ui.hideBelow(grid, 1500, wal, tl);
-        Ui.hideBelow(grid, 980, address, sync, agent, dc);
+        nodeRows = new StableRows<>(grid, NodeRow::name);
+        // WAL position and timeline make room for the Sync and Auto failover choices first (both are also in a
+        // node's details and on the Replication page)
+        Ui.hideBelow(grid, 1750, wal, tl);
+        Ui.hideBelow(grid, 980, address, agent, dc);
         grid.addItemClickListener(e -> {
-            if (e.getColumn() == actionsColumn) {
-                return;
+            if (e.getColumn() == actionsColumn || e.getColumn() == syncCol || e.getColumn() == afCol) {
+                return; // their own controls answer the click
             }
-            toggle(e.getItem());
+            toggle(e.getItem().name());
         });
         grid.setItemDetailsRenderer(new ComponentRenderer<>(this::details));
     }
 
-    private void toggle(NodeRow r) {
-        if (!openRows.remove(r.name())) {
-            openRows.add(r.name());
+    /** Shows or hides a row's details; by name, as a kept menu may have been built for an older row. */
+    private void toggle(String name) {
+        if (!openRows.remove(name)) {
+            openRows.add(name);
         }
-        grid.setDetailsVisible(r, openRows.contains(r.name()));
-        grid.getDataProvider().refreshItem(r);
+        nodeRows.find(name).ifPresent(r -> {
+            grid.setDetailsVisible(r, openRows.contains(name));
+            grid.getDataProvider().refreshItem(r);
+        });
     }
 
     private Component details(NodeRow r) {
@@ -252,38 +280,72 @@ class OverviewPage extends Div {
         return r.streaming() ? Ui.Tone.OK : r.busy() != null ? Ui.Tone.INFO : Ui.Tone.WARN;
     }
 
-    private Component actions(NodeRow r) {
-        boolean noPrimaryRunning = last != null && last.nodes().stream().noneMatch(n -> "Primary".equals(n.role()));
-        return NodeActions.menu(console, user, admin, new NodeActions.Node(r.name(), r.isPrimary(), r.agentOnline(),
-                "Replica".equals(r.role()), noPrimaryRunning,
-                console.watcher().identity().foreignData().contains(r.name()),
-                clusterAdmin == null || r.isPrimary() ? null : () -> clusterAdmin.removeNode(r.name(), null)),
-                () -> toggle(r), this::refresh);
+    private boolean noPrimaryRunning() {
+        return last != null && last.nodes().stream().noneMatch(n -> "Primary".equals(n.role()));
     }
 
+    /** What a node's menu offers; the menu is built again only when this changes. */
+    private Object menuSpec(NodeRow r) {
+        return List.of(r.isPrimary(), r.agentOnline(), "Replica".equals(r.role()), noPrimaryRunning(),
+                console.watcher().identity().foreignData().contains(r.name()), clusterAdmin == null || r.isPrimary());
+    }
+
+    private Component actions(NodeRow r) {
+        String name = r.name();
+        return NodeActions.menu(console, user, admin, new NodeActions.Node(name, r.isPrimary(), r.agentOnline(),
+                "Replica".equals(r.role()), noPrimaryRunning(),
+                console.watcher().identity().foreignData().contains(name),
+                clusterAdmin == null || r.isPrimary() ? null : () -> clusterAdmin.removeNode(name, null)),
+                () -> toggle(name), this::refresh);
+    }
+
+    /**
+     * The node cards of narrow screens. Like the grid rows, they are updated in place and keep their menus: only
+     * the name and chips in the head and the lines under it are built again.
+     */
     private void renderNodeCards(Overview o) {
-        nodeCards.removeAll();
+        List<String> names = o.nodes().stream().map(NodeRow::name).toList();
+        if (!names.equals(new java.util.ArrayList<>(cards.keySet()))) {
+            nodeCards.removeAll();
+            cards.clear();
+            for (String n : names) {
+                Div info = Ui.div("pg-contents");
+                Div lines = Ui.div("pg-contents");
+                Div menuSlot = Ui.div("pg-node-card-menu");
+                Div card = Ui.div("pg-node-card", Ui.div("pg-node-card-head", info, menuSlot), lines);
+                cards.put(n, new Div[]{card, info, lines, menuSlot});
+                nodeCards.add(card);
+            }
+        }
         for (NodeRow r : o.nodes()) {
+            Div[] parts = cards.get(r.name());
+            Div card = parts[0];
             Ui.Tone t = stateTone(r);
-            Div card = Ui.div("pg-node-card");
+            card.removeClassNames("crit", "warn");
             if (t == Ui.Tone.CRIT || t == Ui.Tone.WARN) {
                 card.addClassName(t.name().toLowerCase(java.util.Locale.ROOT));
             }
             Span name = new Span(r.name());
             name.getStyle().set("font-weight", "800").set("color", "var(--pg-ink)").set("font-size", "16px");
-            Div head = Ui.div("pg-node-card-head", name, roleChip(r), Ui.chip(Ui.tr(r.state()), t), actions(r));
+            parts[1].removeAll();
+            parts[1].add(name, roleChip(r), Ui.chip(Ui.tr(r.state()), t));
+            Component menu = cardMenus.get(r.name(), menuSpec(r), () -> actions(r));
+            if (parts[3].getChildren().findFirst().orElse(null) != menu) {
+                parts[3].removeAll();
+                parts[3].add(menu);
+            }
+            Div lines = parts[2];
+            lines.removeAll();
             String since = sinceText(r);
-            card.add(head,
-                    Ui.text("pg-note", r.address() + " · " + r.dc() + (since.isEmpty() ? "" : " · " + since)),
+            lines.add(Ui.text("pg-note", r.address() + " · " + r.dc() + (since.isEmpty() ? "" : " · " + since)),
                     Ui.text("pg-note", (r.isPrimary() ? Ui.t("ov.cardWal", r.lsn() == null ? "—" : r.lsn())
                             : Ui.t("ov.cardLag", lagText(r))) + " · " + Ui.t("ov.cardTimeline",
                             r.timeline() == null ? "—" : r.timeline())
                             + (r.sync() == null ? "" : " · " + Ui.tr(Terms.capitalize(r.sync())))
                             + (r.agentOnline() ? "" : " · " + Ui.t("ov.cardAgent", agentLabel(r)))));
             if (r.error() != null) {
-                card.add(Ui.text("pg-note", Ui.tr(r.error())));
+                lines.add(Ui.text("pg-note", Ui.tr(r.error())));
             }
-            nodeCards.add(card);
         }
     }
 
@@ -292,27 +354,10 @@ class OverviewPage extends Div {
     private Component controlsBlock() {
         Div box = new Div();
         box.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "10px");
-        for (Checkbox cb : List.of(autoFailover, mail, maintenance, autoReinit)) {
+        for (Checkbox cb : List.of(mail, maintenance, autoReinit)) {
             cb.setReadOnly(!admin);
             box.add(cb);
         }
-        autoFailover.addValueChangeListener(e -> {
-            if (!e.isFromClient()) {
-                return;
-            }
-            boolean on = e.getValue();
-            autoFailover.setValue(!on);
-            String p = primaryName();
-            if (!on) {
-                Ui.confirm(Ui.t("ov.afOffTitle"), Ui.t("ov.afOffText", p),
-                        Ui.t("ov.turnOff"), true, () -> setControl(false, null, null, null));
-            } else if (primaryDown()) {
-                Ui.confirm(Ui.t("ov.afOnTitle"), Ui.t("ov.afOnDownText", p), Ui.t("ov.turnOnFailOver"), true,
-                        () -> setControl(true, null, null, null));
-            } else {
-                setControl(true, null, null, null);
-            }
-        });
         maintenance.addValueChangeListener(e -> {
             if (!e.isFromClient()) {
                 return;
@@ -347,8 +392,187 @@ class OverviewPage extends Div {
                 setControl(null, null, null, false);
             }
         });
+        box.add(replicationControl());
         box.add(Ui.div("pg-row", Ui.text("pg-stat-label", Ui.t("ov.scope")), scope));
         return box;
+    }
+
+    /**
+     * The cluster-wide parts of synchronous replication and automatic failover. Which nodes they cover is chosen in
+     * the Nodes table; here are the summaries, and the popup to change how commits wait.
+     */
+    private Component replicationControl() {
+        syncChange.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+        syncChange.setVisible(admin);
+        syncChange.addClickListener(e -> {
+            if (last != null && last.replication().synchronous()) {
+                openSync(null, last.replication().standbys());
+            }
+        });
+        Div af = Ui.div("pg-row", Ui.text("pg-stat-label", Ui.t("ov.afLabel")), afSummary);
+        Div sync = Ui.div("pg-row", Ui.text("pg-stat-label", Ui.t("ov.syncLabel")), syncSummary, syncChange);
+        for (Div row : List.of(af, sync)) {
+            row.getStyle().set("align-items", "baseline").set("flex-wrap", "wrap");
+        }
+        Div box = new Div(af, Ui.text("pg-note", Ui.t("ov.afWhere")), sync, syncState);
+        box.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "4px")
+                .set("padding-top", "10px").set("border-top", "1px solid var(--pg-border)");
+        return box;
+    }
+
+    /** The popup for a checked Sync box, or for a change of the mode (node null). */
+    private void openSync(String node, List<String> standbys) {
+        String primary = last == null ? null : last.primary();
+        SyncDialog.open(node, standbys, primary, last == null ? ClusterState.Replication.ASYNC : last.replication(),
+                c -> {
+                    if (Ui.attempt(() -> console.watcher().setReplication(c.mode(), c.count(), c.standbys(), user))) {
+                        Ui.ok(Ui.t("ov.saved"));
+                    }
+                    refresh();
+                });
+    }
+
+    /** A Sync box clicked: checking opens the popup, clearing asks first. */
+    private void syncClicked(NodeRow r, boolean checked) {
+        if (last == null) {
+            return;
+        }
+        ClusterState.Replication now = last.replication();
+        List<String> standbys = new java.util.ArrayList<>(now.standbys());
+        if (checked) {
+            standbys.add(r.name());
+            openSync(r.name(), standbys);
+            refresh(); // the box shows the saved state until the popup is confirmed
+            return;
+        }
+        standbys.remove(r.name());
+        List<String> replicas = standbys.stream().filter(n -> !n.equals(last.primary())).toList();
+        List<String> rest = replicas.isEmpty() ? List.of() : standbys;
+        int count = Math.min(now.count(), Math.max(1, replicas.size()));
+        String text = rest.isEmpty() ? Ui.t("ov.syncOffAll")
+                : Ui.t("ov.syncOffRest", count, String.join(", ", replicas));
+        refresh();
+        Ui.confirm(Ui.t("ov.syncOffTitle", r.name()), text, Ui.t("ov.syncOffButton"), rest.isEmpty(), () -> {
+            if (Ui.attempt(() -> console.watcher().setReplication(now.mode(), count, rest, user))) {
+                Ui.ok(Ui.t("ov.saved"));
+            }
+            refresh();
+        });
+    }
+
+    /** An Auto failover box clicked: clearing asks first, and warns when no replica would be left to promote. */
+    private void failoverClicked(NodeRow r, boolean checked) {
+        if (last == null) {
+            return;
+        }
+        Runnable apply = () -> {
+            if (Ui.attempt(() -> console.watcher().setNodeFailover(r.name(), checked, user))) {
+                Ui.ok(Ui.t("ov.saved"));
+            }
+            refresh();
+        };
+        String p = primaryName();
+        refresh();
+        if (checked) {
+            if (primaryDown() && !r.isPrimary() && !last.maintenance()) {
+                Ui.confirm(Ui.t("ov.afNodeOnTitle", r.name()), Ui.t("ov.afNodeOnDown", p, r.name()),
+                        Ui.t("ov.afNodeOnButton"), true, apply);
+            } else {
+                apply.run();
+            }
+            return;
+        }
+        boolean othersLeft = last.nodes().stream().anyMatch(n -> !n.isPrimary() && !n.name().equals(r.name())
+                && !n.noFailover());
+        String text = r.isPrimary() ? Ui.t("ov.afNodeOffPrimary", r.name())
+                : Ui.t("ov.afNodeOffText", r.name(), p) + (othersLeft ? "" : " " + Ui.t("ov.afNodeOffLast", p));
+        Ui.confirm(Ui.t("ov.afNodeOffTitle", r.name()), text, Ui.t("ov.afNodeOffButton", r.name()), true, apply);
+    }
+
+    private Component syncCell(NodeRow r) {
+        Checkbox cb = new Checkbox(r.syncStandby());
+        cb.setReadOnly(!admin);
+        cb.setAriaLabel(Ui.t("ov.syncFor", r.name()));
+        cb.addValueChangeListener(e -> {
+            if (e.isFromClient()) {
+                syncClicked(r, e.getValue());
+            }
+        });
+        Span state;
+        if (r.isPrimary()) {
+            state = Ui.text("pg-note", r.syncStandby() ? Ui.t("ov.whenReplica") : "");
+        } else if (r.sync() == null) {
+            state = Ui.text("pg-note", r.syncStandby() ? Ui.t("ov.syncNotConnected") : "—");
+        } else if ("quorum".equalsIgnoreCase(r.sync()) || "sync".equalsIgnoreCase(r.sync())) {
+            state = Ui.chip(Ui.t("ov.syncChip"), Ui.Tone.OK);
+            state.getElement().setAttribute("title", Ui.t("ov.syncChipTitle", r.sync()));
+        } else {
+            state = Ui.chip(Ui.tr(Terms.capitalize(r.sync())), r.syncStandby() ? Ui.Tone.WARN : Ui.Tone.NEUTRAL);
+        }
+        Div d = Ui.div("pg-row", cb, state);
+        d.getStyle().set("flex-wrap", "nowrap");
+        return d;
+    }
+
+    private Component failoverCell(NodeRow r) {
+        boolean on = !r.noFailover();
+        Checkbox cb = new Checkbox(on);
+        cb.setReadOnly(!admin);
+        cb.setAriaLabel(Ui.t("ov.afFor", r.name()));
+        cb.addValueChangeListener(e -> {
+            if (e.isFromClient()) {
+                failoverClicked(r, e.getValue());
+            }
+        });
+        Span text = r.isPrimary() ? Ui.text("pg-note", on ? Ui.t("ov.whenReplica") : Ui.t("ov.neverWhenReplica"))
+                : Ui.text(null, on ? Ui.t("ov.canBePromoted") : Ui.t("ov.neverPromotedCell"));
+        if (!r.isPrimary()) {
+            text.getStyle().set("font-size", "13px").set("font-weight", "600")
+                    .set("color", on ? "var(--pg-green-dark)" : "var(--pg-crit-fg)");
+        }
+        Div d = Ui.div("pg-row", cb, text);
+        d.getStyle().set("flex-wrap", "nowrap");
+        return d;
+    }
+
+    private static int streamingReplicas(Overview o) {
+        return (int) o.nodes().stream().filter(r -> !r.isPrimary() && r.streaming() && r.syncStandby()).count();
+    }
+
+    private void renderReplication(Overview o) {
+        ClusterState.Replication r = o.replication();
+        List<String> promotable = o.nodes().stream().filter(n -> !n.isPrimary() && !n.noFailover())
+                .map(NodeRow::name).toList();
+        afSummary.setText(promotable.isEmpty() ? Ui.t("ov.afNone") : Ui.t("ov.afTo", String.join(", ", promotable)));
+        afSummary.getStyle().set("color", promotable.isEmpty() ? "var(--pg-crit-fg)" : "var(--pg-ink)")
+                .set("font-size", "13px");
+        List<String> replicas = r.standbysOf(o.primary());
+        syncSummary.getStyle().set("font-size", "13px").set("color", "var(--pg-ink)");
+        syncChange.setVisible(admin && r.synchronous());
+        if (!r.synchronous()) {
+            syncSummary.setText(Ui.t("ov.syncNone"));
+            syncState.setText(Ui.t("ov.syncWhere"));
+            syncState.getStyle().remove("color");
+            return;
+        }
+        syncSummary.setText(Ui.t(r.strict() ? "ov.syncStrictSummary" : "ov.syncQuorumSummary", r.count(),
+                String.join(", ", replicas.isEmpty() ? r.standbys() : replicas)));
+        int streaming = streamingReplicas(o);
+        String text;
+        if (!r.strict() && r.degraded()) {
+            text = Ui.t("ov.replDegraded", r.count(), streaming);
+        } else if (!r.strict()) {
+            text = Ui.t("ov.replSyncHelp", r.count(), streaming);
+        } else {
+            text = Ui.t("ov.replStrictHelp", r.count(), streaming);
+        }
+        syncState.setText(text);
+        boolean trouble = !r.strict() && r.degraded() || r.strict() && streaming < r.count();
+        if (trouble) {
+            syncState.getStyle().set("color", "var(--lumo-error-text-color)");
+        } else {
+            syncState.getStyle().remove("color");
+        }
     }
 
     private String primaryName() {
@@ -367,14 +591,13 @@ class OverviewPage extends Div {
     }
 
     private void renderControls(Overview o) {
-        autoFailover.setValue(o.autoFailover());
         mail.setValue(o.mailEnabled());
         maintenance.setValue(o.maintenance());
         autoReinit.setValue(o.autoReinit());
-        help(autoFailover, Ui.t("ov.afHelp"), o.controls().get("auto failover"));
         help(mail, Ui.t("ov.mailHelp"), o.controls().get("mail notifications"));
         help(maintenance, Ui.t("ov.mmHelp"), o.controls().get("maintenance mode"));
         help(autoReinit, Ui.t("ov.arHelp"), o.controls().get("auto reinit"));
+        renderReplication(o);
         scope.setText(Ui.t(o.scope().equals("DC_LOCAL") ? "ov.scopeLocal" : "ov.scopeAny")
                 + (o.selfFence() ? " · " + Ui.t("ov.selfFencingOn") : ""));
     }
@@ -393,15 +616,14 @@ class OverviewPage extends Div {
         renderHead(o);
         renderHealth(o);
         renderStats(o);
-        grid.setItems(o.nodes());
+        nodeRows.set(o.nodes());
         for (NodeRow r : o.nodes()) {
             if (openRows.contains(r.name())) {
                 grid.setDetailsVisible(r, true);
             }
         }
         renderNodeCards(o);
-        refreshed.setText(Ui.t("ov.refreshed", Ui.time(o.observedAtMillis(), zone) + " " + Ui.zone(zone),
-                console.watcher().config().timing().pollIntervalMs() / 1000));
+        refreshed.setText(Ui.t("rp.refreshed", Ui.time(o.observedAtMillis(), zone) + " " + Ui.zone(zone)));
         renderTopology(o);
         renderEvents();
         renderWatchers(o);
@@ -450,6 +672,15 @@ class OverviewPage extends Div {
         }
         if ("No primary".equals(o.health())) {
             banners.add(Ui.banner(Ui.t("ov.noPrimaryBanner"), Ui.Tone.WARN));
+        }
+        ClusterState.Replication r = o.replication();
+        int streaming = streamingReplicas(o);
+        if (r.synchronous() && r.strict() && o.primary() != null && streaming < r.count()) {
+            banners.add(Ui.banner(Ui.t("ov.strictWaitingBanner", o.primary(), streaming, r.count()), Ui.Tone.CRIT,
+                    new Anchor(link("replication"), Ui.t("ov.replicationLink"))));
+        } else if (r.synchronous() && !r.strict() && r.degraded()) {
+            banners.add(Ui.banner(Ui.t("ov.syncDegradedBanner", streaming, r.count()), Ui.Tone.WARN,
+                    new Anchor(link("replication"), Ui.t("ov.replicationLink"))));
         }
     }
 
@@ -733,7 +964,7 @@ class OverviewPage extends Div {
     @Override
     protected void onAttach(AttachEvent e) {
         super.onAttach(e);
-        e.getUI().setPollInterval((int) Math.max(1000, console.watcher().config().timing().pollIntervalMs()));
+        RefreshChoice.apply(e.getUI(), refreshEvery.getValue());
         poll = e.getUI().addPollListener(p -> refresh());
     }
 

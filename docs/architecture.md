@@ -163,10 +163,11 @@ The gates, in order. Any closed gate means no failover, an event saying why, and
 | Gate | Passes when |
 | --- | --- |
 | Primary lost | `failure-threshold` polls in a row with the primary not `OK`; a restart in place was tried first if its agent answered |
-| Armed | auto failover on, maintenance off, no operation running, the retry wait after a failed attempt over |
+| Armed | auto failover on (some node is checked in the *Auto failover* column), maintenance off, no operation running, the retry wait after a failed attempt over |
 | Replicas agree | every reachable replica is asked (`/v1/peer-check`) whether it still reaches the primary's PostgreSQL port or streams from it; one "yes" blocks |
 | Watchers agree (Raft) | a majority of watchers saw the primary gone within `observation-fresh` |
-| A candidate exists | a replica whose agent answers, in recovery, not fenced or busy, on the primary's last timeline, not `no-failover`, in the old primary's data center (scope `DC_LOCAL`), at most `max-lag` behind the newest WAL position seen on the primary; the best by received WAL, then priority, then name |
+| A candidate exists | a replica whose agent answers, in recovery, not fenced or busy, on the primary's last timeline, allowed in the console's *Auto failover* column (before anyone chose there: not `no-failover`), in the old primary's data center (scope `DC_LOCAL`), at most `max-lag` behind the newest WAL position seen on the primary; the best by received WAL, then priority, then name |
+| Strict replication | only with strict synchronous replication: the WAL positions of at least `standbys - n + 1` synchronous replicas are known (every set of `n` standbys a commit waited for has one in it), and the candidate has the newest of them. A stopped synchronous replica whose agent answers is started as a replica (never as a primary) so its position becomes known; the gate is looked at again at the next poll |
 
 Then the `FailoverOperation`:
 
@@ -294,10 +295,12 @@ every second; this network does not carry it to clients):
 ## 12. Console and languages
 
 The console (Vaadin 25, server-side Java) reads everything through `ConsoleService` and `FleetService` and changes
-nothing directly; every action goes through the engine like an API call. It speaks English, Turkish and Arabic
-(right to left). The views' own texts come from `i18n/messages*.properties`; texts made by the engine (health,
-events, operation steps, checks, errors) stay English in the state, the API and the mails, and are translated for
-the screen with the catalogs `i18n/runtime-tr.json` and `runtime-ar.json` (templates such as `{node} is down`;
+nothing directly; every action goes through the engine like an API call. It is in English and built for more
+languages: the views' own texts come from `i18n/messages*.properties`, and `i18n/languages` lists the languages
+(English only today). A language is added without code: its tag in `i18n/languages`, `messages_<tag>.properties`
+with every key, and optionally `runtime-<tag>.json`; a right-to-left language lays the console out right to left.
+Texts made by the engine (health, events, operation steps, checks, errors) stay English in the state, the API and
+the mails; a language's `runtime-<tag>.json` translates them for the screen (templates such as `{node} is down`;
 a text the catalog does not know is shown in English). So two operators in different languages see the same
 facts, and logs and mails stay searchable.
 

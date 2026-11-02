@@ -120,6 +120,11 @@ public class HttpAgentClient implements AgentClient {
     }
 
     @Override
+    public ApiResult setSyncStandbys(long epoch, String value) {
+        return command("/v1/pg/sync-standbys", body(epoch).put("value", value));
+    }
+
+    @Override
     public ApiResult stop(long epoch, String mode, boolean releaseVip) {
         return command("/v1/pg/stop", body(epoch).put("mode", mode).put("releaseVip", releaseVip));
     }

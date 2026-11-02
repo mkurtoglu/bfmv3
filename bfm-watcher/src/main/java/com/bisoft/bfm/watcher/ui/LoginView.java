@@ -71,6 +71,7 @@ public class LoginView extends Div implements BeforeEnterObserver, HasDynamicTit
             }
             languages.add(link);
         }
+        languages.setVisible(Messages.severalLanguages());
         Div card = Ui.div("pg-login-card", brand,
                 Ui.text("pg-note", Ui.t("app.subtitle")), cluster, form, languages);
         add(card);

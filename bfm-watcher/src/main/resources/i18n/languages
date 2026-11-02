@@ -1,0 +1,5 @@
+# The console's languages, one language tag per line; English is always there. A language needs
+# messages_<tag>.properties next to this file (every key of messages.properties), lang.<tag> (its name in
+# itself) in every bundle, and may have runtime-<tag>.json (the engine's texts). Right-to-left languages
+# (ar, fa, he, ur) lay the console out right to left.
+en

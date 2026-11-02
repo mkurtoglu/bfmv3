@@ -165,10 +165,11 @@ yeniden bakılması demektir.
 | Kapı | Ne zaman geçer |
 | --- | --- |
 | Primary kayıp | art arda `failure-threshold` sorguda primary `OK` değil; agent'ı yanıt veriyorsa önce yerinde yeniden başlatma denendi |
-| Silahlı | otomatik failover açık, bakım modu kapalı, çalışan işlem yok, başarısız bir denemeden sonraki bekleme bitti |
+| Silahlı | otomatik failover açık (*Otomatik failover* kolonunda en az bir düğüm işaretli), bakım modu kapalı, çalışan işlem yok, başarısız bir denemeden sonraki bekleme bitti |
 | Replica'lar hemfikir | ulaşılabilen her replica'ya (`/v1/peer-check`) primary'nin PostgreSQL portuna hâlâ ulaşıp ulaşmadığı ya da ondan streaming yapıp yapmadığı sorulur; tek bir "evet" engeller |
 | Watcher'lar hemfikir (Raft) | watcher'ların çoğunluğu primary'nin gittiğini `observation-fresh` içinde gördü |
-| Aday var | agent'ı yanıt veren, recovery'de olan, fence edilmemiş veya meşgul olmayan, primary'nin son timeline'ında olan, `no-failover` olmayan, eski primary'nin veri merkezinde olan (kapsam `DC_LOCAL`) ve primary'de görülen en yeni WAL konumunun en fazla `max-lag` gerisinde olan bir replica; alınan WAL'e, sonra önceliğe, sonra ada göre en iyisi |
+| Aday var | agent'ı yanıt veren, recovery'de olan, fence edilmemiş veya meşgul olmayan, primary'nin son timeline'ında olan, konsolun *Otomatik failover* kolonunda izin verilmiş (orada seçim yapılmadıysa: `no-failover` olmayan), eski primary'nin veri merkezinde olan (kapsam `DC_LOCAL`) ve primary'de görülen en yeni WAL konumunun en fazla `max-lag` gerisinde olan bir replica; alınan WAL'e, sonra önceliğe, sonra ada göre en iyisi |
+| Katı replikasyon | yalnız katı (strict) senkron replikasyonda: en az `standbys - n + 1` senkron replica'nın WAL konumu biliniyor (bir commit'in beklediği her `n`'li standby kümesinde biri var) ve aday bunların en yenisine sahip. Agent'ı yanıt veren ama PostgreSQL'i durmuş bir senkron replica, konumu bilinsin diye replica olarak başlatılır (asla primary olarak değil); kapıya bir sonraki sorguda yeniden bakılır |
 
 Ardından `FailoverOperation`:
 
@@ -297,11 +298,13 @@ edildi; bu ağ VIP'i istemcilere taşımaz):
 ## 12. Konsol ve diller
 
 Konsol (Vaadin 25, sunucu tarafı Java) her şeyi `ConsoleService` ve `FleetService` üzerinden okur ve doğrudan
-hiçbir şeyi değiştirmez; her eylem bir API çağrısı gibi motordan geçer. İngilizce, Türkçe ve Arapça (sağdan sola)
-konuşur. Görünümlerin kendi metinleri `i18n/messages*.properties`'ten gelir; motorun ürettiği metinler (sağlık,
-olaylar, işlem adımları, kontroller, hatalar) durumda, API'de ve e-postalarda İngilizce kalır ve ekran için
-`i18n/runtime-tr.json` ve `runtime-ar.json` kataloglarıyla çevrilir (`{node} is down` gibi şablonlar; katalogun
-bilmediği bir metin İngilizce gösterilir). Böylece farklı dillerdeki iki operatör aynı olguları görür; günlükler
+hiçbir şeyi değiştirmez; her eylem bir API çağrısı gibi motordan geçer. İngilizcedir ve başka diller için
+kurulmuştur: görünümlerin kendi metinleri `i18n/messages*.properties`'ten gelir, `i18n/languages` dilleri listeler
+(bugün yalnız İngilizce). Bir dil kod değişmeden eklenir: etiketi `i18n/languages`'a, tüm anahtarlarıyla
+`messages_<etiket>.properties` ve isteğe bağlı `runtime-<etiket>.json`; sağdan sola yazılan bir dil konsolu sağdan
+sola dizer. Motorun ürettiği metinler (sağlık, olaylar, işlem adımları, kontroller, hatalar) durumda, API'de ve
+e-postalarda İngilizce kalır; bir dilin `runtime-<etiket>.json` dosyası onları ekran için çevirir (`{node} is down`
+gibi şablonlar; katalogun bilmediği bir metin İngilizce gösterilir). Böylece farklı dillerdeki iki operatör aynı olguları görür; günlükler
 ve e-postalar aranabilir kalır.
 
 ## 13. Kodda neyin nerede olduğu

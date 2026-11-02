@@ -267,7 +267,7 @@ public class AgentService {
                 s.replicas(), s.slots(), cfg.vipEnabled ? cfg.vipAddress : null, vipHeld, epoch.current(),
                 lease.info(), fence.fenced(), fence.reason(), c.clusterState(), c.checkpointLsn(), c.timeline(),
                 ops.busy(), error, new AgentIdentity(binding.clusterId(), binding.clusterName(), cfg.instanceName,
-                hostId, hostname));
+                hostId, hostname), s.syncStandbys());
     }
 
     /**
@@ -369,6 +369,22 @@ public class AgentService {
     public ApiResult checkpoint(JsonMap body) {
         accept(body);
         return ApiResult.ok(ops.exclusive("checkpoint", pg::checkpoint));
+    }
+
+    /**
+     * Writes {@code synchronous_standby_names} (ALTER SYSTEM, then a reload; no restart). The watcher sends it to every
+     * node, so whichever becomes primary already has it. Only "" or {@code ANY n ("node", ...)} with node names is
+     * accepted: no other text reaches the server.
+     */
+    public ApiResult setSyncStandbys(JsonMap body) {
+        accept(body);
+        String value = body.str("value", "");
+        if (!SyncStandbys.valid(value)) {
+            throw AgentException.badRequest("not a synchronous_standby_names value BFM writes: " + value);
+        }
+        String msg = ops.exclusive("sync standbys", () -> pg.setSyncStandbys(value));
+        refresh();
+        return ApiResult.ok(msg);
     }
 
     public ApiResult stopPg(JsonMap body) {

@@ -193,9 +193,23 @@ Operator actions (console or API, ADMIN only, written to the event log with the 
   rest. If the VIP cannot be brought up, the target stays a replica and the old primary starts again as
   primary with its VIP.
 - **Rejoin (pg_rewind)**, **Re-initialize (pg_basebackup)**, **Start as primary**, **Drop slot**.
-- **Switches**: auto failover, maintenance mode, mail notifications, auto re-initialize. Turning failover off,
-  maintenance on or auto re-initialize on asks first, and so does the reverse while the primary is down (it starts
-  a failover at once).
+- **Switches**: maintenance mode, mail notifications, auto re-initialize. Maintenance on or auto re-initialize on
+  asks first, and so does maintenance off while the primary is down (it starts a failover at once).
+- **Per node, in the Nodes table**: *Auto failover* (whether automatic failover may promote the node; no node
+  checked means no automatic failover, a manual switchover stays possible) and *Sync* (commits wait for the
+  checked replicas). Checking a Sync box asks how commits wait:
+  - *Quorum*: each commit waits until ANY n of the checked replicas has it on disk; when too few of them stream
+    for 10 seconds the leading watcher drops the wait, and takes it up again once they are back and caught up.
+    Writes never stop.
+  - *Strict*: commits keep waiting while the replicas are missing (writes stop rather than lose a commit), and
+    automatic failover promotes only a replica that is sure to have every commit: it needs the WAL position of
+    enough synchronous replicas (`standbys - n + 1`) and picks the newest of them, else it waits. While the
+    primary is down, a synchronous replica whose agent answers but whose PostgreSQL is stopped is started as a
+    replica, so its position becomes known.
+
+  BFM writes `synchronous_standby_names` on every node with `ALTER SYSTEM` and a reload: `FIRST 1 ("a")` for one
+  replica, `ANY n ("a", "b")` for more, empty when none is checked. A switchover warns when no other synchronous
+  node would be left.
 
 ### Several clusters, one console
 
@@ -269,7 +283,9 @@ to the console's login page, so a monitoring script can rely on the status code.
 | `GET /api/v1/switchover/checks?target=` | Pre-checks |
 | `POST /api/v1/switchover` | `{"target":"pg-a2","confirm":"prod-main"}` |
 | `POST /api/v1/nodes/{node}/rejoin` / `reinit` / `start-primary` | Node operations |
-| `PUT /api/v1/controls` | `{"autoFailover":true,"maintenance":false,"mailEnabled":true,"autoReinit":false}` |
+| `PUT /api/v1/controls` | `{"autoFailover":true,"maintenance":false,"mailEnabled":true,"autoReinit":false}`; `autoFailover` sets every node: true allows the ones not configured `no-failover`, false none |
+| `PUT /api/v1/nodes/{node}/auto-failover` | `{"enabled":false}`: whether automatic failover may promote the node |
+| `PUT /api/v1/replication` | `{"standbys":["pg-a2","pg-a3"],"count":1,"mode":"quorum"}` (`mode` quorum or strict, `standbys` `[]` for asynchronous; fields left out keep their value) |
 | `DELETE /api/v1/slots/{name}` | Drop an inactive slot that belongs to no node |
 | `GET/PUT /api/v1/notifications/...` , `POST /api/v1/notifications/test` | Mail settings and test mail |
 | `POST /api/v1/clusters/{cluster}/enrollments` | `{"node":"pg-b1"}`: a one-time enrollment token and the setup command (ADMIN) |

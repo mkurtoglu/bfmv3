@@ -20,6 +20,7 @@ import com.vaadin.flow.shared.Registration;
 import com.vaadin.flow.spring.security.AuthenticationContext;
 import com.bisoft.bfm.core.monitor.LagHistory;
 import com.bisoft.bfm.core.notify.NotificationSettings;
+import com.bisoft.bfm.core.state.ClusterState;
 import com.bisoft.bfm.watcher.service.ConsoleService;
 import com.bisoft.bfm.watcher.service.ConsoleService.ReplicaRow;
 import com.bisoft.bfm.watcher.service.ConsoleService.Replication;
@@ -52,8 +53,12 @@ class ReplicationPage extends Div {
     private final Select<String> lagNode = new Select<>();
     private final Div lagChart = new Div();
     private final Span refreshed = Ui.text("pg-note", "");
+    /** Seconds between refreshes of this page, as this browser chose (0: off). */
+    private final com.vaadin.flow.component.select.Select<Integer> refreshEvery = RefreshChoice.select();
     private final Set<String> openRows = new HashSet<>();
     private Grid.Column<ReplicaRow> actionsColumn;
+    private StableRows<ReplicaRow> replicaRows;
+    private final StableRows.Kept<Component> menus = new StableRows.Kept<>();
     private Registration poll;
     private Replication last;
 
@@ -69,8 +74,12 @@ class ReplicationPage extends Div {
         H1 title = new H1(Ui.t("nav.replication"));
         title.addClassName("pg-title");
         stats.addClassName("pg-stats");
+        Button refreshNow = new Button(Ui.t("ov.refresh"), VaadinIcon.REFRESH.create(), e -> refresh());
+        refreshNow.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        Div refreshRow = Ui.div("pg-row", refreshed, refreshEvery, refreshNow);
+        refreshRow.getStyle().set("flex-wrap", "wrap");
         add(banners, Ui.div("pg-spread", new Div(Ui.text("pg-eyebrow", Ui.t("rp.eyebrow")), title),
-                refreshed), stats);
+                refreshRow), stats);
 
         buildPrimarySide();
         buildReplicaSide();
@@ -180,14 +189,17 @@ class ReplicationPage extends Div {
             return Ui.chip(Ui.t(r.slotActive() ? "rp.slotActive" : "rp.slotInactive", r.slot()),
                     r.slotActive() ? Ui.Tone.OK : Ui.Tone.WARN);
         }).setHeader(Ui.t("rp.col.slot")).setAutoWidth(true);
-        actionsColumn = replicaSide.addComponentColumn(this::actions).setHeader(Ui.t("ov.col.actions")).setAutoWidth(true)
+        // Kept across refreshes: a menu built again while it is open would close under the pointer.
+        actionsColumn = replicaSide.addColumn(StableRows.Kept.renderer(menus, ReplicaRow::node, this::menuSpec,
+                        this::actions)).setHeader(Ui.t("ov.col.actions")).setAutoWidth(true)
                 .setFlexGrow(0).setFrozenToEnd(true);
+        replicaRows = new StableRows<>(replicaSide, ReplicaRow::node);
         Ui.hideBelow(replicaSide, 1180, received, replayed, tl);
         Ui.hideBelow(replicaSide, 900, from, dc);
         Ui.switchAt(replicaSide, 640, List.of(nodeCol, state, behind, slot), List.of(stacked));
         replicaSide.addItemClickListener(e -> {
             if (e.getColumn() != actionsColumn) {
-                toggle(e.getItem());
+                toggle(e.getItem().node());
             }
         });
         replicaSide.setItemDetailsRenderer(new ComponentRenderer<>(r -> {
@@ -244,19 +256,32 @@ class ReplicationPage extends Div {
                 : r.streaming() ? Ui.Tone.OK : Ui.Tone.WARN);
     }
 
-    private void toggle(ReplicaRow r) {
-        if (!openRows.remove(r.node())) {
-            openRows.add(r.node());
+    /** Shows or hides a row's details; by name, as a kept menu may have been built for an older row. */
+    private void toggle(String node) {
+        if (!openRows.remove(node)) {
+            openRows.add(node);
         }
-        replicaSide.setDetailsVisible(r, openRows.contains(r.node()));
-        replicaSide.getDataProvider().refreshItem(r);
+        replicaRows.find(node).ifPresent(r -> {
+            replicaSide.setDetailsVisible(r, openRows.contains(node));
+            replicaSide.getDataProvider().refreshItem(r);
+        });
+    }
+
+    private static boolean runsAsReplica(ReplicaRow r) {
+        return "Streaming".equals(r.state()) || "Not streaming".equals(r.state());
+    }
+
+    /** What a node's menu offers; the menu is built again only when this changes. */
+    private Object menuSpec(ReplicaRow r) {
+        return List.of(r.agentOnline(), runsAsReplica(r), last != null && !last.primaryRunning(),
+                console.watcher().identity().foreignData().contains(r.node()));
     }
 
     private Component actions(ReplicaRow r) {
-        boolean runsAsReplica = "Streaming".equals(r.state()) || "Not streaming".equals(r.state());
-        return NodeActions.menu(console, user, admin, new NodeActions.Node(r.node(), false, r.agentOnline(),
-                runsAsReplica, last != null && !last.primaryRunning(),
-                console.watcher().identity().foreignData().contains(r.node()), null), () -> toggle(r),
+        String node = r.node();
+        return NodeActions.menu(console, user, admin, new NodeActions.Node(node, false, r.agentOnline(),
+                runsAsReplica(r), last != null && !last.primaryRunning(),
+                console.watcher().identity().foreignData().contains(node), null), () -> toggle(node),
                 this::refresh);
     }
 
@@ -268,7 +293,7 @@ class ReplicationPage extends Div {
         renderBanners(r);
         renderStats(r);
         primarySide.setItems(r.replicas());
-        replicaSide.setItems(r.replicas());
+        replicaRows.set(r.replicas());
         for (ReplicaRow row : r.replicas()) {
             if (openRows.contains(row.node())) {
                 replicaSide.setDetailsVisible(row, true);
@@ -296,6 +321,19 @@ class ReplicationPage extends Div {
             banners.add(Ui.banner(Ui.t(notConnected.size() == 1 ? "rp.noWalsenderOne" : "rp.noWalsender",
                     String.join(", ", notConnected), r.primary()), Ui.Tone.WARN));
         }
+        ClusterState.Replication m = r.mode();
+        int sync = syncStreaming(r);
+        if (m.synchronous() && m.strict() && sync < m.count()) {
+            banners.add(Ui.banner(Ui.t("ov.strictWaitingBanner", r.primary(), sync, m.count()), Ui.Tone.CRIT));
+        } else if (m.synchronous() && !m.strict() && m.degraded()) {
+            banners.add(Ui.banner(Ui.t("ov.syncDegradedBanner", sync, m.count()), Ui.Tone.WARN));
+        }
+    }
+
+    /** Synchronous replicas the primary streams to (walsender caught up). */
+    private static int syncStreaming(Replication r) {
+        return (int) r.replicas().stream().filter(x -> r.mode().standbys().contains(x.node())
+                && "streaming".equalsIgnoreCase(x.peerState())).count();
     }
 
     private void renderStats(Replication r) {
@@ -311,6 +349,15 @@ class ReplicationPage extends Div {
         stats.add(Ui.stat(Ui.t("rp.stat.walRate"), r.walRatePerMinute() == null ? "—"
                         : Ui.t("rp.perMinute", Ui.size(r.walRatePerMinute())),
                 r.primaryLsn() == null ? Ui.t("rp.positionUnknown") : Ui.t("rp.primaryAt", r.primaryLsn())));
+        ClusterState.Replication m = r.mode();
+        String value = !m.synchronous() ? Ui.t("ov.repl.async")
+                : Ui.t("ov.repl." + m.mode()) + " · " + Ui.t("ov.replAny", m.count());
+        String sub = r.syncStandbys() == null ? Ui.t("rp.syncUnknown")
+                : r.syncStandbys().isEmpty() ? Ui.t("rp.syncNone") : Ui.ltr(r.syncStandbys());
+        int sync = syncStreaming(r);
+        stats.add(Ui.stat(Ui.t("rp.stat.commits"), value, sub,
+                m.synchronous() && !m.strict() && m.degraded() ? Ui.Tone.WARN
+                        : m.synchronous() && m.strict() && sync < m.count() ? Ui.Tone.CRIT : null));
     }
 
     private void renderLag(Replication r) {
@@ -348,7 +395,7 @@ class ReplicationPage extends Div {
     @Override
     protected void onAttach(AttachEvent e) {
         super.onAttach(e);
-        e.getUI().setPollInterval((int) Math.max(1000, console.watcher().config().timing().pollIntervalMs()));
+        RefreshChoice.apply(e.getUI(), refreshEvery.getValue());
         poll = e.getUI().addPollListener(p -> refresh());
     }
 

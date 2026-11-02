@@ -126,11 +126,12 @@ Rocky / RHEL bir iş istasyonunda: `cp bfm-ca.crt /etc/pki/ca-trust/source/ancho
 `https://bfm.example.com:8443` adresini açın ve admin olarak oturum açın. Yeni bir watcher'da henüz küme yoktur;
 *Filo* sayfası *Küme ekle*'yi önerir.
 
-![Oturum açma sayfası](images/login-tr.png)
+![Oturum açma sayfası](images/login.png)
 
-Konsol İngilizce, Türkçe ve Arapça (sağdan sola) kullanılabilir. Tarayıcının diline uyar; üst çubuktaki dünya
-simgesi (veya oturum açma formunun altındaki bağlantılar) dili değiştirir ve tarayıcı seçimi bir yıl hatırlar.
-Olay kayıtları, e-postalar ve REST API herkes için aynı okunsun diye İngilizce kalır.
+Konsol İngilizcedir. Metinleri dil dosyalarında durur; başka diller kod değişmeden eklenebilir (mimari dokümanına
+bakın). Birden fazla dil olduğunda konsol tarayıcının diline uyar, üst çubuktaki dünya simgesi (ve oturum açma
+formunun altındaki bağlantılar) dili değiştirir ve tarayıcı seçimi bir yıl hatırlar. Olay kayıtları, e-postalar ve
+REST API herkes için aynı okunsun diye İngilizce kalır.
 
 ---
 
@@ -167,7 +168,7 @@ Konsolda *Küme ekle*, kümenin adı, ortamı ve failover kuralları üzerinden 
 agent adresi, PostgreSQL adresi ve portu, veri merkezi). 3. adım, *Kayıt*, her node için bir komut verir.
 [Kullanıcı rehberi](user-guide.md#adding-a-cluster) her adımı gösterir.
 
-![Küme ekle'nin 3. adımı: her node için bir kayıt komutu](images/add-cluster-3-command-tr.png)
+![Küme ekle'nin 3. adımı: her node için bir kayıt komutu](images/add-cluster-3-command.png)
 
 - **Agent adresi**, watcher'ın agent'a nasıl ulaştığıdır: `https://<sunucu>:8008`. Sunucu adı node'un sertifikasına
   girer; bu yüzden watcher'ın gerçekten kullandığı adı veya adresi yazın.

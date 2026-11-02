@@ -162,6 +162,7 @@ public final class SwitchoverOperation extends Operation {
             out.add(PreCheck.warn("Replay lag", Lsn.bytes(lag) + " (" + (sync == null ? "async" : sync)
                     + "). Writes stop first so nothing is lost."));
         }
+        out.addAll(syncCheck(state.replication(), target));
         NodeConfig pc = ctx.cfg().requireNode(state.primary());
         NodeConfig tc = ctx.cfg().requireNode(target);
         if (Objects.equals(p.status().vipAddress(), t.status().vipAddress())) {
@@ -172,6 +173,25 @@ public final class SwitchoverOperation extends Operation {
                     + t.status().vipAddress() + "; clients must move to it"));
         }
         return out;
+    }
+
+    /**
+     * With synchronous replication, the nodes a commit on the new primary can wait for are the checked ones other
+     * than the target. Too few: strict mode stops writes on it, quorum mode stops waiting after 10 s.
+     */
+    public static List<PreCheck> syncCheck(ClusterState.Replication r, String target) {
+        if (!r.synchronous()) {
+            return List.of();
+        }
+        String title = "Synchronous replicas after the switchover";
+        List<String> after = r.standbysOf(target);
+        if (after.size() >= r.count()) {
+            return List.of(PreCheck.pass(title, "Pass · ANY " + r.count() + " of " + String.join(", ", after)));
+        }
+        return List.of(PreCheck.warn(title, "after the switchover " + after.size() + " synchronous replicas remain,"
+                + " commits wait for " + r.count() + (r.strict()
+                ? ": writes on " + target + " stop until another node is checked in the Sync column"
+                : ": commits stop waiting 10 s after the switchover until another node is checked in the Sync column")));
     }
 
     /** Runs arping -D through the target agent: proves sudo works and shows whether the VIP is taken. */

@@ -13,8 +13,8 @@ import java.util.Locale;
 
 /**
  * Picks every console page's language and writing direction: the operator's choice from the language menu (cookie
- * {@value #COOKIE}), otherwise the browser's first supported language, otherwise English. Arabic pages are laid out
- * right to left.
+ * {@value #COOKIE}), otherwise the browser's first supported language, otherwise English. A right-to-left language
+ * lays the pages out right to left.
  */
 @Component
 public class LanguageSetup implements VaadinServiceInitListener {

@@ -153,6 +153,36 @@ public class ApiController {
                 body.autoReinit(), a.getName());
     }
 
+    /**
+     * How commits wait for replicas: the synchronous {@code standbys} (empty: asynchronous), how many of them a commit
+     * waits for ({@code count}) and the {@code mode}: quorum (stop waiting while they are missing) or strict (keep
+     * waiting). Fields left out keep their value.
+     */
+    public record ReplicationMode(String mode, Integer count, List<String> standbys) {
+    }
+
+    @PutMapping("/replication")
+    public ClusterState replication(ClusterContext c, @RequestBody ReplicationMode body, Authentication a) {
+        ClusterState st = c.watcher().state();
+        ClusterState.Replication now = st == null ? ClusterState.Replication.ASYNC : st.replication();
+        return c.watcher().setReplication(body.mode() != null ? body.mode() : now.mode(),
+                body.count() != null ? body.count() : now.count(),
+                body.standbys() != null ? body.standbys() : now.standbys(), a.getName());
+    }
+
+    /** Whether automatic failover may promote this node. */
+    public record NodeFailover(Boolean enabled) {
+    }
+
+    @PutMapping("/nodes/{node}/auto-failover")
+    public ClusterState nodeFailover(ClusterContext c, @PathVariable String node, @RequestBody NodeFailover body,
+                                     Authentication a) {
+        if (body.enabled() == null) {
+            throw new IllegalArgumentException("enabled is required: true or false");
+        }
+        return c.watcher().setNodeFailover(node, body.enabled(), a.getName());
+    }
+
     @DeleteMapping("/slots/{name}")
     public ResponseEntity<Void> dropSlot(ClusterContext c, @PathVariable String name, Authentication a) {
         c.watcher().dropSlot(name, a.getName());

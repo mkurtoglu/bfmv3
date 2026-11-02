@@ -125,9 +125,10 @@ On a Rocky / RHEL workstation: `cp bfm-ca.crt /etc/pki/ca-trust/source/anchors/ 
 Open `https://bfm.example.com:8443` and sign in as the admin. A new watcher has no cluster yet; the Fleet page
 offers *Add cluster*.
 
-The console speaks English, Turkish and Arabic (laid out right to left). It follows the browser's language; the
-globe in the header (or the links under the sign-in form) switches it, and the browser remembers the choice for a
-year. Events, mails and the REST API stay in English, so they read the same for everyone.
+The console is in English. Its texts sit in language files, so further languages can be added without code (see
+the architecture document); with more than one, it follows the browser's language, a globe in the header (and links
+under the sign-in form) switches it, and the browser remembers the choice for a year. Events, mails and the REST API
+stay in English, so they read the same for everyone.
 
 ![The sign-in page](images/login.png)
 

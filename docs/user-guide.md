@@ -92,20 +92,33 @@ From the top:
 - **Primary**, **Virtual IP**, **Max replay lag** and **Primary lease** cards. The lease is how long the primary
   may stay primary without hearing from the watchers; with self-fencing on, a primary whose lease runs out
   stops itself.
-- **Nodes**: role, state and for how long, replay lag, sync or async, whether its agent answers. The arrow opens
-  a node's details; **•••** opens its [actions](#node-actions).
+- **Nodes**: role, state and for how long, replay lag, whether its agent answers. The arrow opens a node's details;
+  **•••** opens its [actions](#node-actions). Two columns are choices (admins):
+  - **Sync**: commits wait for the checked replicas; next to the box, what PostgreSQL reports (*Sync*, *Async*).
+    Checking a box opens a popup: *Quorum* (commits stop waiting 10 seconds after too few of the checked
+    replicas stream, so writes never stop) or *Strict* (commits keep waiting: writes stop rather than lose a
+    commit, and automatic failover promotes only a replica that has every commit), and with two or more replicas
+    how many of them each commit waits for. The popup shows the `synchronous_standby_names` BFM writes on every
+    node. On the primary's row the box applies once it is a replica again.
+  - **Auto failover**: whether automatic failover may promote the node. A node left unchecked stays a replica
+    when the primary fails (a manual switchover to it is still possible); with no node checked there is no
+    automatic failover. Clearing the last one warns first.
+- **Auto-refresh** next to *Refresh*: how often the page reloads its data in this browser (off, 5, 10, 30 or 60
+  seconds; 30 by default). The watcher's own checks of the nodes do not change with it.
 - **Topology**: the VIP and the replication tree; dashed boxes are in another data center.
 - **Cluster controls** (admins):
 
 | Switch | What it does |
 | --- | --- |
-| Auto failover | promote a replica when the primary is lost. Off: the console says so and nothing is promoted on its own |
 | Mail notifications | send this cluster's alerts |
 | Maintenance mode | for planned work: the watcher keeps watching and alerting, but starts no failover |
 | Auto re-initialize | when a former primary cannot be rewound, rebuild it with `pg_basebackup` without asking |
 
-  Turning failover off, maintenance on or auto re-initialize on asks first, and so does turning failover back on
-  while the primary is down (it would start a failover at once).
+  Maintenance on or auto re-initialize on asks first, and so does maintenance off while the primary is down (it
+  would start a failover at once). Under the switches: which nodes automatic failover may promote, and how commits
+  wait for replicas, with *Change…* to switch between quorum and strict or change how many replicas a commit
+  waits for. A banner says when strict replication makes commits wait, or when quorum replication dropped to
+  asynchronous.
 
 - **Watchers**: each watcher, whether it leads, and whether it still sees the primary.
 - **Recent events**, with a link to all of them.

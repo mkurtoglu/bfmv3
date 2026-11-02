@@ -19,12 +19,17 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * The console's languages: English, Turkish and Arabic.
+ * The console's languages: English, and any other listed in {@code i18n/languages}.
+ *
+ * <p>Adding a language takes no code: its tag on a line of {@code i18n/languages}, {@code messages_<tag>.properties}
+ * with every key of {@code messages.properties}, {@code lang.<tag>} (the language's name in itself) in every bundle,
+ * and optionally {@code runtime-<tag>.json}. The language picker shows once there is more than one; a right-to-left
+ * language lays the console out right to left.
  *
  * <p>Two kinds of text. The views' own texts have keys in {@code i18n/messages*.properties} (UTF-8) and come
  * through {@link #getTranslation}: a key missing in a language falls back to English, then to the key itself.
- * Arguments replace {@code {0}}, {@code {1}}... literally (no MessageFormat, so the apostrophes of Turkish and English
- * text need no escaping, and numbers keep Latin digits in Arabic).
+ * Arguments replace {@code {0}}, {@code {1}}... literally (no MessageFormat, so apostrophes need no escaping and
+ * numbers keep Latin digits in every language).
  *
  * <p>Texts made outside the views (health, reasons, events, operation steps, pre-checks, errors) stay English in the
  * state, the REST API and the mails; {@link #runtime} translates them for the screen with the catalog
@@ -35,9 +40,10 @@ import java.util.regex.Pattern;
 public class Messages implements I18NProvider {
 
     public static final Locale ENGLISH = Locale.ENGLISH;
-    public static final Locale TURKISH = Locale.forLanguageTag("tr");
-    public static final Locale ARABIC = Locale.forLanguageTag("ar");
-    public static final List<Locale> LOCALES = List.of(ENGLISH, TURKISH, ARABIC);
+    /** The console's languages, English first: from {@code i18n/languages}. */
+    public static final List<Locale> LOCALES = languages("i18n/languages");
+    /** Languages written right to left. */
+    private static final java.util.Set<String> RIGHT_TO_LEFT = java.util.Set.of("ar", "fa", "he", "ur");
 
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{([a-zA-Z_][a-zA-Z0-9_]*)}");
     private static final Pattern NUMBERED = Pattern.compile("\\{(\\d{1,2})}");
@@ -60,9 +66,38 @@ public class Messages implements I18NProvider {
         return ENGLISH;
     }
 
-    /** Arabic is written right to left. */
+    /** Whether the language is written right to left (Arabic, Persian, Hebrew, Urdu). */
     public static boolean rightToLeft(Locale locale) {
-        return locale != null && "ar".equals(locale.getLanguage());
+        return locale != null && RIGHT_TO_LEFT.contains(locale.getLanguage());
+    }
+
+    /**
+     * The languages a resource lists, one tag per line ({@code #} starts a comment); English is always there, first.
+     */
+    static List<Locale> languages(String resource) {
+        List<Locale> out = new ArrayList<>(List.of(ENGLISH));
+        try (InputStream in = Messages.class.getClassLoader().getResourceAsStream(resource)) {
+            if (in != null) {
+                for (String line : new String(in.readAllBytes(), StandardCharsets.UTF_8).split("\\R")) {
+                    String tag = line.replaceAll("#.*", "").trim();
+                    if (tag.isEmpty()) {
+                        continue;
+                    }
+                    Locale l = Locale.forLanguageTag(tag);
+                    if (!l.getLanguage().isEmpty() && out.stream().noneMatch(x -> x.getLanguage().equals(l.getLanguage()))) {
+                        out.add(l);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("cannot read " + resource, e);
+        }
+        return List.copyOf(out);
+    }
+
+    /** The console has languages to choose from (the picker shows only then). */
+    public static boolean severalLanguages() {
+        return LOCALES.size() > 1;
     }
 
     @Override
@@ -159,7 +194,7 @@ public class Messages implements I18NProvider {
     }
 
     /** English text or template → translation; templates are tried longest first. */
-    private static final class Catalog {
+    static final class Catalog {
         /** A template with its literal start and end, checked before the regex (most texts fail there). */
         private record Template(String prefix, String suffix, Pattern rx, List<String> names, String translation) {
         }

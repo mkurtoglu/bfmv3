@@ -127,6 +127,20 @@ public class PgController {
         }
     }
 
+    /** {@code synchronous_standby_names} written and reloaded; {@code value} is checked by {@code SyncStandbys}. */
+    public String setSyncStandbys(String value) {
+        if (!com.bisoft.bfm.agent.SyncStandbys.valid(value)) {
+            throw new AgentException("not a synchronous_standby_names value BFM writes");
+        }
+        try {
+            psql.exec("ALTER SYSTEM SET synchronous_standby_names = '" + value.replace("'", "''") + "'", 30);
+            psql.exec("SELECT pg_reload_conf()", 30);
+            return value.isEmpty() ? "synchronous_standby_names cleared" : "synchronous_standby_names = " + value;
+        } catch (PgException e) {
+            throw new AgentException("setting synchronous_standby_names failed: " + e.getMessage());
+        }
+    }
+
     /** libpq connection string the replica uses to stream from {@code host:port}. */
     public String conninfo(String host, int port, String user, boolean forReplication) {
         List<String> parts = new ArrayList<>();

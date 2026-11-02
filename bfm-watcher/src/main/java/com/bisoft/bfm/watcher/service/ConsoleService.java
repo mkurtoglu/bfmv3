@@ -25,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /** Builds the read models of one cluster shown in the console and returned by the REST API. */
 public class ConsoleService {
@@ -51,7 +52,8 @@ public class ConsoleService {
                           Long lagBytes, Long replayDelayMs, Integer timeline, String sync, boolean agentOnline,
                           long lastCheckMillis, boolean fenced, String fencedReason, boolean vipHeld, String vipAddress,
                           long epoch, String error, String busy, boolean noFailover, int priority,
-                          boolean isPrimary, boolean streaming, String upstream, long stateSinceMillis) {
+                          boolean isPrimary, boolean streaming, String upstream, long stateSinceMillis,
+                          boolean syncStandby) {
     }
 
     /** The last change of one cluster switch, from the event log. */
@@ -77,7 +79,11 @@ public class ConsoleService {
                            List<NodeRow> nodes, List<SlotRow> slots, List<WatcherRow> watchers,
                            long observedAtMillis, String environment, List<String> healthReasons,
                            String failoverBlockedReason, RoleChange roleChange, Map<String, ControlChange> controls,
-                           String clusterId, String systemIdentifier) {
+                           String clusterId, String systemIdentifier, ClusterState.Replication replication) {
+        public Overview {
+            replication = replication == null ? ClusterState.Replication.ASYNC : replication;
+        }
+
         /**
          * Where the running operation's steps and log can be followed. They live in the memory of the watcher
          * that runs it, so on any other watcher this is that watcher's console (from {@code raft.peers[].url}),
@@ -111,6 +117,20 @@ public class ConsoleService {
         }
     }
 
+    /** The nodes automatic failover never promotes: the console's choice, or the configuration's before one. */
+    private Set<String> notPromotable(ClusterState st) {
+        if (st != null) {
+            return watcher.notPromotable(st);
+        }
+        Set<String> out = new java.util.TreeSet<>();
+        for (NodeConfig nc : watcher.config().nodes()) {
+            if (nc.noFailover()) {
+                out.add(nc.name());
+            }
+        }
+        return out;
+    }
+
     public Overview overview() {
         ClusterConfig cfg = watcher.config();
         ClusterView view = watcher.view();
@@ -125,6 +145,8 @@ public class ConsoleService {
                 sync.put(r.applicationName(), r.syncState());
             }
         }
+        Set<String> never = notPromotable(st);
+        List<String> syncStandbys = st == null ? List.of() : st.replication().standbys();
         List<NodeRow> rows = new ArrayList<>();
         Long maxLag = null;
         String maxLagNode = null;
@@ -158,10 +180,10 @@ public class ConsoleService {
                     s != null, v == null ? 0 : v.observedAtMillis(), s != null && s.fenced(),
                     s == null ? null : s.fencedReason(), s != null && s.vipHeld(), s == null ? null : s.vipAddress(),
                     s == null ? 0 : s.epoch(), v == null ? null : v.error() != null ? v.error() : s == null ? null
-                    : s.error(), s == null ? null : s.busyOperation(), nc.noFailover(), nc.priority(),
+                    : s.error(), s == null ? null : s.busyOperation(), never.contains(nc.name()), nc.priority(),
                     nc.name().equals(primary), s != null && s.streaming(),
                     s == null || s.upstreamHost() == null ? null : s.upstreamHost() + ":" + s.upstreamPort(),
-                    since(nc.name())));
+                    since(nc.name()), syncStandbys.contains(nc.name())));
         }
 
         List<SlotRow> slots = new ArrayList<>();
@@ -222,7 +244,8 @@ public class ConsoleService {
                 maxLagNode, maxDelay, lease, st == null ? null : st.operation(), rows, slots, watchers,
                 view.observedAtMillis(), environment, reasons,
                 lead.leader() ? watcher.failoverBlockedReason() : null, watcher.lastRoleChange(), controls(),
-                watcher.identity().clusterId(), watcher.identity().systemId());
+                watcher.identity().clusterId(), watcher.identity().systemId(),
+                st == null ? null : st.replication());
     }
 
     private long since(String node) {
@@ -341,11 +364,17 @@ public class ConsoleService {
 
     /**
      * @param walRatePerMinute bytes of WAL the primary wrote per minute over the last two polls, null until known
+     * @param mode             how commits wait for replicas (async, sync or strict)
+     * @param syncStandbys     synchronous_standby_names on the primary, null when not known
      */
     public record Replication(String cluster, String primary, String primaryAddress, String primaryLsn,
                               Integer primaryTimeline, boolean primaryRunning, int streamingCount,
                               Long worstFlushBehindBytes, Long worstReplayBehindBytes, Long walRatePerMinute,
-                              List<ReplicaRow> replicas, List<SlotRow> slots, long observedAtMillis) {
+                              List<ReplicaRow> replicas, List<SlotRow> slots, long observedAtMillis,
+                              ClusterState.Replication mode, String syncStandbys) {
+        public Replication {
+            mode = mode == null ? ClusterState.Replication.ASYNC : mode;
+        }
     }
 
     public Replication replication() {
@@ -371,6 +400,7 @@ public class ConsoleService {
             }
         }
 
+        Set<String> never = notPromotable(st);
         List<ReplicaRow> rows = new ArrayList<>();
         Long worstFlush = null;
         Long worstReplay = null;
@@ -406,7 +436,7 @@ public class ConsoleService {
                     peer == null ? null : peer.replayLagMs(), s != null && s.fenced(),
                     s == null ? null : s.fencedReason(), s == null ? null : s.busyOperation(),
                     v == null ? null : v.error() != null ? v.error() : s == null ? null : s.error(),
-                    nc.noFailover()));
+                    never.contains(nc.name())));
         }
 
         List<SlotRow> slotRows = new ArrayList<>();
@@ -420,7 +450,8 @@ public class ConsoleService {
         return new Replication(cfg.name(), primary, pv == null ? null : pv.config().pgHost() + ":"
                 + pv.config().pgPort(), primaryLsn, primaryRunning ? ps.timeline() : null, primaryRunning,
                 streaming, worstFlush, worstReplay, walRate(primaryLsn, view.observedAtMillis()), rows, slotRows,
-                view.observedAtMillis());
+                view.observedAtMillis(), st == null ? null : st.replication(),
+                primaryRunning ? ps.syncStandbys() : null);
     }
 
     private String rateLsn;

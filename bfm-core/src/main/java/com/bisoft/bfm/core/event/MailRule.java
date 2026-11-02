@@ -12,6 +12,7 @@ public enum MailRule {
     WATCHER("Watcher lost or rejoined", Severity.WARNING, 15 * 60_000L, true),
     NODE("Node down or back", Severity.WARNING, 15 * 60_000L, true),
     SWITCHOVER("Switchover finished", Severity.INFO, 0, true),
+    SYNC("Synchronous replication dropped, waiting or back", Severity.WARNING, 0, true),
     REINIT_REJOIN("Reinit or rejoin finished", Severity.INFO, 0, false);
 
     private final String label;

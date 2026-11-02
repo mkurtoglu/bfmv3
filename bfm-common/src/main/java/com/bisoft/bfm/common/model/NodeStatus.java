@@ -42,11 +42,26 @@ public record NodeStatus(
         Integer controlTimeline,
         String busyOperation,
         String error,
-        AgentIdentity identity) implements JsonWritable {
+        AgentIdentity identity,
+        String syncStandbys) implements JsonWritable {
 
     /** Agents older than the identity field report none; treat them as unknown, never as a match. */
     public NodeStatus {
         identity = identity == null ? AgentIdentity.UNKNOWN : identity;
+    }
+
+    /** A status without {@code synchronous_standby_names} (an older agent, or a test). */
+    public NodeStatus(String node, String agentVersion, long agentTimeMillis, boolean pgRunning, PgRole role,
+                      Integer timeline, String systemIdentifier, Integer serverVersionNum, String currentLsn,
+                      String receiveLsn, String replayLsn, Long replayDelayMs, String walReceiverStatus,
+                      String upstreamHost, Integer upstreamPort, List<ReplicationPeer> replicas, List<SlotInfo> slots,
+                      String vipAddress, boolean vipHeld, long epoch, LeaseInfo lease, boolean fenced,
+                      String fencedReason, String controlClusterState, String controlCheckpointLsn,
+                      Integer controlTimeline, String busyOperation, String error, AgentIdentity identity) {
+        this(node, agentVersion, agentTimeMillis, pgRunning, role, timeline, systemIdentifier, serverVersionNum,
+                currentLsn, receiveLsn, replayLsn, replayDelayMs, walReceiverStatus, upstreamHost, upstreamPort,
+                replicas, slots, vipAddress, vipHeld, epoch, lease, fenced, fencedReason, controlClusterState,
+                controlCheckpointLsn, controlTimeline, busyOperation, error, identity, null);
     }
 
     public boolean isPrimary() {
@@ -107,6 +122,7 @@ public record NodeStatus(
                 .put("busyOperation", busyOperation)
                 .put("error", error)
                 .put("identity", identity)
+                .put("syncStandbys", syncStandbys)
                 .raw();
     }
 
@@ -144,6 +160,7 @@ public record NodeStatus(
                 m.intOrNull("controlTimeline"),
                 m.str("busyOperation"),
                 m.str("error"),
-                AgentIdentity.from(m.obj("identity")));
+                AgentIdentity.from(m.obj("identity")),
+                m.str("syncStandbys"));
     }
 }

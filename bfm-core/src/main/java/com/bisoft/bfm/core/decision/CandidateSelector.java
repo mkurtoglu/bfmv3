@@ -68,6 +68,20 @@ public final class CandidateSelector {
      */
     public static Result rank(ClusterConfig cfg, ClusterView view, String oldPrimary, Integer primaryTimeline,
                               String primaryLsn, Set<String> excluded) {
+        Set<String> configured = new java.util.HashSet<>();
+        for (NodeConfig n : cfg.nodes()) {
+            if (n.noFailover()) {
+                configured.add(n.name());
+            }
+        }
+        return rank(cfg, view, oldPrimary, primaryTimeline, primaryLsn, excluded, configured);
+    }
+
+    /**
+     * @param notPromotable nodes automatic failover never promotes (the console's per-node choice)
+     */
+    public static Result rank(ClusterConfig cfg, ClusterView view, String oldPrimary, Integer primaryTimeline,
+                              String primaryLsn, Set<String> excluded, Set<String> notPromotable) {
         NodeConfig old = cfg.node(oldPrimary).orElse(null);
         List<Candidate> ok = new ArrayList<>();
         List<Rejected> rejected = new ArrayList<>();
@@ -75,7 +89,7 @@ public final class CandidateSelector {
             if (v.name().equals(oldPrimary)) {
                 continue;
             }
-            String why = reject(cfg, v, old, primaryTimeline, primaryLsn, excluded);
+            String why = reject(cfg, v, old, primaryTimeline, primaryLsn, excluded, notPromotable);
             if (why != null) {
                 rejected.add(new Rejected(v.name(), why));
                 continue;
@@ -90,13 +104,47 @@ public final class CandidateSelector {
         return new Result(List.copyOf(ok), List.copyOf(rejected));
     }
 
+    /**
+     * Strict replication: every commit reached at least {@code count} of the synchronous standbys before the client
+     * got its answer. A promotion keeps them all only when the WAL positions of at least
+     * {@code standbys - count + 1} of them are known (then every set of {@code count} standbys has one in it) and
+     * the chosen replica has the newest of them.
+     *
+     * @return null when promoting {@code target} keeps every commit, else why not
+     */
+    public static String strictGap(ClusterView view, String oldPrimary, Integer primaryTimeline,
+                                   List<String> syncStandbys, int count, Candidate target) {
+        int standbys = (int) syncStandbys.stream().filter(n -> !n.equals(oldPrimary)).count();
+        int needed = Math.max(1, standbys - count + 1);
+        List<NodeView> known = view.nodes().stream()
+                .filter(v -> !v.name().equals(oldPrimary) && syncStandbys.contains(v.name())
+                        && v.runningReplica() && v.status().bestLsn() != null
+                        && (primaryTimeline == null || v.status().timeline() == null
+                        || primaryTimeline.equals(v.status().timeline())))
+                .toList();
+        if (known.size() < needed) {
+            return "strict replication: the WAL position of " + known.size() + " of " + standbys + " synchronous"
+                    + " replicas is known, " + needed + " are needed to be sure no commit is lost (commits waited"
+                    + " for ANY " + count + ")";
+        }
+        NodeView newest = known.stream().max(Comparator.comparingLong((NodeView v) -> Lsn.parse(v.status().bestLsn()))
+                .thenComparing(NodeView::name, Comparator.reverseOrder())).orElseThrow();
+        long newestLsn = Lsn.parse(newest.status().bestLsn());
+        if (target.lsn() < newestLsn) {
+            return "strict replication: " + newest.name() + " has WAL up to " + Lsn.format(newestLsn)
+                    + " but cannot be promoted, and " + target.name() + " (at " + Lsn.format(target.lsn())
+                    + ") may miss commits";
+        }
+        return null;
+    }
+
     private static String reject(ClusterConfig cfg, NodeView v, NodeConfig old, Integer primaryTimeline,
-                                 String primaryLsn, Set<String> excluded) {
+                                 String primaryLsn, Set<String> excluded, Set<String> notPromotable) {
         if (excluded.contains(v.name())) {
             return "skipped after a failed attempt";
         }
-        if (v.config().noFailover()) {
-            return "marked noFailover";
+        if (notPromotable.contains(v.name())) {
+            return "automatic failover is off for this node";
         }
         if (cfg.scope() == FailoverScope.DC_LOCAL && old != null && !Objects.equals(old.dc(), v.config().dc())) {
             return "in data center " + v.config().dc() + ", automatic failover stays in " + old.dc();

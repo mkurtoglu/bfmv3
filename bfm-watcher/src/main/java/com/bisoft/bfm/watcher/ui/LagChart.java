@@ -72,7 +72,7 @@ final class LagChart {
         Div xaxis = Ui.div("pg-axis", Ui.text(null, Ui.minute(samples.get(0).minuteMillis(), zone)),
                 Ui.text(null, Ui.minute(now, zone) + " " + Ui.zone(zone)));
         Div chart = Ui.div("pg-chart", yaxis, bars, xaxis);
-        // time runs left to right in every language, Arabic included
+        // time runs left to right in every language, right-to-left ones included
         chart.getElement().setAttribute("dir", "ltr");
         box.add(chart);
         return box;

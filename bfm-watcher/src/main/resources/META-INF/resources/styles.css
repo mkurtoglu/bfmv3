@@ -93,12 +93,6 @@ html {
   --lumo-font-family: "Plus Jakarta Sans", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
 }
 
-/* Arabic: Latin words keep Plus Jakarta Sans, Arabic letters come from an Arabic font; letter spacing would tear the
-   joined Arabic script apart, so it is off on Arabic pages */
-html[lang="ar"], html[lang="ar"] body {
-  --lumo-font-family: "Plus Jakarta Sans", "Noto Sans Arabic", "Segoe UI", Tahoma, "Geeza Pro", system-ui, sans-serif;
-}
-html[lang="ar"] * { letter-spacing: 0 !important; }
 
 body {
   background: var(--pg-bg);
@@ -580,7 +574,7 @@ vaadin-app-layout.pg-env-production::part(navbar) { border-top: 4px solid var(--
 /* Rows that open: the chevron says so. */
 .pg-chevron { color: var(--pg-muted); transition: transform 0.15s ease; width: 14px; height: 14px; }
 .pg-chevron.open { transform: rotate(90deg); }
-/* right to left (Arabic): a closed row's chevron points to the start of the line */
+/* right to left: a closed row's chevron points to the start of the line */
 [dir="rtl"] .pg-chevron:not(.open) { transform: scaleX(-1); }
 @media (prefers-reduced-motion: reduce) { .pg-chevron { transition: none; } }
 
@@ -640,7 +634,8 @@ vaadin-menu-bar-item.pg-danger, vaadin-context-menu-item.pg-danger { color: var(
 .pg-node-card.warn { border-color: var(--pg-warn-line); }
 .pg-node-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pg-node-card-head b { color: var(--pg-ink); font-size: 16px; }
-.pg-node-card-head vaadin-menu-bar { margin-inline-start: auto; }
+.pg-node-card-head vaadin-menu-bar, .pg-node-card-menu { margin-inline-start: auto; }
+.pg-contents { display: contents; }
 .pg-node-card .pg-note { overflow-wrap: anywhere; }
 
 /* Unsaved changes on a settings card. */

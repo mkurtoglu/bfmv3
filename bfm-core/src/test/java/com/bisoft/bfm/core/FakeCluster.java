@@ -77,6 +77,8 @@ public final class FakeCluster implements AgentClientFactory {
         public Runnable onPromote;
         public boolean rewindFails;
         public String clusterState = "in production";
+        /** synchronous_standby_names as the agent last wrote it ("" = asynchronous). */
+        public String syncStandbys = "";
         public long checkpointLsn;
         public final Set<String> slots = new TreeSet<>();
         private final Map<String, OperationStatus> ops = new HashMap<>();
@@ -167,7 +169,10 @@ public final class FakeCluster implements AgentClientFactory {
                 if (pgRunning && role == PgRole.PRIMARY) {
                     for (Node r : nodes.values()) {
                         if (r != this && r.isStreaming() && r.upstream() == this) {
-                            peers.add(new ReplicationPeer(r.name, r.host, "streaming", "async", Lsn.format(r.lsn),
+                            // ANY n (...): every listed standby is a quorum candidate, as pg_stat_replication says
+                            String sync = !syncStandbys.contains("\"" + r.name + "\"") ? "async"
+                                    : syncStandbys.startsWith("FIRST") ? "sync" : "quorum";
+                            peers.add(new ReplicationPeer(r.name, r.host, "streaming", sync, Lsn.format(r.lsn),
                                     Lsn.format(r.lsn), Lsn.format(r.lsn), Lsn.format(r.lsn), 0L));
                         }
                     }
@@ -190,7 +195,8 @@ public final class FakeCluster implements AgentClientFactory {
                         peers, slotInfos, vip, vipHeld(), epoch, leaseInfo(), fenced, fencedReason,
                         pgRunning ? null : clusterState, Lsn.format(checkpointLsn), timeline,
                         null, up == null && !primary && pgRunning ? "no upstream" : null,
-                        new AgentIdentity(boundCluster, boundClusterName, null, hostId, host));
+                        new AgentIdentity(boundCluster, boundClusterName, null, hostId, host),
+                        pgRunning ? syncStandbys : null);
             }
         }
 
@@ -348,6 +354,20 @@ public final class FakeCluster implements AgentClientFactory {
                     throw AgentCallException.unreachable(name, "unreachable: HttpTimeoutException: request timed out");
                 }
                 return ApiResult.ok("promoted");
+            }
+        }
+
+        @Override
+        public ApiResult setSyncStandbys(long e, String value) {
+            synchronized (FakeCluster.this) {
+                reachable();
+                epoch(e);
+                if (!pgRunning) {
+                    throw new AgentCallException(name, 409, "PostgreSQL is not running");
+                }
+                did("sync " + value);
+                syncStandbys = value;
+                return ApiResult.ok("synchronous_standby_names = " + value);
             }
         }
 

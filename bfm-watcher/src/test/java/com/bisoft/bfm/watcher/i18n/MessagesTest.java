@@ -5,7 +5,9 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
@@ -16,12 +18,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** The console's three languages: complete bundles, keys the code uses, placeholders, the runtime catalog. */
+/**
+ * The console's languages: complete bundles, keys the code uses, placeholders, the runtime catalog. The console ships
+ * English; the multi-language parts are checked with sample data, so they keep working for a language added later.
+ */
 class MessagesTest {
 
     private static final Pattern NUMBERED = Pattern.compile("\\{\\d+}");
     private static final Pattern NAMED = Pattern.compile("\\{[a-zA-Z_][a-zA-Z0-9_]*}");
     private static final Path UI_SOURCES = Path.of("src/main/java/com/bisoft/bfm/watcher");
+
+    private static final Locale TURKISH = Locale.forLanguageTag("tr");
+    private static final Locale ARABIC = Locale.forLanguageTag("ar");
 
     private final Messages messages = new Messages();
 
@@ -95,60 +103,85 @@ class MessagesTest {
     @Test
     void argumentsAreFilledLiterallyAndMissingKeysFallBack() {
         assertEquals("Watchers 2/3 · leader w1", messages.getTranslation("header.watchers", Messages.ENGLISH, 2, 3, "w1"));
-        // an apostrophe needs no escaping (no MessageFormat), numbers keep Latin digits in Arabic
-        assertTrue(messages.getTranslation("header.watchers", Messages.TURKISH, 2, 3, "w1").contains("Watcher'lar 2/3"));
-        assertTrue(messages.getTranslation("ov.leaseLeft", Messages.ARABIC, 12).contains("12"));
-        assertEquals("no.such.key", messages.getTranslation("no.such.key", Messages.TURKISH));
+        // an apostrophe needs no escaping (no MessageFormat), numbers keep Latin digits whatever the language
+        assertEquals("Watcher'lar 2/3 · lider w1", Messages.fill("Watcher'lar {0}/{1} · lider {2}", 2, 3, "w1"));
+        Locale before = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("ar-SA"));
+            assertTrue(messages.getTranslation("ov.leaseLeft", ARABIC, 12).contains("12"));
+        } finally {
+            Locale.setDefault(before);
+        }
+        assertEquals("no.such.key", messages.getTranslation("no.such.key", TURKISH));
+        // a language without a bundle gets English
+        assertEquals("Watchers 2/3 · leader w1", messages.getTranslation("header.watchers", TURKISH, 2, 3, "w1"));
         // arguments go in once: a name that contains "{1}" is shown as it is
         assertEquals("Watchers 2/{1} · leader w1", messages.getTranslation("header.watchers", Messages.ENGLISH, 2,
                 "{1}", "w1"));
-        assertEquals(Messages.TURKISH, Messages.supported(Locale.forLanguageTag("tr-TR")));
+        assertEquals(Messages.ENGLISH, Messages.LOCALES.get(0), "English first");
+        assertEquals(Messages.LOCALES.size() > 1, Messages.severalLanguages());
+        for (Locale l : Messages.LOCALES) {
+            assertEquals(l, Messages.supported(Locale.forLanguageTag(l.getLanguage() + "-ZZ")), "region ignored");
+        }
         assertEquals(Messages.ENGLISH, Messages.supported(Locale.GERMAN));
-        assertTrue(Messages.rightToLeft(Messages.ARABIC));
-        assertFalse(Messages.rightToLeft(Messages.TURKISH));
+        assertTrue(Messages.rightToLeft(ARABIC));
+        assertTrue(Messages.rightToLeft(Locale.forLanguageTag("he")));
+        assertFalse(Messages.rightToLeft(TURKISH));
+        assertFalse(Messages.rightToLeft(Messages.ENGLISH));
+    }
+
+    @Test
+    void theLanguageListIsReadFromItsResource() {
+        // sample list (test resource): comments, blank lines, regions and repeats; English always first
+        assertEquals(List.of(Messages.ENGLISH, TURKISH, Locale.forLanguageTag("ar-SA")),
+                Messages.languages("i18n/sample-languages"));
+        assertEquals(List.of(Messages.ENGLISH), Messages.languages("i18n/no-such-file"));
     }
 
     @Test
     void runtimeTextsAreTranslatedByTemplateAndUnknownOnesStayEnglish() {
         // English is never touched; a text the catalog does not know comes back as it is
         assertEquals("Healthy", messages.runtime("Healthy", Messages.ENGLISH));
-        assertEquals("some agent said something", messages.runtime("some agent said something", Messages.TURKISH));
-        assertEquals(null, messages.runtime(null, Messages.ARABIC));
-        for (Locale l : new Locale[] {Messages.TURKISH, Messages.ARABIC}) {
-            Set<String> templates = messages.runtimeTemplates(l);
-            if (templates.isEmpty()) {
-                continue;
-            }
-            assertEquals(messages.runtimeTemplates(Messages.TURKISH), templates, "Turkish and Arabic know the same texts");
-            for (String en : templates) {
+        assertEquals("some agent said something", messages.runtime("some agent said something", TURKISH));
+        assertEquals(null, messages.runtime(null, ARABIC));
+        for (Locale l : Messages.LOCALES) {
+            for (String en : messages.runtimeTemplates(l)) {
                 assertEquals(placeholders(NAMED, en), placeholders(NAMED, messages.runtime(en, l)), l + ": " + en);
             }
-            if (templates.contains("Healthy")) {
-                assertFalse(messages.runtime("Healthy", l).equals("Healthy"), l + ": Healthy");
-            }
         }
-        // events as the watcher writes them: the template's values are translated too, names stay as they are
+        // the catalog itself, with sample entries: events as the watcher writes them, the template's values are
+        // translated too, names stay as they are
+        Messages.Catalog c = new Messages.Catalog(Map.of(
+                "Automatic failover {oldPrimary} -> {target} completed",
+                "Otomatik failover {oldPrimary} -> {target} tamamlandı",
+                "Automatic failover not started: {reason}", "Otomatik failover başlatılmadı: {reason}",
+                "maintenance mode is on", "bakım modu açık",
+                "the VIP is on {primary} now, as expected; it moves to {target} after {primary2} stops",
+                "VIP beklendiği gibi şu an {primary} üzerinde; {primary2} durduktan sonra {target}'e geçer",
+                "{node} re-initialized from {source} (by {user})",
+                "{node}, {source} üzerinden yeniden oluşturuldu ({user} tarafından)",
+                "{node} re-initialized from {source}", "{node}, {source} üzerinden yeniden oluşturuldu",
+                "primary", "birincil"));
         assertEquals("Otomatik failover pg-a1 -> pg-a3 tamamlandı",
-                messages.runtime("Automatic failover pg-a1 -> pg-a3 completed", Messages.TURKISH));
+                c.translate("Automatic failover pg-a1 -> pg-a3 completed", 0));
         assertEquals("Otomatik failover başlatılmadı: bakım modu açık",
-                messages.runtime("Automatic failover not started: maintenance mode is on", Messages.TURKISH));
-        assertEquals("فشل التبديل {oldPrimary} -> {target}: {a}".replace("{oldPrimary}", "pg-a1").replace("{target}", "pg-a2")
-                        .replace("{a}", "لا يزال الـ VIP يستجيب: x"),
-                messages.runtime("Switchover pg-a1 -> pg-a2 failed: the VIP still answers: x", Messages.ARABIC));
+                c.translate("Automatic failover not started: maintenance mode is on", 0));
         // placeholder names with digits ({primary2}: the same value used twice in the English text)
         assertEquals("VIP beklendiği gibi şu an pg-a1 üzerinde; pg-a1 durduktan sonra pg-a2'e geçer",
-                messages.runtime("the VIP is on pg-a1 now, as expected; it moves to pg-a2 after pg-a1 stops", Messages.TURKISH));
+                c.translate("the VIP is on pg-a1 now, as expected; it moves to pg-a2 after pg-a1 stops", 0));
+        // the longest template wins
         assertEquals("pg-dr1, pg-a1 üzerinden yeniden oluşturuldu (admin tarafından)",
-                messages.runtime("pg-dr1 re-initialized from pg-a1 (by admin)", Messages.TURKISH));
+                c.translate("pg-dr1 re-initialized from pg-a1 (by admin)", 0));
         // a single-word value is a name and stays as it is, even a node called "primary"
-        assertEquals("primary, pg-a1 üzerinden yeniden oluşturuldu",
-                messages.runtime("primary re-initialized from pg-a1", Messages.TURKISH));
+        assertEquals("primary, pg-a1 üzerinden yeniden oluşturuldu", c.translate("primary re-initialized from pg-a1", 0));
+        assertEquals("not in the catalog", c.translate("not in the catalog", 0));
     }
 
     @Test
     void theLanguageCookieWinsOverTheBrowser() {
         assertEquals(Messages.ENGLISH, LanguageSetup.chosen(null, Locale.ENGLISH));
-        assertEquals(Messages.ARABIC, LanguageSetup.chosen(null, Locale.forLanguageTag("ar-SA")));
+        // a browser language the console does not have gets English
+        assertEquals(Messages.supported(ARABIC), LanguageSetup.chosen(null, Locale.forLanguageTag("ar-SA")));
         assertEquals(Messages.ENGLISH, LanguageSetup.chosen(null, Locale.JAPANESE));
     }
 

@@ -33,6 +33,12 @@ public enum EventType {
     REJOIN_FAILED(Severity.WARNING, MailRule.REINIT_REJOIN, false),
     VIP(Severity.INFO, null, false),
     CONTROL_CHANGED(Severity.INFO, null, false),
+    /** sync mode: fewer replicas stream than the mode waits for; commits no longer wait (asynchronous for now). */
+    SYNC_DEGRADED(Severity.WARNING, MailRule.SYNC, false),
+    /** strict mode: fewer replicas stream than the mode waits for; commits wait until one is back. */
+    SYNC_WAITING(Severity.CRITICAL, MailRule.SYNC, false),
+    /** Enough replicas stream again; commits wait for them as the mode says. */
+    SYNC_RESTORED(Severity.INFO, MailRule.SYNC, false),
     SLOT_DROPPED(Severity.INFO, null, false),
     OPERATION(Severity.INFO, null, false);
 
