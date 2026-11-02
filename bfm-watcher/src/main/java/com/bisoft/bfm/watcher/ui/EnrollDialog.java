@@ -25,21 +25,19 @@ final class EnrollDialog {
         String command = "sudo minipgagent setup --enroll " + scheme + host + " --token " + t.token()
                 + (fp == null ? " --insecure-http" : " --fingerprint " + fp);
         Dialog d = new Dialog();
-        d.setHeaderTitle("Enroll " + t.node() + " of " + t.cluster());
+        d.setHeaderTitle(Ui.t("en.title", t.node(), t.cluster()));
         Pre pre = new Pre(command);
         pre.addClassName("pg-mono");
         pre.getStyle().set("white-space", "pre-wrap").set("word-break", "break-all");
-        d.add(Ui.text("pg-note", "Run it as root on the node's database host. Shown once; works once, for "
-                + t.node() + " only, until " + Ui.full(t.expiresAtMillis(), zone) + " " + Ui.zone(zone)
-                + "." + (fp == null ? "" : " --fingerprint pins this console's certificate, so the token goes to"
-                + " no one else.") + " The node's certificate will be signed by the BFM CA " + t.caFingerprint()
-                + "."), pre);
-        Button copy = new Button("Copy", e -> {
+        pre.getElement().setAttribute("dir", "ltr"); // a shell command
+        d.add(Ui.text("pg-note", Ui.t("en.runIt", t.node(), Ui.full(t.expiresAtMillis(), zone) + " " + Ui.zone(zone))
+                + (fp == null ? "" : " " + Ui.t("en.pins")) + " " + Ui.t("en.signedBy", t.caFingerprint())), pre);
+        Button copy = new Button(Ui.t("en.copy"), e -> {
             UI.getCurrent().getPage().executeJs("navigator.clipboard.writeText($0)", command);
-            Ui.ok("Copied");
+            Ui.ok(Ui.t("en.copied"));
         });
         copy.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        d.getFooter().add(new Button("Close", e -> d.close()), copy);
+        d.getFooter().add(new Button(Ui.t("common.close"), e -> d.close()), copy);
         d.setWidth("min(720px, 95vw)");
         d.open();
     }

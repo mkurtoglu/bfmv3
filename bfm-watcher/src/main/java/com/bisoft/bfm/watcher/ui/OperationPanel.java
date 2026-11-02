@@ -24,22 +24,22 @@ class OperationPanel extends Div {
     void show(OperationProgress.Snapshot s) {
         removeAll();
         if (s == null) {
-            add(Ui.text("pg-note", "Choose an operation."));
+            add(Ui.text("pg-note", Ui.t("op.choose")));
             return;
         }
         H2 title = new H2(label(s.type()) + (s.target() == null ? "" : " · " + s.target()));
         add(Ui.div("pg-spread", title, Ui.chip(switch (s.state()) {
-            case RUNNING -> "Running";
-            case SUCCEEDED -> "Succeeded";
-            case FAILED -> "Failed";
+            case RUNNING -> Ui.t("op.running");
+            case SUCCEEDED -> Ui.t("op.succeeded");
+            case FAILED -> Ui.t("op.failed");
         }, Ui.tone(s.state()))));
-        add(Ui.text("pg-note", "Started " + Ui.full(s.startedAtMillis(), zone) + " " + Ui.zone(zone) + " by "
-                + s.startedBy() + (s.epochTo() > 0 ? " · epoch " + s.epochFrom() + " → " + s.epochTo() : "")
-                + (s.finishedAtMillis() == null ? " · running for " + Ui.ago(s.startedAtMillis(),
-                System.currentTimeMillis()) : " · finished " + Ui.time(s.finishedAtMillis(), zone) + ", took "
-                + Ui.duration(s.durationMs()))));
+        add(Ui.text("pg-note", Ui.t("op.startedBy", Ui.full(s.startedAtMillis(), zone) + " " + Ui.zone(zone),
+                s.startedBy()) + (s.epochTo() > 0 ? " · " + Ui.t("op.epochs", s.epochFrom(), s.epochTo()) : "")
+                + " · " + (s.finishedAtMillis() == null ? Ui.t("op.runningFor", Ui.ago(s.startedAtMillis(),
+                System.currentTimeMillis())) : Ui.t("op.finished", Ui.time(s.finishedAtMillis(), zone),
+                Ui.duration(s.durationMs())))));
         if (s.result() != null && !s.running()) {
-            add(Ui.banner(Ui.arrows(s.result()), s.state() == OperationProgress.State.SUCCEEDED ? Ui.Tone.OK
+            add(Ui.banner(Ui.arrows(Ui.tr(s.result())), s.state() == OperationProgress.State.SUCCEEDED ? Ui.Tone.OK
                     : Ui.Tone.CRIT));
         }
         UnorderedList steps = new UnorderedList();
@@ -50,7 +50,7 @@ class OperationPanel extends Div {
             Span dot = new Span();
             dot.addClassNames("pg-dot", st.state().name());
             dot.getElement().setAttribute("aria-hidden", "true");
-            Span name = new Span(st.title());
+            Span name = new Span(Ui.tr(st.title()));
             name.getStyle().set("color", "var(--pg-ink)").set("font-weight", st.state()
                     == OperationProgress.StepState.RUNNING ? "700" : "500");
             String took = st.durationMs() != null && st.state() != OperationProgress.StepState.SKIPPED
@@ -58,14 +58,14 @@ class OperationPanel extends Div {
                     : st.state() == OperationProgress.StepState.RUNNING && st.startedAtMillis() != null
                     ? " · " + Ui.ago(st.startedAtMillis(), System.currentTimeMillis()) : "";
             li.add(dot, name, Ui.text("pg-note", switch (st.state()) {
-                case PENDING -> "Pending";
-                case RUNNING -> "Running";
-                case DONE -> "Done";
-                case FAILED -> "Failed";
-                case SKIPPED -> "Skipped";
+                case PENDING -> Ui.t("op.pending");
+                case RUNNING -> Ui.t("op.running");
+                case DONE -> Ui.t("op.done");
+                case FAILED -> Ui.t("op.failed");
+                case SKIPPED -> Ui.t("op.skipped");
             } + took));
             if (st.detail() != null && !st.detail().isBlank()) {
-                li.add(Ui.text("pg-step-detail", st.detail()));
+                li.add(Ui.text("pg-step-detail", Ui.tr(st.detail())));
             }
             steps.add(li);
         }
@@ -77,12 +77,13 @@ class OperationPanel extends Div {
                         .append(l.text()).append('\n');
             }
             Pre pre = new Pre(sb.toString());
+            pre.getElement().setAttribute("dir", "ltr"); // log lines stay as the programs wrote them
             pre.addClassName("pg-log");
             add(pre);
         }
     }
 
     static String label(String type) {
-        return Terms.operation(type);
+        return Ui.tr(Terms.operation(type));
     }
 }

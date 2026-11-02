@@ -37,23 +37,21 @@ final class ClusterAdmin {
 
     void addNode() {
         Dialog d = new Dialog();
-        d.setHeaderTitle("Add a node to " + cluster);
-        TextField name = new TextField("Node name");
-        TextField agent = new TextField("Agent address");
+        d.setHeaderTitle(Ui.t("adm.addTitle", cluster));
+        TextField name = new TextField(Ui.t("adm.nodeName"));
+        TextField agent = new TextField(Ui.t("ca.col.agent"));
         agent.setPlaceholder("https://db04:8008");
-        TextField pgHost = new TextField("PostgreSQL address");
-        IntegerField pgPort = new IntegerField("Port");
+        TextField pgHost = new TextField(Ui.t("adm.pgAddress"));
+        IntegerField pgPort = new IntegerField(Ui.t("adm.port"));
         pgPort.setValue(5432);
-        TextField dc = new TextField("Data center");
+        TextField dc = new TextField(Ui.t("adm.dc"));
         dc.setValue("DC1");
-        IntegerField prio = new IntegerField("Priority");
+        IntegerField prio = new IntegerField(Ui.t("adm.priority"));
         prio.setValue(100);
-        Checkbox never = new Checkbox("Never promote automatically");
-        d.add(Ui.text("pg-note", "The watchers start polling it at once; enroll it with the command shown next. It"
-                + " joins as a replica: following if it already streams, otherwise rewound or re-initialized from"
-                + " the primary (from its menu)."), Ui.div("pg-grid-auto", name, agent, pgHost, pgPort, dc, prio),
+        Checkbox never = new Checkbox(Ui.t("adm.never"));
+        d.add(Ui.text("pg-note", Ui.t("adm.addNote")), Ui.div("pg-grid-auto", name, agent, pgHost, pgPort, dc, prio),
                 never);
-        Button add = new Button("Add and enroll", e -> {
+        Button add = new Button(Ui.t("adm.addButton"), e -> {
             ClusterSpec.NodeSpec n = new ClusterSpec.NodeSpec(name.getValue().trim(), agent.getValue().trim(),
                     pgHost.getValue().trim(), pgPort.getValue() == null ? 5432 : pgPort.getValue(),
                     dc.getValue().isBlank() ? "DC1" : dc.getValue().trim(), prio.getValue() == null ? 100
@@ -61,24 +59,23 @@ final class ClusterAdmin {
             EnrollmentService.Issued[] t = new EnrollmentService.Issued[1];
             if (Ui.attempt(() -> wizard.addNode(cluster, n, user))) {
                 d.close();
-                Ui.ok(n.name() + " added to " + cluster);
+                Ui.ok(Ui.t("adm.added", n.name(), cluster));
                 if (Ui.attempt(() -> t[0] = wizard.token(cluster, n.name(), user))) {
                     EnrollDialog.open(t[0], tls, zone);
                 }
             }
         });
         add.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        d.getFooter().add(new Button("Cancel", e -> d.close()), add);
+        d.getFooter().add(new Button(Ui.t("common.cancel"), e -> d.close()), add);
         d.setWidth("min(760px, 95vw)");
         d.open();
     }
 
     void removeNode(String node, Runnable after) {
-        Ui.confirmTyped(node, "Remove " + node + " from " + cluster, "The watchers stop polling " + node + " and its"
-                + " agent forgets the cluster. PostgreSQL on it keeps running, no longer a node of " + cluster + ".",
-                "Remove", true, () -> {
+        Ui.confirmTyped(node, Ui.t("adm.removeTitle", node, cluster), Ui.t("adm.removeText", node, cluster),
+                Ui.t("adm.removeButton"), true, () -> {
                     if (Ui.attempt(() -> wizard.removeNode(cluster, node, user))) {
-                        Ui.ok(node + " removed from " + cluster);
+                        Ui.ok(Ui.t("adm.removed", node, cluster));
                     }
                     if (after != null) {
                         after.run();
@@ -87,19 +84,16 @@ final class ClusterAdmin {
     }
 
     void detach() {
-        Ui.confirmTyped(cluster, "Detach " + cluster, "In this order: automatic failover is paused, the watchers"
-                + " stop, the primary gets a last lease that never fences (it keeps running even with self-fencing),"
-                + " and every agent forgets the cluster. PostgreSQL keeps running on every node; the event log stays."
-                + " Then run 'minipgagent remove' on each host, or add the nodes to another cluster.", "Detach",
+        Ui.confirmTyped(cluster, Ui.t("adm.detachTitle", cluster), Ui.t("adm.detachText"), Ui.t("adm.detachButton"),
                 true, () -> {
                     List<String>[] out = new List[1];
                     if (Ui.attempt(() -> out[0] = wizard.detach(cluster, cluster, user))) {
                         Dialog d = new Dialog();
-                        d.setHeaderTitle(cluster + " detached");
+                        d.setHeaderTitle(Ui.t("adm.detached", cluster));
                         UnorderedList ul = new UnorderedList();
-                        out[0].forEach(l -> ul.add(new ListItem(l)));
+                        out[0].forEach(l -> ul.add(new ListItem(Ui.tr(l))));
                         d.add(new Div(ul));
-                        d.getFooter().add(new Button("To the fleet", e -> {
+                        d.getFooter().add(new Button(Ui.t("adm.toFleet"), e -> {
                             d.close();
                             UI.getCurrent().navigate(FleetView.class);
                         }));

@@ -39,46 +39,39 @@ final class NodeActions {
         MenuBar mb = new MenuBar();
         mb.addThemeVariants(MenuBarVariant.LUMO_TERTIARY_INLINE, MenuBarVariant.LUMO_SMALL);
         MenuItem root = mb.addItem(VaadinIcon.ELLIPSIS_DOTS_H.create());
-        root.setAriaLabel("Actions for " + n.name());
-        root.getElement().setAttribute("title", "Actions for " + n.name());
+        root.setAriaLabel(Ui.t("na.actionsFor", n.name()));
+        root.getElement().setAttribute("title", Ui.t("na.actionsFor", n.name()));
         SubMenu sub = root.getSubMenu();
         if (details != null) {
-            sub.addItem("Details", e -> details.run());
+            sub.addItem(Ui.t("ov.details"), e -> details.run());
         }
         if (admin && !n.isPrimary()) {
-            sub.addItem("Switch over to " + n.name() + "…", e -> ClusterRoutes.go(console.watcher().config().name(),
+            sub.addItem(Ui.t("na.switchTo", n.name()), e -> ClusterRoutes.go(console.watcher().config().name(),
                     "switchover", new QueryParameters(Map.of("target", List.of(n.name())))));
-            sub.addItem("Rejoin (pg_rewind)…", e -> Ui.confirmTyped(n.name(), "Rejoin " + n.name(),
-                    n.name() + " is stopped, rewound with pg_rewind against the primary and started as a replica."
-                            + " Its data directory is kept.", "Rejoin", false,
-                    () -> start(() -> console.watcher().rejoin(n.name(), user), "Rejoin of " + n.name(), after)));
-            MenuItem reinit = sub.addItem("Re-initialize…", e -> Ui.confirmTyped(n.name(),
-                    "Re-initialize " + n.name(), "The data directory of " + n.name() + " is moved aside and copied"
-                            + " again from the primary with pg_basebackup. Use it when a rejoin cannot work. This"
-                            + " can take hours on a large database.", "Re-initialize", true,
-                    () -> start(() -> console.watcher().reinit(n.name(), user), "Re-initialization of " + n.name(),
+            sub.addItem(Ui.t("na.rejoin"), e -> Ui.confirmTyped(n.name(), Ui.t("na.rejoinTitle", n.name()),
+                    Ui.t("na.rejoinText", n.name()), Ui.t("na.rejoinButton"), false,
+                    () -> start(() -> console.watcher().rejoin(n.name(), user), Ui.t("na.rejoinOf", n.name()), after)));
+            MenuItem reinit = sub.addItem(Ui.t("na.reinit"), e -> Ui.confirmTyped(n.name(),
+                    Ui.t("na.reinitTitle", n.name()), Ui.t("na.reinitText", n.name()), Ui.t("na.reinitButton"), true,
+                    () -> start(() -> console.watcher().reinit(n.name(), user), Ui.t("na.reinitOf", n.name()),
                             after)));
             reinit.addClassName("pg-danger");
         }
         if (admin && n.noPrimaryRunning() && (n.agentOnline() && !n.runsAsReplica() || n.otherDatabase())) {
             String text = n.otherDatabase()
-                    ? n.name() + " holds another database than this cluster's (" + console.watcher().identity()
-                    .problem(n.name()) + "). Starting it as primary makes that database the cluster's: the other"
-                    + " nodes are left alone until they are re-initialized from it. The VIP comes up on " + n.name()
-                    + " first, then PostgreSQL starts there as primary."
-                    : "No node runs as primary. The VIP comes up on " + n.name() + " first, then PostgreSQL starts"
-                    + " there as primary.";
-            sub.addItem("Start as primary…", e -> Ui.confirmTyped(n.name(), "Start " + n.name() + " as primary",
-                    text, "Start", true,
-                    () -> start(() -> console.watcher().startPrimary(n.name(), user), n.name() + " as primary",
+                    ? Ui.t("na.otherDb", n.name(), Ui.tr(console.watcher().identity().problem(n.name())))
+                    : Ui.t("na.noPrimary", n.name());
+            sub.addItem(Ui.t("na.startPrimary"), e -> Ui.confirmTyped(n.name(), Ui.t("na.startPrimaryTitle", n.name()),
+                    text, Ui.t("na.startButton"), true,
+                    () -> start(() -> console.watcher().startPrimary(n.name(), user), Ui.t("na.asPrimary", n.name()),
                             after)));
         }
         if (admin && n.remove() != null) {
-            MenuItem rm = sub.addItem("Remove from the cluster…", e -> n.remove().run());
+            MenuItem rm = sub.addItem(Ui.t("na.remove"), e -> n.remove().run());
             rm.addClassName("pg-danger");
         }
         if (!admin) {
-            MenuItem none = sub.addItem("Only admins can start operations");
+            MenuItem none = sub.addItem(Ui.t("na.adminsOnly"));
             none.setEnabled(false);
         }
         return mb;
@@ -86,7 +79,7 @@ final class NodeActions {
 
     private static void start(Runnable action, String what, Runnable after) {
         if (Ui.attempt(action)) {
-            Ui.ok(what + " started; follow it under Operations");
+            Ui.ok(Ui.t("na.started", what));
         }
         if (after != null) {
             after.run();

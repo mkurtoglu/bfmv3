@@ -27,28 +27,27 @@ class OperationsPage extends Div {
         this.console = console;
         this.panel = new OperationPanel(zone);
         addClassName("pg-page");
-        H1 title = new H1("Operations");
+        H1 title = new H1(Ui.t("nav.operations"));
         title.addClassName("pg-title");
-        add(new Div(Ui.text("pg-eyebrow", "Run on this watcher since it started · the event log keeps every"
-                + " operation for good"), title));
+        add(new Div(Ui.text("pg-eyebrow", Ui.t("ops.eyebrow")), title));
 
         grid.addThemeVariants(GridVariant.LUMO_ROW_STRIPES);
         grid.setAllRowsVisible(true);
-        grid.addColumn(s -> Ui.full(s.startedAtMillis(), zone)).setHeader("Started (" + Ui.zone(zone) + ")")
+        grid.addColumn(s -> Ui.full(s.startedAtMillis(), zone)).setHeader(Ui.t("ops.col.started", Ui.zone(zone)))
                 .setAutoWidth(true);
-        grid.addColumn(s -> Terms.operation(s.type())).setHeader("Operation").setAutoWidth(true);
+        grid.addColumn(s -> Ui.tr(Terms.operation(s.type()))).setHeader(Ui.t("ops.col.operation")).setAutoWidth(true);
         Grid.Column<OperationProgress.Snapshot> node = grid.addColumn(s -> s.target() != null ? s.target()
                 : s.result() != null && s.result().contains("->") ? s.result().replace("->", "→") : "—")
-                .setHeader("Node").setAutoWidth(true);
+                .setHeader(Ui.t("ov.col.node")).setAutoWidth(true);
         Grid.Column<OperationProgress.Snapshot> by = grid.addColumn(OperationProgress.Snapshot::startedBy)
-                .setHeader("By").setAutoWidth(true);
-        grid.addComponentColumn(s -> Ui.chip(Terms.capitalize(s.state().name().toLowerCase()), Ui.tone(s.state())))
-                .setHeader("State").setAutoWidth(true);
-        grid.addColumn(s -> s.running() ? Ui.ago(s.startedAtMillis(), System.currentTimeMillis()) + " so far"
-                : Ui.duration(s.durationMs())).setHeader("Took").setAutoWidth(true);
+                .setHeader(Ui.t("ops.col.by")).setAutoWidth(true);
+        grid.addComponentColumn(s -> Ui.chip(Ui.t("op." + s.state().name().toLowerCase()), Ui.tone(s.state())))
+                .setHeader(Ui.t("ov.col.state")).setAutoWidth(true);
+        grid.addColumn(s -> s.running() ? Ui.t("ops.soFar", Ui.ago(s.startedAtMillis(), System.currentTimeMillis()))
+                : Ui.duration(s.durationMs())).setHeader(Ui.t("ops.col.took")).setAutoWidth(true);
         Grid.Column<OperationProgress.Snapshot> result = grid.addColumn(s -> s.result() == null ? ""
-                : Ui.arrows(s.result())).setHeader("Result").setFlexGrow(1)
-                .setTooltipGenerator(s -> s.result() == null ? null : Ui.arrows(s.result()));
+                : Ui.arrows(Ui.tr(s.result()))).setHeader(Ui.t("sw.col.result")).setFlexGrow(1)
+                .setTooltipGenerator(s -> s.result() == null ? null : Ui.arrows(Ui.tr(s.result())));
         Ui.hideBelow(grid, 900, by, result);
         Ui.hideBelow(grid, 600, node);
         grid.addSelectionListener(e -> {
@@ -67,7 +66,7 @@ class OperationsPage extends Div {
         if (ops.isEmpty()) {
             panel.show(null);
             panel.removeAll();
-            panel.add(Ui.text("pg-note", "No operations yet."));
+            panel.add(Ui.text("pg-note", Ui.t("ops.none")));
             return;
         }
         String id = selected != null ? selected : ops.get(0).id();

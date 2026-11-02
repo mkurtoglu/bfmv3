@@ -42,14 +42,14 @@ class SwitchoverPage extends Div implements ClusterRoute.Enterable {
     private final Span currentPrimary = Ui.text("pg-stat-value", "");
     private final Span currentSub = Ui.text("pg-stat-sub", "");
     private final Select<String> target = new Select<>();
-    private final Checkbox checkpoint = new Checkbox("Run CHECKPOINT on the primary first", true);
-    private final Checkbox restartOld = new Checkbox("Start the old primary again as a replica", true);
-    private final Checkbox mail = new Checkbox("Send a mail when it finishes", true);
+    private final Checkbox checkpoint = new Checkbox(Ui.t("sw.checkpoint"), true);
+    private final Checkbox restartOld = new Checkbox(Ui.t("sw.restartOld"), true);
+    private final Checkbox mail = new Checkbox(Ui.t("sw.mail"), true);
     private final Grid<PreCheck> checks = new Grid<>();
     private final TextField confirm = new TextField();
     private final Span confirmError = new Span();
-    private final Button start = new Button("Start switchover");
-    private final Div changes = Ui.card("What will change");
+    private final Button start = new Button(Ui.t("sw.start"));
+    private final Div changes = Ui.card(Ui.t("sw.changes"));
     private final OperationPanel panel;
     private final Div running = new Div();
     private String operationId;
@@ -63,40 +63,40 @@ class SwitchoverPage extends Div implements ClusterRoute.Enterable {
         this.panel = new OperationPanel(zone);
         addClassName("pg-page");
 
-        H1 title = new H1("Switchover");
+        H1 title = new H1(Ui.t("nav.switchover"));
         title.addClassName("pg-title");
-        add(new Div(Ui.text("pg-eyebrow", "Planned role change"), title));
+        add(new Div(Ui.text("pg-eyebrow", Ui.t("sw.eyebrow")), title));
 
         String cluster = console.watcher().config().name();
-        Div step1 = Ui.card("Choose the new primary and review the checks");
-        Div primaryBox = new Div(Ui.text("pg-stat-label", "Current primary"), new Div(currentPrimary),
+        Div step1 = Ui.card(Ui.t("sw.step1"));
+        Div primaryBox = new Div(Ui.text("pg-stat-label", Ui.t("sw.currentPrimary")), new Div(currentPrimary),
                 new Div(currentSub));
-        target.setLabel("New primary");
+        target.setLabel(Ui.t("sw.newPrimary"));
         target.setWidthFull();
         target.addValueChangeListener(e -> renderChecks());
         restartOld.addValueChangeListener(e -> renderChanges(console.overview(), target.getValue()));
-        Div options = new Div(Ui.text("pg-stat-label", "Options"), checkpoint, restartOld, mail);
+        Div options = new Div(Ui.text("pg-stat-label", Ui.t("sw.options")), checkpoint, restartOld, mail);
         options.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "4px");
         Div top = Ui.div("pg-grid-auto", primaryBox, target);
 
         checks.addThemeVariants(GridVariant.LUMO_COMPACT, GridVariant.LUMO_NO_BORDER,
                 GridVariant.LUMO_WRAP_CELL_CONTENT);
         checks.setAllRowsVisible(true);
-        checks.addColumn(PreCheck::title).setHeader("Check").setFlexGrow(2);
+        checks.addColumn(c -> Ui.tr(c.title())).setHeader(Ui.t("sw.col.check")).setFlexGrow(2);
         checks.addComponentColumn(c -> {
             Div d = Ui.div("pg-row", Ui.chip(switch (c.level()) {
-                case PASS -> "Pass";
-                case WARN -> "Warning";
-                case FAIL -> "Blocked";
+                case PASS -> Ui.t("check.pass");
+                case WARN -> Ui.t("check.warn");
+                case FAIL -> Ui.t("check.blocked");
             }, Ui.tone(c.level())));
             if (c.detail() != null && !c.detail().equals("Pass")) {
-                d.add(Ui.text("pg-note", c.detail()));
+                d.add(Ui.text("pg-note", Ui.tr(c.detail())));
             }
             d.getStyle().set("flex-wrap", "nowrap").set("align-items", "baseline");
             return d;
-        }).setHeader("Result").setFlexGrow(3);
+        }).setHeader(Ui.t("sw.col.result")).setFlexGrow(3);
 
-        confirm.setLabel("Type the cluster name " + cluster + " to confirm");
+        confirm.setLabel(Ui.t("sw.typeName", cluster));
         confirm.setWidthFull();
         confirm.setMaxWidth("420px");
         confirm.setValueChangeMode(com.vaadin.flow.data.value.ValueChangeMode.EAGER);
@@ -105,14 +105,14 @@ class SwitchoverPage extends Div implements ClusterRoute.Enterable {
         confirmError.getElement().setAttribute("role", "alert");
         start.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         start.addClickListener(e -> startSwitchover(cluster));
-        Button recheck = new Button("Re-run checks", e -> renderChecks());
+        Button recheck = new Button(Ui.t("sw.recheck"), e -> renderChecks());
         recheck.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
-        Button cancel = new Button("Cancel", e -> ClusterRoutes.go(cluster, "overview"));
+        Button cancel = new Button(Ui.t("common.cancel"), e -> ClusterRoutes.go(cluster, "overview"));
         cancel.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
-        step1.add(top, options, Ui.div("pg-spread", new H2("Pre-checks"), recheck), checks, confirm, confirmError,
+        step1.add(top, options, Ui.div("pg-spread", new H2(Ui.t("sw.prechecks")), recheck), checks, confirm, confirmError,
                 Ui.div("pg-row", start, cancel));
         if (!admin) {
-            step1.add(Ui.text("pg-note", "Viewers can review the checks but cannot start a switchover."));
+            step1.add(Ui.text("pg-note", Ui.t("sw.viewerNote")));
         }
         review.add(Ui.div("pg-grid-2", step1, changes));
 
@@ -151,7 +151,7 @@ class SwitchoverPage extends Div implements ClusterRoute.Enterable {
                     : replicas.get(0));
         }
         target.setItemLabelGenerator(n -> o.nodes().stream().filter(r -> r.name().equals(n)).findFirst()
-                .map(r -> r.name() + " · " + (r.sync() == null ? "async" : r.sync()) + " · " + r.dc()).orElse(n));
+                .map(r -> r.name() + " · " + Ui.tr(r.sync() == null ? "async" : r.sync()) + " · " + r.dc()).orElse(n));
     }
 
     private void renderChecks() {
@@ -165,9 +165,9 @@ class SwitchoverPage extends Div implements ClusterRoute.Enterable {
 
     private void renderChanges(Overview o, String t) {
         changes.removeAll();
-        changes.add(new H2("What will change"));
+        changes.add(new H2(Ui.t("sw.changes")));
         if (t == null || o.primary() == null) {
-            changes.add(Ui.text("pg-note", "Choose a target."));
+            changes.add(Ui.text("pg-note", Ui.t("sw.chooseTarget")));
             return;
         }
         NodeRow tr = o.nodes().stream().filter(r -> r.name().equals(t)).findFirst().orElse(null);
@@ -175,19 +175,17 @@ class SwitchoverPage extends Div implements ClusterRoute.Enterable {
         boolean sameVip = tr != null && pr != null && Objects.equals(tr.vipAddress(), pr.vipAddress());
         Div kv = new Div();
         kv.addClassName("pg-kv");
-        add(kv, "Primary", o.primary() + " → " + t);
-        add(kv, "VIP", tr == null || tr.vipAddress() == null ? "not managed"
-                : sameVip ? tr.vipAddress() + " moves from " + o.primary() + " to " + t
-                : (pr == null || pr.vipAddress() == null ? "" : pr.vipAddress() + " stays down; ") + tr.vipAddress()
-                + " comes up on " + t);
-        add(kv, "Safety", "The VIP comes up first; no promote without it");
-        add(kv, "Promotion", "Only after " + t + " has replayed the final WAL position of " + o.primary()
-                + ": nothing written before the stop is lost");
-        add(kv, "Old primary", restartOld.getValue() ? "Restarts as a replica; no rewind after a clean stop"
-                : "Stays stopped");
-        add(kv, "Epoch", o.epoch() + " → " + (o.epoch() + 1) + "; agents reject older commands");
-        add(kv, "Writes", "Paused from the stop of " + o.primary() + " until promotion");
-        changes.add(kv, Ui.text("pg-note", "Every step is written to the event log with your user name."));
+        add(kv, Ui.t("sw.k.primary"), o.primary() + " → " + t);
+        add(kv, Ui.t("sw.k.vip"), tr == null || tr.vipAddress() == null ? Ui.t("ov.notManaged")
+                : sameVip ? Ui.t("sw.vipMoves", tr.vipAddress(), o.primary(), t)
+                : (pr == null || pr.vipAddress() == null ? "" : Ui.t("sw.vipStaysDown", pr.vipAddress()) + " ")
+                + Ui.t("sw.vipComesUp", tr.vipAddress(), t));
+        add(kv, Ui.t("sw.k.safety"), Ui.t("sw.safety"));
+        add(kv, Ui.t("sw.k.promotion"), Ui.t("sw.promotion", t, o.primary()));
+        add(kv, Ui.t("sw.k.oldPrimary"), Ui.t(restartOld.getValue() ? "sw.oldRestarts" : "sw.oldStays"));
+        add(kv, Ui.t("sw.k.epoch"), Ui.t("sw.epochChange", o.epoch(), o.epoch() + 1));
+        add(kv, Ui.t("sw.k.writes"), Ui.t("sw.writesPaused", o.primary()));
+        changes.add(kv, Ui.text("pg-note", Ui.t("sw.logged")));
     }
 
     private static void add(Div kv, String k, String v) {
@@ -200,7 +198,7 @@ class SwitchoverPage extends Div implements ClusterRoute.Enterable {
 
     private void startSwitchover(String cluster) {
         if (!cluster.equals(confirm.getValue().trim())) {
-            confirmError.setText("Enter " + cluster + " exactly to start the switchover.");
+            confirmError.setText(Ui.t("sw.enterExactly", cluster));
             return;
         }
         String t = target.getValue();
@@ -224,9 +222,9 @@ class SwitchoverPage extends Div implements ClusterRoute.Enterable {
         op.ifPresent(panel::show);
         if (op.isPresent() && running.getComponentCount() == 1) {
             String cluster = console.watcher().config().name();
-            Button back = new Button("Back to overview", e -> ClusterRoutes.go(cluster, "overview"));
+            Button back = new Button(Ui.t("sw.backToOverview"), e -> ClusterRoutes.go(cluster, "overview"));
             back.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-            Button another = new Button("New switchover", e -> {
+            Button another = new Button(Ui.t("sw.another"), e -> {
                 operationId = null;
                 ClusterRoutes.go(cluster, "switchover");
                 showMode();

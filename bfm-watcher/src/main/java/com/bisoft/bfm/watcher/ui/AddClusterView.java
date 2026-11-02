@@ -46,7 +46,7 @@ import java.util.Map;
 @RolesAllowed("ADMIN")
 public class AddClusterView extends Div implements BeforeEnterObserver, HasDynamicTitle {
 
-    private static final String[] STEPS = {"Basics", "Nodes", "Enroll", "Checks", "Start", "Review"};
+    private static final String[] STEPS = {"basics", "nodes", "enroll", "checks", "start", "review"};
 
     private final ClusterWizardService wizard;
     private final ConsoleTls consoleTls;
@@ -63,9 +63,9 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
         this.consoleTls = consoleTls;
         this.user = auth.getPrincipalName().orElse("unknown");
         addClassName("pg-page");
-        H1 title = new H1("Add cluster");
+        H1 title = new H1(Ui.t("nav.addCluster"));
         title.addClassName("pg-title");
-        add(new Div(Ui.text("pg-eyebrow", "A cluster created here runs on every watcher of this group"), title),
+        add(new Div(Ui.text("pg-eyebrow", Ui.t("ac.eyebrow")), title),
                 stepper, body);
         body.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "16px");
     }
@@ -98,7 +98,7 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
         stepper.removeAll();
         for (int i = 0; i < STEPS.length; i++) {
             Span chip = Ui.text("pg-step" + (i == step ? " current" : i < step ? " done" : ""), (i + 1) + " "
-                    + STEPS[i]);
+                    + Ui.t("ac.step." + STEPS[i]));
             int to = i;
             if (draft != null && i != step) {
                 chip.getElement().addEventListener("click", ev -> go(to));
@@ -110,14 +110,12 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
         onPoll = null;
         ClusterWizardService.Elsewhere away = wizard.elsewhere();
         if (away != null) {
-            Div b = Ui.banner("This watcher (" + away.self() + ") follows " + (away.leaderId() == null
-                    ? "no leader right now: clusters can be added once a leader is elected."
-                    : "watcher " + away.leaderId() + ". Clusters are added, changed and detached on the leader."),
-                    Ui.Tone.INFO);
+            Div b = Ui.banner(away.leaderId() == null ? Ui.t("ac.noLeader", away.self())
+                    : Ui.t("ac.follows", away.self(), away.leaderId()), Ui.Tone.INFO);
             if (away.consoleUrl() != null) {
                 String url = away.consoleUrl().replaceAll("/+$", "") + "/clusters/new"
                         + (draft == null ? "" : "/" + draft);
-                b.add(Ui.div("pg-banner-actions", new Anchor(url, "Open the leader's console")));
+                b.add(Ui.div("pg-banner-actions", new Anchor(url, Ui.t("ov.openLeader"))));
             }
             body.add(b);
         }
@@ -139,35 +137,33 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
 
     private void basics() {
         ClusterSpec spec = draft == null ? ClusterSpec.draft("", null) : current().spec();
-        Div card = Ui.card("Basics");
-        TextField name = new TextField("Name");
-        name.setHelperText("Letters, digits, '.', '_' and '-'; it is part of the console's URLs and confirms"
-                + " switchovers");
+        Div card = Ui.card(Ui.t("ac.step.basics"));
+        TextField name = new TextField(Ui.t("ac.name"));
+        name.setHelperText(Ui.t("ac.nameHelp"));
         name.setValue(spec.name());
         name.setReadOnly(draft != null);
-        ComboBox<String> env = new ComboBox<>("Environment");
+        ComboBox<String> env = new ComboBox<>(Ui.t("ui.environment"));
         env.setItems("production", "staging", "test", "development");
         env.setAllowCustomValue(true);
         env.addCustomValueSetListener(e -> env.setValue(e.getDetail()));
         env.setValue(spec.environment());
-        env.setHelperText("Shown on every page; production gets a red bar");
+        env.setHelperText(Ui.t("ac.envHelp"));
         Select<FailoverScope> scope = new Select<>();
-        scope.setLabel("Automatic failover");
+        scope.setLabel(Ui.t("ac.scope"));
         scope.setItems(FailoverScope.values());
-        scope.setItemLabelGenerator(s -> s == FailoverScope.DC_LOCAL ? "Stays in the primary's data center"
-                : "Any data center");
+        scope.setItemLabelGenerator(s -> Ui.t(s == FailoverScope.DC_LOCAL ? "ac.scopeLocal" : "ov.scopeAny"));
         scope.setValue(spec.scope());
-        Checkbox fence = new Checkbox("Self-fencing (recommended with three watchers)", spec.selfFence());
-        IntegerField poll = new IntegerField("Poll interval (s)");
+        Checkbox fence = new Checkbox(Ui.t("ac.selfFence"), spec.selfFence());
+        IntegerField poll = new IntegerField(Ui.t("ac.poll"));
         poll.setValue((int) Math.max(1, spec.pollIntervalMs() / 1000));
-        IntegerField threshold = new IntegerField("Failed polls before failover");
+        IntegerField threshold = new IntegerField(Ui.t("ac.threshold"));
         threshold.setValue(spec.failureThreshold());
-        IntegerField lag = new IntegerField("Max lag for automatic promotion (MB)");
+        IntegerField lag = new IntegerField(Ui.t("ac.maxLag"));
         lag.setValue((int) (spec.maxLagBytes() / (1024 * 1024)));
-        Checkbox coloc = new Checkbox("Allow two nodes on one host (lab only)", spec.allowColocation());
-        Details advanced = new Details("Advanced", Ui.div("pg-grid-auto", poll, threshold, lag), coloc);
+        Checkbox coloc = new Checkbox(Ui.t("ac.coloc"), spec.allowColocation());
+        Details advanced = new Details(Ui.t("ac.advanced"), Ui.div("pg-grid-auto", poll, threshold, lag), coloc);
         card.add(Ui.div("pg-grid-auto", name, env, scope), fence, advanced);
-        Button next = new Button("Save and continue", e -> {
+        Button next = new Button(Ui.t("ac.saveContinue"), e -> {
             if (Ui.attempt(() -> {
                 if (draft == null) {
                     wizard.createDraft(name.getValue().trim(), env.getValue(), user);
@@ -186,7 +182,7 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
     }
 
     private Button cancel() {
-        Button b = new Button("Back to the fleet", e -> UI.getCurrent().navigate(FleetView.class));
+        Button b = new Button(Ui.t("ac.backToFleet"), e -> UI.getCurrent().navigate(FleetView.class));
         b.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
         return b;
     }
@@ -195,21 +191,19 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
 
     private void nodes() {
         List<ClusterSpec.NodeSpec> rows = new ArrayList<>(current().spec().nodes());
-        Div card = Ui.card("Nodes");
-        card.add(Ui.text("pg-note", "One row per PostgreSQL instance. The agent address is where the watchers reach"
-                + " its agent (https://host:port: 8008, or 8009, 8010 for more instances on one host); the PostgreSQL"
-                + " address is the node's own, never the VIP."));
+        Div card = Ui.card(Ui.t("ov.nodes"));
+        card.add(Ui.text("pg-note", Ui.t("ac.nodesNote")));
         Grid<ClusterSpec.NodeSpec> grid = new Grid<>();
         grid.addThemeVariants(GridVariant.LUMO_COMPACT, GridVariant.LUMO_ROW_STRIPES);
         grid.setAllRowsVisible(true);
-        grid.addColumn(ClusterSpec.NodeSpec::name).setHeader("Node").setAutoWidth(true);
-        grid.addColumn(ClusterSpec.NodeSpec::agentUrl).setHeader("Agent").setAutoWidth(true);
+        grid.addColumn(ClusterSpec.NodeSpec::name).setHeader(Ui.t("ov.col.node")).setAutoWidth(true);
+        grid.addColumn(ClusterSpec.NodeSpec::agentUrl).setHeader(Ui.t("ov.col.agent")).setAutoWidth(true);
         grid.addColumn(n -> n.pgHost() + ":" + n.pgPort()).setHeader("PostgreSQL").setAutoWidth(true);
-        grid.addColumn(ClusterSpec.NodeSpec::dc).setHeader("DC").setAutoWidth(true);
-        grid.addColumn(n -> n.noFailover() ? "never automatically" : "priority " + n.priority())
-                .setHeader("Promotion").setAutoWidth(true);
+        grid.addColumn(ClusterSpec.NodeSpec::dc).setHeader(Ui.t("ov.col.dc")).setAutoWidth(true);
+        grid.addColumn(n -> n.noFailover() ? Ui.t("ac.neverAuto") : Ui.t("ov.priority", n.priority()))
+                .setHeader(Ui.t("ac.col.promotion")).setAutoWidth(true);
         grid.addComponentColumn(n -> {
-            Button rm = new Button("Remove", e -> {
+            Button rm = new Button(Ui.t("adm.removeButton"), e -> {
                 rows.remove(n);
                 grid.setItems(rows);
             });
@@ -218,20 +212,20 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
         }).setAutoWidth(true).setFlexGrow(0);
         grid.setItems(rows);
 
-        TextField name = new TextField("Node name");
+        TextField name = new TextField(Ui.t("adm.nodeName"));
         name.setPlaceholder(draft + "-a1");
-        TextField agent = new TextField("Agent address");
+        TextField agent = new TextField(Ui.t("ca.col.agent"));
         agent.setPlaceholder("https://db01:8008");
-        TextField pgHost = new TextField("PostgreSQL address");
+        TextField pgHost = new TextField(Ui.t("adm.pgAddress"));
         pgHost.setPlaceholder("10.0.0.11");
-        IntegerField pgPort = new IntegerField("Port");
+        IntegerField pgPort = new IntegerField(Ui.t("adm.port"));
         pgPort.setValue(5432);
-        TextField dc = new TextField("Data center");
+        TextField dc = new TextField(Ui.t("adm.dc"));
         dc.setValue("DC1");
-        IntegerField prio = new IntegerField("Priority");
+        IntegerField prio = new IntegerField(Ui.t("adm.priority"));
         prio.setValue(100);
-        Checkbox never = new Checkbox("Never promote automatically");
-        Button add = new Button("Add the node", e -> {
+        Checkbox never = new Checkbox(Ui.t("adm.never"));
+        Button add = new Button(Ui.t("ac.addNode"), e -> {
             rows.add(new ClusterSpec.NodeSpec(name.getValue().trim(), agent.getValue().trim(),
                     pgHost.getValue().trim(), pgPort.getValue() == null ? 5432 : pgPort.getValue(),
                     dc.getValue().isBlank() ? "DC1" : dc.getValue().trim(), prio.getValue() == null ? 100
@@ -242,7 +236,7 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
             pgHost.clear();
         });
         card.add(grid, Ui.div("pg-grid-auto", name, agent, pgHost, pgPort, dc, prio), never, add);
-        Button next = new Button("Save and continue", e -> {
+        Button next = new Button(Ui.t("ac.saveContinue"), e -> {
             if (Ui.attempt(() -> wizard.saveNodes(draft, rows))) {
                 go(2);
             }
@@ -252,7 +246,7 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
     }
 
     private Button back() {
-        Button b = new Button("Back", e -> go(step - 1));
+        Button b = new Button(Ui.t("ac.back"), e -> go(step - 1));
         b.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
         return b;
     }
@@ -260,20 +254,18 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
     // ---------------------------------------------------------------- 3 enroll
 
     private void enroll() {
-        Div card = Ui.card("Enroll the nodes");
-        card.add(Ui.text("pg-note", "On each node's database host, as root, run its command: minipgagent setup"
-                + " finds the PostgreSQL instance, gets the node's certificate with the one-time token and starts the"
-                + " agent. This list follows them live."));
+        Div card = Ui.card(Ui.t("ac.enrollTitle"));
+        card.add(Ui.text("pg-note", Ui.t("ac.enrollNote")));
         Div list = new Div();
         list.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "8px");
         card.add(list);
         Runnable refresh = () -> {
             list.removeAll();
             for (NodeLive l : wizard.live(current().spec())) {
-                Div row = Ui.div("pg-spread", Ui.div("pg-row", Ui.text("pg-node-name", l.node()), Ui.chip(l.online()
-                        ? "enrolled" : "waiting", l.online() ? Ui.Tone.OK : Ui.Tone.WARN), Ui.text("pg-note",
-                        l.online() ? describe(l) : "no agent answers yet")));
-                Button cmd = new Button(l.online() ? "New token" : "Enrollment command…", e -> token(l.node()));
+                Div row = Ui.div("pg-spread", Ui.div("pg-row", Ui.text("pg-node-name", l.node()), Ui.chip(Ui.t(l.online()
+                        ? "ac.enrolled" : "ac.waiting"), l.online() ? Ui.Tone.OK : Ui.Tone.WARN), Ui.text("pg-note",
+                        l.online() ? describe(l) : Ui.t("ac.noAgent"))));
+                Button cmd = new Button(Ui.t(l.online() ? "ac.newToken" : "ca.command"), e -> token(l.node()));
                 cmd.addThemeVariants(ButtonVariant.LUMO_SMALL, l.online() ? ButtonVariant.LUMO_TERTIARY
                         : ButtonVariant.LUMO_PRIMARY);
                 row.add(cmd);
@@ -282,7 +274,7 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
         };
         refresh.run();
         onPoll = refresh;
-        Button next = new Button("Continue to the checks", e -> go(3));
+        Button next = new Button(Ui.t("ac.toChecks"), e -> go(3));
         next.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         body.add(card, Ui.div("pg-row", back(), next));
     }
@@ -291,7 +283,8 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
         var s = l.status();
         return (s.identity().hostname() == null ? "" : s.identity().hostname() + " · ")
                 + (s.serverVersionNum() == null ? "" : "PG " + s.serverVersionNum() / 10000 + " · ")
-                + (s.pgRunning() ? (s.isPrimary() ? "primary" : s.isReplica() ? "replica" : "running") : "stopped");
+                + Ui.t(s.pgRunning() ? (s.isPrimary() ? "ac.isPrimary" : s.isReplica() ? "ac.isReplica" : "ac.isRunning")
+                : "ac.isStopped");
     }
 
     private void token(String node) {
@@ -304,15 +297,14 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
     // ---------------------------------------------------------------- 4 checks
 
     private void checks() {
-        Div card = Ui.card("Checks");
+        Div card = Ui.card(Ui.t("ac.step.checks"));
         Div result = new Div();
         result.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "8px");
-        Button rerun = new Button("Run again", e -> renderChecks(result));
+        Button rerun = new Button(Ui.t("ac.runAgain"), e -> renderChecks(result));
         rerun.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
-        card.add(Ui.div("pg-spread", Ui.text("pg-note", "Across the nodes, then each node's own; a red line blocks"
-                + " creation."), rerun), result);
+        card.add(Ui.div("pg-spread", Ui.text("pg-note", Ui.t("ac.checksNote")), rerun), result);
         renderChecks(result);
-        Button next = new Button("Continue", e -> go(4));
+        Button next = new Button(Ui.t("fleet.continue"), e -> go(4));
         next.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         body.add(card, Ui.div("pg-row", back(), next));
     }
@@ -324,24 +316,23 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
         Grid<Check> grid = new Grid<>();
         grid.addThemeVariants(GridVariant.LUMO_COMPACT, GridVariant.LUMO_WRAP_CELL_CONTENT);
         grid.setAllRowsVisible(true);
-        grid.addColumn(c -> c.node() == null ? "all nodes" : c.node()).setHeader("Node").setAutoWidth(true)
-                .setFlexGrow(0);
-        grid.addColumn(Check::name).setHeader("Check").setAutoWidth(true).setFlexGrow(0);
+        grid.addColumn(c -> c.node() == null ? Ui.t("ac.allNodes") : c.node()).setHeader(Ui.t("ov.col.node"))
+                .setAutoWidth(true).setFlexGrow(0);
+        grid.addColumn(c -> Ui.tr(c.name())).setHeader(Ui.t("sw.col.check")).setAutoWidth(true).setFlexGrow(0);
         grid.addComponentColumn(c -> Ui.chip(switch (c.level()) {
-            case "OK" -> "Pass";
-            case "FAIL" -> "Blocks";
-            default -> "Warning";
+            case "OK" -> Ui.t("check.pass");
+            case "FAIL" -> Ui.t("ac.blocks");
+            default -> Ui.t("check.warn");
         }, switch (c.level()) {
             case "OK" -> Ui.Tone.OK;
             case "FAIL" -> Ui.Tone.CRIT;
             default -> Ui.Tone.WARN;
-        })).setHeader("Result").setAutoWidth(true).setFlexGrow(0);
-        grid.addColumn(Check::detail).setHeader("Detail").setFlexGrow(1);
+        })).setHeader(Ui.t("sw.col.result")).setAutoWidth(true).setFlexGrow(0);
+        grid.addColumn(c -> Ui.tr(c.detail())).setHeader(Ui.t("ac.col.detail")).setFlexGrow(1);
         grid.setItems(list);
         long blocking = list.stream().filter(Check::blocks).count();
-        into.add(blocking == 0 ? Ui.banner("Nothing blocks the creation of " + draft + ".", Ui.Tone.INFO)
-                : Ui.banner(blocking + " check" + (blocking == 1 ? " blocks" : "s block") + " the creation of "
-                + draft + ".", Ui.Tone.CRIT), grid);
+        into.add(blocking == 0 ? Ui.banner(Ui.t("ac.nothingBlocks", draft), Ui.Tone.INFO)
+                : Ui.banner(Ui.t(blocking == 1 ? "ac.oneBlocks" : "ac.manyBlock", blocking, draft), Ui.Tone.CRIT), grid);
     }
 
     // ---------------------------------------------------------------- 5 start and 6 review
@@ -366,14 +357,13 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
     }
 
     private void start() {
-        Div card = Ui.card("Start");
+        Div card = Ui.card(Ui.t("ac.step.start"));
         String running = defaults();
         mode.setItems("Adopt", "Build");
-        mode.setItemLabelGenerator(m -> m.equals("Adopt") ? (running == null ? "Adopt (no node runs as primary)"
-                : "Adopt: " + running + " runs as primary; the watchers record it and keep the replicas as they are")
-                : "Build: start one node as primary, then re-initialize the others from it (pg_basebackup)");
+        mode.setItemLabelGenerator(m -> m.equals("Adopt") ? (running == null ? Ui.t("ac.adoptNone")
+                : Ui.t("ac.adopt", running)) : Ui.t("ac.build"));
         mode.setValue(running != null ? "Adopt" : "Build");
-        primary.setLabel("Primary to start");
+        primary.setLabel(Ui.t("ac.primaryToStart"));
         String chosen = primary.getValue();
         primary.setItems(current().spec().nodes().stream().map(ClusterSpec.NodeSpec::name).toList());
         if (chosen != null) {
@@ -385,10 +375,9 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
         mode.addValueChangeListener(e -> primary.setVisible("Build".equals(e.getValue())));
         card.add(mode, primary);
         if (running == null) {
-            card.add(Ui.text("pg-note", "Building replaces the data directories of the other nodes with copies of the"
-                    + " primary; their old ones are kept aside."));
+            card.add(Ui.text("pg-note", Ui.t("ac.buildNote")));
         }
-        Button next = new Button("Continue to the review", e -> go(5));
+        Button next = new Button(Ui.t("ac.toReview"), e -> go(5));
         next.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         body.add(card, Ui.div("pg-row", back(), next));
     }
@@ -397,36 +386,35 @@ public class AddClusterView extends Div implements BeforeEnterObserver, HasDynam
         ClusterWizardService.Draft d = current();
         ClusterSpec s = d.spec();
         defaults();
-        Div card = Ui.card("Review");
+        Div card = Ui.card(Ui.t("ac.step.review"));
         Div kv = new Div();
         kv.addClassName("pg-kv");
-        kv.add(Ui.text(null, "Cluster"), Ui.text(null, s.name() + (s.environment() == null ? "" : " · "
+        kv.add(Ui.text(null, Ui.t("nav.cluster")), Ui.text(null, s.name() + (s.environment() == null ? "" : " · "
                 + s.environment())));
-        kv.add(Ui.text(null, "Id"), Ui.text("pg-mono", d.id()));
-        kv.add(Ui.text(null, "Failover"), Ui.text(null, (s.scope() == FailoverScope.DC_LOCAL ? "stays in the"
-                + " primary's data center" : "any data center") + (s.selfFence() ? " · self-fencing" : "")
-                + " · after " + s.failureThreshold() + " failed polls of " + s.pollIntervalMs() / 1000 + " s"));
+        kv.add(Ui.text(null, Ui.t("ac.id")), Ui.text("pg-mono", d.id()));
+        kv.add(Ui.text(null, Ui.t("ac.failover")), Ui.text(null, Ui.t(s.scope() == FailoverScope.DC_LOCAL
+                ? "ac.scopeLocalLower" : "ac.scopeAnyLower") + (s.selfFence() ? " · " + Ui.t("ac.selfFencing") : "")
+                + " · " + Ui.t("ac.after", s.failureThreshold(), s.pollIntervalMs() / 1000)));
         for (ClusterSpec.NodeSpec n : s.nodes()) {
             kv.add(Ui.text(null, n.name()), Ui.text(null, n.agentUrl() + " · PostgreSQL " + n.pgHost() + ":"
-                    + n.pgPort() + " · " + n.dc() + (n.noFailover() ? " · never promoted automatically" : "")));
+                    + n.pgPort() + " · " + n.dc() + (n.noFailover() ? " · " + Ui.t("ov.neverPromoted") : "")));
         }
         boolean build = "Build".equals(mode.getValue());
-        kv.add(Ui.text(null, "Start"), Ui.text(null, build ? "build from " + primary.getValue() : "adopt the"
-                + " running primary"));
-        TextField confirm = new TextField("Type the cluster name " + s.name() + " to create it");
+        kv.add(Ui.text(null, Ui.t("ac.step.start")), Ui.text(null, build ? Ui.t("ac.buildFrom", primary.getValue())
+                : Ui.t("ac.adoptRunning")));
+        TextField confirm = new TextField(Ui.t("ac.typeName", s.name()));
         confirm.setWidthFull();
         confirm.setMaxWidth("420px");
-        Button create = new Button("Create the cluster", e -> {
+        Button create = new Button(Ui.t("ac.create"), e -> {
             if (Ui.attempt(() -> wizard.create(s.name(), build ? ClusterWizardService.StartMode.BUILD
                     : ClusterWizardService.StartMode.ADOPT, primary.getValue(), confirm.getValue(), user))) {
-                Ui.ok(s.name() + " created" + (build ? "; building it, follow it under Operations" : ""));
+                Ui.ok(Ui.t(build ? "ac.createdBuilding" : "ac.created", s.name()));
                 UI.getCurrent().navigate(ClusterRoutes.path(s.name(), build ? "operations" : "overview"));
             }
         });
         create.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        Button discard = new Button("Discard the draft", e -> Ui.confirm("Discard " + s.name() + "?", "Agents"
-                + " already enrolled keep running bound to it; run 'minipgagent remove' on their hosts.", "Discard",
-                true, () -> {
+        Button discard = new Button(Ui.t("ac.discard"), e -> Ui.confirm(Ui.t("ac.discardTitle", s.name()),
+                Ui.t("ac.discardText"), Ui.t("ac.discardButton"), true, () -> {
                     if (Ui.attempt(() -> wizard.discard(s.name(), user))) {
                         UI.getCurrent().navigate(FleetView.class);
                     }

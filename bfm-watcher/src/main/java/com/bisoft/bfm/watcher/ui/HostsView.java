@@ -34,10 +34,9 @@ public class HostsView extends Div implements HasDynamicTitle {
     public HostsView(FleetService fleet) {
         this.fleet = fleet;
         addClassName("pg-page");
-        H1 title = new H1("Hosts");
+        H1 title = new H1(Ui.t("nav.hosts"));
         title.addClassName("pg-title");
-        add(new Div(Ui.text("pg-eyebrow", "Servers as their agents report them (/etc/machine-id), with every"
-                + " instance on each"), title));
+        add(new Div(Ui.text("pg-eyebrow", Ui.t("hosts.eyebrow")), title));
         list.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "16px");
         add(list);
         refresh();
@@ -51,36 +50,36 @@ public class HostsView extends Div implements HasDynamicTitle {
         last = hosts;
         list.removeAll();
         if (hosts.isEmpty()) {
-            list.add(Ui.text("pg-empty", "No agent has answered yet."));
+            list.add(Ui.text("pg-empty", Ui.t("hosts.none")));
         }
         for (Host h : hosts) {
             Div card = Ui.card(null);
-            String sub = h.primaries() + (h.primaries() == 1 ? " primary" : " primaries") + " · " + h.replicas()
-                    + (h.replicas() == 1 ? " replica" : " replicas");
+            String sub = Ui.t(h.primaries() == 1 ? "hosts.primary" : "hosts.primaries", h.primaries()) + " · "
+                    + Ui.t(h.replicas() == 1 ? "hosts.replica" : "hosts.replicas", h.replicas());
             card.add(Ui.div("pg-spread", Ui.div("pg-row", Ui.text("pg-host-name", h.name()),
-                            Ui.text("pg-note", h.hostId() == null ? "agents not answering: placed by address"
+                            Ui.text("pg-note", h.hostId() == null ? Ui.t("hosts.byAddress")
                                     : "machine-id " + h.hostId().substring(0, Math.min(8, h.hostId().length()))
                                     + "…")),
                     Ui.text("pg-note", sub)));
             for (String c : h.sameCluster()) {
-                card.add(Ui.banner(c + " has more than one node on " + h.name() + ": losing this host takes all of"
-                        + " them. Move one to another host.", Ui.Tone.WARN));
+                card.add(Ui.banner(Ui.t("hosts.sameCluster", c, h.name()), Ui.Tone.WARN));
             }
             Grid<Instance> grid = new Grid<>();
             grid.addThemeVariants(GridVariant.LUMO_COMPACT, GridVariant.LUMO_NO_BORDER);
             grid.setAllRowsVisible(true);
             grid.addComponentColumn(i -> new Anchor(ClusterRoutes.path(i.cluster(), "overview"), i.cluster()))
-                    .setHeader("Cluster").setAutoWidth(true);
-            grid.addColumn(Instance::node).setHeader("Node").setAutoWidth(true);
-            grid.addComponentColumn(i -> Ui.chip(i.role(), i.role().equals("Primary") ? Ui.Tone.OK
-                    : i.role().equals("Replica") ? Ui.Tone.NEUTRAL : Ui.Tone.WARN)).setHeader("Role")
+                    .setHeader(Ui.t("nav.cluster")).setAutoWidth(true);
+            grid.addColumn(Instance::node).setHeader(Ui.t("ov.col.node")).setAutoWidth(true);
+            grid.addComponentColumn(i -> Ui.chip(Ui.tr(i.role()), i.role().equals("Primary") ? Ui.Tone.OK
+                    : i.role().equals("Replica") ? Ui.Tone.NEUTRAL : Ui.Tone.WARN)).setHeader(Ui.t("ov.col.role"))
                     .setAutoWidth(true);
-            Grid.Column<Instance> state = grid.addColumn(Instance::state).setHeader("State").setAutoWidth(true);
+            Grid.Column<Instance> state = grid.addColumn(i -> Ui.tr(i.state())).setHeader(Ui.t("ov.col.state"))
+                    .setAutoWidth(true);
             grid.addColumn(i -> "PG " + i.pgPort()).setHeader("PostgreSQL").setAutoWidth(true);
             Grid.Column<Instance> agent = grid.addColumn(i -> i.agent() + (i.instance() == null ? ""
-                    : " · " + i.instance())).setHeader("Agent").setAutoWidth(true);
+                    : " · " + i.instance())).setHeader(Ui.t("ov.col.agent")).setAutoWidth(true);
             Grid.Column<Instance> vip = grid.addColumn(i -> i.vip() == null ? "—" : i.vip()
-                    + (i.vipHeld() ? " (up)" : "")).setHeader("VIP").setFlexGrow(1);
+                    + (i.vipHeld() ? " " + Ui.t("hosts.up") : "")).setHeader("VIP").setFlexGrow(1);
             Ui.hideBelow(grid, 900, state, vip);
             Ui.hideBelow(grid, 600, agent);
             grid.setItems(h.instances());

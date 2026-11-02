@@ -336,6 +336,16 @@ final class Ui {
         return FULL.format(Instant.ofEpochMilli(millis).atZone(zone));
     }
 
+    /** A byte count for the screen ("0 B", "1.5 MB"); on a right-to-left page the unit stays on the number's right. */
+    static String size(Long bytes) {
+        return ltr(bytes == null ? "\u2014" : com.bisoft.bfm.common.Lsn.bytes(bytes));
+    }
+
+    /** Text written left to right (numbers with Latin units, addresses) kept as one run on a right-to-left page. */
+    static String ltr(String text) {
+        return text == null || !Messages.rightToLeft(locale()) ? text : "\u2066" + text + "\u2069";
+    }
+
     static String seconds(Long ms) {
         if (ms == null) {
             return "—";

@@ -69,22 +69,16 @@ class MailNotifierTest {
         MailNotifier notifier = new MailNotifier(box);
         try (FakeSmtpServer server = new FakeSmtpServer(tls, "bfm-alerts", "s3cret")) {
             // The test certificate is not in the JVM's trust store; an operator with an internal CA points at
-            // one with -Djavax.net.ssl.trustStore (see the README).
-            String old = System.getProperty("javax.net.ssl.trustStore");
-            System.setProperty("javax.net.ssl.trustStore", dir.resolve("smtp.p12").toString());
-            System.setProperty("javax.net.ssl.trustStorePassword", "changeit");
-            System.setProperty("javax.net.ssl.trustStoreType", "PKCS12");
+            // one with -Djavax.net.ssl.trustStore (see the README). The JVM reads that property only when it builds
+            // its default SSL context, which an earlier test in the same JVM may already have done (the test then
+            // failed in the full suite and passed alone), so the test sets the default context itself.
+            javax.net.ssl.SSLContext previous = javax.net.ssl.SSLContext.getDefault();
+            javax.net.ssl.SSLContext.setDefault(trusting(dir.resolve("smtp.p12")));
             try {
                 notifier.send(smtp(server.port(), NotificationSettings.Security.STARTTLS, "bfm-alerts",
                         box.encrypt("s3cret")), FAILOVER);
             } finally {
-                if (old == null) {
-                    System.clearProperty("javax.net.ssl.trustStore");
-                    System.clearProperty("javax.net.ssl.trustStorePassword");
-                    System.clearProperty("javax.net.ssl.trustStoreType");
-                } else {
-                    System.setProperty("javax.net.ssl.trustStore", old);
-                }
+                javax.net.ssl.SSLContext.setDefault(previous);
             }
             assertTrue(server.awaitMessage(20_000), "no message arrived: " + server.dialogue());
             assertTrue(server.tlsUsed(), "the session was not upgraded: " + server.dialogue());
@@ -148,5 +142,19 @@ class MailNotifierTest {
             }
         }
         return sb.toString();
+    }
+
+    /** An SSL context that trusts the certificates of a PKCS#12 store (password changeit). */
+    private static javax.net.ssl.SSLContext trusting(Path p12) throws Exception {
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("PKCS12");
+        try (java.io.InputStream in = java.nio.file.Files.newInputStream(p12)) {
+            ks.load(in, "changeit".toCharArray());
+        }
+        javax.net.ssl.TrustManagerFactory tmf = javax.net.ssl.TrustManagerFactory.getInstance(
+                javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init(ks);
+        javax.net.ssl.SSLContext ctx = javax.net.ssl.SSLContext.getInstance("TLS");
+        ctx.init(null, tmf.getTrustManagers(), null);
+        return ctx;
     }
 }

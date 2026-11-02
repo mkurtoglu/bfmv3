@@ -2,7 +2,6 @@ package com.bisoft.bfm.watcher.ui;
 
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.html.Div;
-import com.bisoft.bfm.common.Lsn;
 import com.bisoft.bfm.core.monitor.LagHistory;
 
 import java.time.ZoneId;
@@ -25,7 +24,7 @@ final class LagChart {
         Div box = new Div();
         box.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "8px");
         if (samples.isEmpty()) {
-            box.add(Ui.text("pg-empty", "No samples yet: the chart fills in as the watcher polls " + node + "."));
+            box.add(Ui.text("pg-empty", Ui.t("lag.noSamples", node)));
             return box;
         }
         LagHistory.Sample peak = samples.get(0);
@@ -36,20 +35,19 @@ final class LagChart {
         }
         LagHistory.Sample latest = samples.get(samples.size() - 1);
         if (peak.maxLagBytes() == 0) {
-            box.add(Ui.text("pg-chart-summary", "No replay lag in the " + window),
-                    Ui.text("pg-empty", node + " kept up the whole time: replay lag stayed at 0 B (alert at "
-                            + Lsn.bytes(alert) + ")."));
+            box.add(Ui.text("pg-chart-summary", Ui.t("lag.none", window)),
+                    Ui.text("pg-empty", Ui.t("lag.keptUp", node, Ui.size(alert))));
             return box;
         }
-        box.add(Ui.text("pg-chart-summary", "Peak " + Lsn.bytes(peak.maxLagBytes()) + " at "
-                + Ui.minute(peak.minuteMillis(), zone) + " · now " + Lsn.bytes(latest.maxLagBytes())
-                + (peak.maxLagBytes() > alert ? " · above the alert at " + Lsn.bytes(alert) : "")));
+        box.add(Ui.text("pg-chart-summary", Ui.t("lag.peak", Ui.size(peak.maxLagBytes()),
+                Ui.minute(peak.minuteMillis(), zone), Ui.size(latest.maxLagBytes()))
+                + (peak.maxLagBytes() > alert ? " · " + Ui.t("lag.aboveAlert", Ui.size(alert)) : "")));
 
         long top = niceCeiling(Math.max(peak.maxLagBytes(), alert) * 5 / 4);
         Div bars = Ui.div("pg-bars");
         bars.getElement().setAttribute("role", "img");
-        bars.getElement().setAttribute("aria-label", "Replay lag of " + node + ", " + window + ": peak "
-                + Lsn.bytes(peak.maxLagBytes()) + " at " + Ui.minute(peak.minuteMillis(), zone));
+        bars.getElement().setAttribute("aria-label", Ui.t("lag.aria", node, window, Ui.size(peak.maxLagBytes()),
+                Ui.minute(peak.minuteMillis(), zone)));
         for (LagHistory.Sample s : samples) {
             Div b = Ui.div("pg-bar");
             boolean over = s.maxLagBytes() > alert;
@@ -57,23 +55,25 @@ final class LagChart {
                 b.addClassName("over");
             }
             b.getStyle().set("height", Math.max(2, Math.round(s.maxLagBytes() * (double) HEIGHT_PX / top)) + "px");
-            b.setTitle(Ui.minute(s.minuteMillis(), zone) + " · " + Lsn.bytes(s.maxLagBytes())
-                    + (over ? " (above the alert)" : ""));
+            b.setTitle(Ui.minute(s.minuteMillis(), zone) + " · " + Ui.size(s.maxLagBytes())
+                    + (over ? " " + Ui.t("lag.overShort") : ""));
             bars.add(b);
         }
         long alertPx = Math.round(alert * (double) HEIGHT_PX / top);
         Div line = Ui.div("pg-threshold");
         line.getStyle().set("bottom", alertPx + "px");
         Div label = Ui.div("pg-threshold-label");
-        label.setText("alert " + Lsn.bytes(alert));
+        label.setText(Ui.t("lag.alert", Ui.size(alert)));
         label.getStyle().set("bottom", alertPx + "px");
         bars.add(line, label);
 
-        Div yaxis = Ui.div("pg-yaxis", Ui.text(null, Lsn.bytes(top)), Ui.text(null, Lsn.bytes(top / 2)),
+        Div yaxis = Ui.div("pg-yaxis", Ui.text(null, Ui.size(top)), Ui.text(null, Ui.size(top / 2)),
                 Ui.text(null, "0"));
         Div xaxis = Ui.div("pg-axis", Ui.text(null, Ui.minute(samples.get(0).minuteMillis(), zone)),
                 Ui.text(null, Ui.minute(now, zone) + " " + Ui.zone(zone)));
         Div chart = Ui.div("pg-chart", yaxis, bars, xaxis);
+        // time runs left to right in every language, Arabic included
+        chart.getElement().setAttribute("dir", "ltr");
         box.add(chart);
         return box;
     }

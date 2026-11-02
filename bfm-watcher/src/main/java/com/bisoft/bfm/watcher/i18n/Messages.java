@@ -39,7 +39,7 @@ public class Messages implements I18NProvider {
     public static final Locale ARABIC = Locale.forLanguageTag("ar");
     public static final List<Locale> LOCALES = List.of(ENGLISH, TURKISH, ARABIC);
 
-    private static final Pattern PLACEHOLDER = Pattern.compile("\\{([a-zA-Z_]+)}");
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\{([a-zA-Z_][a-zA-Z0-9_]*)}");
 
     private final Map<String, Properties> bundles = new ConcurrentHashMap<>();
     private final Map<String, Catalog> catalogs = new ConcurrentHashMap<>();

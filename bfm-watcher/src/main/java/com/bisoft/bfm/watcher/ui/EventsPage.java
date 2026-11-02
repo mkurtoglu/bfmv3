@@ -36,16 +36,17 @@ class EventsPage extends Div implements ClusterRoute.Enterable {
     EventsPage(ConsoleService console, ZoneId zone) {
         this.console = console;
         addClassName("pg-page");
-        H1 title = new H1("Events");
+        H1 title = new H1(Ui.t("nav.events"));
         title.addClassName("pg-title");
-        add(new Div(Ui.text("pg-eyebrow", "Failovers, switchovers, alerts and every operator action"), title));
+        add(new Div(Ui.text("pg-eyebrow", Ui.t("ev.eyebrow")), title));
 
-        severity.setLabel("Severity");
+        severity.setLabel(Ui.t("ev.severity"));
         severity.setItems("All", "Critical", "Warning", "Info");
+        severity.setItemLabelGenerator(v -> Ui.t("sev." + v.toLowerCase(Locale.ROOT)));
         severity.setValue("All");
         severity.addValueChangeListener(e -> refresh());
-        search.setLabel("Search");
-        search.setPlaceholder("node, user or text");
+        search.setLabel(Ui.t("ev.search"));
+        search.setPlaceholder(Ui.t("ev.searchHint"));
         search.setValueChangeMode(ValueChangeMode.LAZY);
         search.setClearButtonVisible(true);
         search.addValueChangeListener(e -> refresh());
@@ -55,23 +56,23 @@ class EventsPage extends Div implements ClusterRoute.Enterable {
         grid.addComponentColumn(e -> Ui.chevron(open.contains(e.id()))).setWidth("56px").setFlexGrow(0)
                 .setHeader("");
         Grid.Column<ClusterEvent> time = grid.addColumn(e -> Ui.full(e.timeMillis(), zone))
-                .setHeader("Time (" + Ui.zone(zone) + ")").setAutoWidth(true).setFlexGrow(0);
-        Grid.Column<ClusterEvent> sev = grid.addComponentColumn(e -> severityChip(e)).setHeader("Severity")
+                .setHeader(Ui.t("ev.col.time", Ui.zone(zone))).setAutoWidth(true).setFlexGrow(0);
+        Grid.Column<ClusterEvent> sev = grid.addComponentColumn(e -> severityChip(e)).setHeader(Ui.t("ev.severity"))
                 .setAutoWidth(true).setFlexGrow(0);
         // On a phone one column carries it all, stacked: time and severity on top, the event below.
         Grid.Column<ClusterEvent> stacked = grid.addComponentColumn(e -> {
             Div d = new Div(Ui.div("pg-row", Ui.text("pg-note", Ui.shortTime(e.timeMillis(), zone)),
                     severityChip(e), Ui.text("pg-note", e.node() == null ? "" : e.node())),
-                    Ui.text(null, Ui.arrows(e.message())));
+                    Ui.text(null, Ui.arrows(Ui.tr(e.message()))));
             d.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "4px")
                     .set("white-space", "normal");
             return d;
-        }).setHeader("Event (" + Ui.zone(zone) + ")").setFlexGrow(1);
-        Grid.Column<ClusterEvent> node = grid.addColumn(e -> e.node() == null ? "—" : e.node()).setHeader("Node")
+        }).setHeader(Ui.t("ev.col.eventZone", Ui.zone(zone))).setFlexGrow(1);
+        Grid.Column<ClusterEvent> node = grid.addColumn(e -> e.node() == null ? "—" : e.node()).setHeader(Ui.t("ov.col.node"))
                 .setAutoWidth(true).setFlexGrow(0);
-        Grid.Column<ClusterEvent> message = grid.addColumn(e -> Ui.arrows(e.message())).setHeader("Event")
+        Grid.Column<ClusterEvent> message = grid.addColumn(e -> Ui.arrows(Ui.tr(e.message()))).setHeader(Ui.t("ev.col.event"))
                 .setFlexGrow(1);
-        Grid.Column<ClusterEvent> by = grid.addColumn(ClusterEvent::actor).setHeader("By").setAutoWidth(true)
+        Grid.Column<ClusterEvent> by = grid.addColumn(ClusterEvent::actor).setHeader(Ui.t("ops.col.by")).setAutoWidth(true)
                 .setFlexGrow(0);
         Ui.switchAt(grid, 760, List.of(time, sev, node, message, by), List.of(stacked));
         grid.addItemClickListener(e -> {
@@ -81,9 +82,10 @@ class EventsPage extends Div implements ClusterRoute.Enterable {
             grid.setDetailsVisible(e.getItem(), open.contains(e.getItem().id()));
             grid.getDataProvider().refreshItem(e.getItem());
         });
-        grid.setEmptyStateText("No events match.");
+        grid.setEmptyStateText(Ui.t("ev.empty"));
         grid.setItemDetailsRenderer(new ComponentRenderer<>(e -> {
             Pre p = new Pre(e.type() + (e.detail() == null ? "" : "\n\n" + e.detail()));
+            p.getElement().setAttribute("dir", "ltr"); // the event's type and raw detail, as recorded
             p.addClassName("pg-log");
             return p;
         }));
@@ -95,9 +97,9 @@ class EventsPage extends Div implements ClusterRoute.Enterable {
 
     private static com.vaadin.flow.component.html.Span severityChip(ClusterEvent e) {
         return Ui.chip(switch (e.severity()) {
-            case CRITICAL -> "Critical";
-            case WARNING -> "Warning";
-            case INFO -> "Info";
+            case CRITICAL -> Ui.t("sev.critical");
+            case WARNING -> Ui.t("sev.warning");
+            case INFO -> Ui.t("sev.info");
         }, Ui.tone(e.severity()));
     }
 
@@ -106,7 +108,9 @@ class EventsPage extends Div implements ClusterRoute.Enterable {
         String q = search.getValue() == null ? "" : search.getValue().toLowerCase(Locale.ROOT).trim();
         List<ClusterEvent> list = console.watcher().events(1000).stream()
                 .filter(e -> "All".equals(sev) || e.severity() == Severity.valueOf(sev.toUpperCase(Locale.ROOT)))
-                .filter(e -> q.isEmpty() || (e.message() + " " + e.node() + " " + e.actor() + " " + e.type())
+                // the search finds the English text and the one on the screen
+                .filter(e -> q.isEmpty() || (e.message() + " " + Ui.tr(e.message()) + " " + e.node() + " " + e.actor()
+                        + " " + e.type())
                         .toLowerCase(Locale.ROOT).contains(q))
                 .toList();
         grid.setItems(list);

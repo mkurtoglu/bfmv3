@@ -55,23 +55,23 @@ class NotificationsPage extends Div implements BeforeLeaveObserver {
     private final String user;
     private final boolean sharedSmtp;
 
-    private final TextField host = new TextField("Host");
-    private final IntegerField port = new IntegerField("Port");
+    private final TextField host = new TextField(Ui.t("nt.host"));
+    private final IntegerField port = new IntegerField(Ui.t("adm.port"));
     private final Select<NotificationSettings.Security> security = new Select<>();
-    private final TextField smtpUser = new TextField("User name");
-    private final PasswordField password = new PasswordField("Password");
-    private final EmailField from = new EmailField("From address");
+    private final TextField smtpUser = new TextField(Ui.t("login.username"));
+    private final PasswordField password = new PasswordField(Ui.t("login.password"));
+    private final EmailField from = new EmailField(Ui.t("nt.from"));
     private final List<NotificationSettings.Recipient> recipients = new ArrayList<>();
     private final Grid<NotificationSettings.Recipient> recipientGrid = new Grid<>();
-    private final TextField lagAlert = new TextField("Replica lag alert");
-    private final TextField slotAlert = new TextField("Inactive slot alert");
+    private final TextField lagAlert = new TextField(Ui.t("nt.lagAlert"));
+    private final TextField slotAlert = new TextField(Ui.t("nt.slotAlert"));
     private final Span smtpState = Ui.text("pg-dirty", "");
     private final Span thresholdsState = Ui.text("pg-dirty", "");
     private final Span rulesState = Ui.text("pg-dirty", "");
-    private final Button saveSmtp = new Button("Save");
-    private final Button testMail = new Button("Send test mail");
-    private final Button saveThresholds = new Button("Save thresholds");
-    private final Button saveRules = new Button("Save rules");
+    private final Button saveSmtp = new Button(Ui.t("nt.save"));
+    private final Button testMail = new Button(Ui.t("nt.test"));
+    private final Button saveThresholds = new Button(Ui.t("nt.saveThresholds"));
+    private final Button saveRules = new Button(Ui.t("nt.saveRules"));
     private boolean smtpDirty;
     private boolean thresholdsDirty;
     private boolean rulesDirty;
@@ -85,33 +85,32 @@ class NotificationsPage extends Div implements BeforeLeaveObserver {
         this.admin = auth.hasRole("ADMIN");
         this.user = auth.getPrincipalName().orElse("unknown");
         addClassName("pg-page");
-        H1 title = new H1("Mail notifications");
+        H1 title = new H1(Ui.t("title.mailNotifications"));
         title.addClassName("pg-title");
-        add(new Div(Ui.text("pg-eyebrow", "Settings"), title));
+        add(new Div(Ui.text("pg-eyebrow", Ui.t("ca.eyebrow")), title));
         if (!admin) {
-            add(Ui.banner("You can look at the mail settings; only admins can change them.", Ui.Tone.INFO));
+            add(Ui.banner(Ui.t("nt.viewerNote"), Ui.Tone.INFO));
         }
         add(Ui.div("pg-grid-auto", smtpCard(), recipientsCard()), rulesCard(), previewCard());
         load();
     }
 
     private Div smtpCard() {
-        Div card = Ui.card("SMTP server");
+        Div card = Ui.card(Ui.t("nt.smtp"));
         if (sharedSmtp) {
-            card.add(Ui.text("pg-note", "Shared by every cluster of this watcher; recipients, thresholds and rules"
-                    + " below are this cluster's."));
+            card.add(Ui.text("pg-note", Ui.t("nt.shared")));
         }
-        security.setLabel("Security");
+        security.setLabel(Ui.t("nt.security"));
         security.setItems(NotificationSettings.Security.values());
         security.setItemLabelGenerator(s -> switch (s) {
             case STARTTLS -> "STARTTLS";
             case SMTPS -> "SMTPS (TLS)";
-            case NONE -> "None";
+            case NONE -> Ui.t("nt.none");
         });
         host.setPlaceholder("smtp.example.com");
         port.setMin(1);
         port.setMax(65535);
-        password.setPlaceholder("Stored encrypted");
+        password.setPlaceholder(Ui.t("nt.storedEncrypted"));
         FormLayout form = new FormLayout(host, port, security, smtpUser, password, from);
         form.setResponsiveSteps(new FormLayout.ResponsiveStep("0", 1), new FormLayout.ResponsiveStep("360px", 2));
         form.setColspan(host, 2);
@@ -119,14 +118,14 @@ class NotificationsPage extends Div implements BeforeLeaveObserver {
         saveSmtp.addClickListener(e -> {
             if (host.isEmpty()) {
                 host.setInvalid(true);
-                host.setErrorMessage("Enter the SMTP host first.");
+                host.setErrorMessage(Ui.t("nt.hostFirst"));
                 return;
             }
             if (Ui.attempt(() -> service.saveSmtp(new NotificationService.SmtpChange(host.getValue(),
                     port.getValue() == null ? 587 : port.getValue(), security.getValue(), smtpUser.getValue(),
                     password.isEmpty() ? null : password.getValue(), from.getValue()), user))) {
                 password.clear();
-                Ui.ok("SMTP settings saved");
+                Ui.ok(Ui.t("nt.smtpSaved"));
                 load();
             }
         });
@@ -134,9 +133,9 @@ class NotificationsPage extends Div implements BeforeLeaveObserver {
         testMail.addClickListener(e -> {
             try {
                 List<String> to = service.sendTest(user);
-                Ui.ok("Test mail accepted by " + host.getValue() + " for " + String.join(", ", to));
+                Ui.ok(Ui.t("nt.testOk", host.getValue(), String.join(", ", to)));
             } catch (Exception ex) {
-                Ui.error("Test mail failed: " + ex.getMessage());
+                Ui.error(Ui.t("nt.testFailed", Ui.tr(ex.getMessage())));
             }
         });
         host.addValueChangeListener(e -> smtpChanged(e.isFromClient()));
@@ -146,12 +145,12 @@ class NotificationsPage extends Div implements BeforeLeaveObserver {
         security.addValueChangeListener(e -> smtpChanged(e.isFromClient()));
         password.addValueChangeListener(e -> smtpChanged(e.isFromClient()));
         card.add(form, Ui.div("pg-row", testMail, saveSmtp, smtpState),
-                Ui.text("pg-note", "Save first, then send a test mail to every recipient."));
+                Ui.text("pg-note", Ui.t("nt.saveFirst")));
         return card;
     }
 
     private Div recipientsCard() {
-        Div card = Ui.card("Recipients");
+        Div card = Ui.card(Ui.t("nt.recipients"));
         recipientGrid.addThemeVariants(GridVariant.LUMO_NO_BORDER, GridVariant.LUMO_COMPACT);
         recipientGrid.setAllRowsVisible(true);
         recipientGrid.addComponentColumn(r -> {
@@ -159,43 +158,43 @@ class NotificationsPage extends Div implements BeforeLeaveObserver {
             d.getChildren().findFirst().ifPresent(c -> c.getElement().setAttribute("style",
                     "font-weight:700;color:var(--pg-ink)"));
             return d;
-        }).setHeader("Group").setFlexGrow(1);
+        }).setHeader(Ui.t("nt.group")).setFlexGrow(1);
         recipientGrid.addComponentColumn(r -> Ui.chip(switch (r.filter()) {
-            case ALL -> "All events";
-            case CRITICAL -> "Critical only";
-            case ROLE_CHANGES -> "Role changes";
+            case ALL -> Ui.t("nt.allEvents");
+            case CRITICAL -> Ui.t("nt.criticalOnly");
+            case ROLE_CHANGES -> Ui.t("nt.roleChanges");
         }, switch (r.filter()) {
             case ALL -> Ui.Tone.OK;
             case CRITICAL -> Ui.Tone.CRIT;
             case ROLE_CHANGES -> Ui.Tone.INFO;
-        })).setHeader("Gets").setAutoWidth(true);
+        })).setHeader(Ui.t("nt.gets")).setAutoWidth(true);
         recipientGrid.addComponentColumn(r -> {
             Button rm = new Button(VaadinIcon.TRASH.create(), e -> {
                 recipients.remove(r);
                 saveRecipients();
             });
-            rm.setAriaLabel("Remove " + r.name());
+            rm.setAriaLabel(Ui.t("nt.removeGroup", r.name()));
             rm.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_ERROR);
             rm.setEnabled(admin);
             return rm;
         }).setAutoWidth(true).setFlexGrow(0);
 
-        TextField name = new TextField("Group name");
-        TextField address = new TextField("Address(es)");
-        address.setHelperText("Several addresses: separate with commas");
+        TextField name = new TextField(Ui.t("nt.groupName"));
+        TextField address = new TextField(Ui.t("nt.addresses"));
+        address.setHelperText(Ui.t("nt.addressesHelp"));
         Select<NotificationSettings.Filter> filter = new Select<>();
-        filter.setLabel("Gets");
+        filter.setLabel(Ui.t("nt.gets"));
         filter.setItems(NotificationSettings.Filter.values());
         filter.setItemLabelGenerator(f -> switch (f) {
-            case ALL -> "All events";
-            case CRITICAL -> "Critical only";
-            case ROLE_CHANGES -> "Role changes";
+            case ALL -> Ui.t("nt.allEvents");
+            case CRITICAL -> Ui.t("nt.criticalOnly");
+            case ROLE_CHANGES -> Ui.t("nt.roleChanges");
         });
         filter.setValue(NotificationSettings.Filter.ALL);
-        Button add = new Button("Add group", e -> {
+        Button add = new Button(Ui.t("nt.addGroup"), e -> {
             if (address.isEmpty()) {
                 address.setInvalid(true);
-                address.setErrorMessage("Enter an address");
+                address.setErrorMessage(Ui.t("nt.enterAddress"));
                 return;
             }
             recipients.add(new NotificationSettings.Recipient(name.getValue(), address.getValue(), filter.getValue()));
@@ -208,8 +207,8 @@ class NotificationsPage extends Div implements BeforeLeaveObserver {
         FormLayout form = new FormLayout(name, address, filter);
         form.setResponsiveSteps(new FormLayout.ResponsiveStep("0", 1), new FormLayout.ResponsiveStep("420px", 3));
 
-        lagAlert.setHelperText("Replay lag that raises a warning, e.g. 512 KB or 16 MB");
-        slotAlert.setHelperText("WAL an unused slot may hold, e.g. 1 GB");
+        lagAlert.setHelperText(Ui.t("nt.lagHelp"));
+        slotAlert.setHelperText(Ui.t("nt.slotHelp"));
         lagAlert.addValueChangeListener(e -> thresholdsChanged(e.isFromClient()));
         slotAlert.addValueChangeListener(e -> thresholdsChanged(e.isFromClient()));
         saveThresholds.addClickListener(e -> {
@@ -219,7 +218,7 @@ class NotificationsPage extends Div implements BeforeLeaveObserver {
                 lag = SizeText.parse(lagAlert.getValue());
                 lagAlert.setInvalid(false);
             } catch (IllegalArgumentException ex) {
-                lagAlert.setErrorMessage(ex.getMessage());
+                lagAlert.setErrorMessage(Ui.tr(ex.getMessage()));
                 lagAlert.setInvalid(true);
                 return;
             }
@@ -227,26 +226,26 @@ class NotificationsPage extends Div implements BeforeLeaveObserver {
                 slot = SizeText.parse(slotAlert.getValue());
                 slotAlert.setInvalid(false);
             } catch (IllegalArgumentException ex) {
-                slotAlert.setErrorMessage(ex.getMessage());
+                slotAlert.setErrorMessage(Ui.tr(ex.getMessage()));
                 slotAlert.setInvalid(true);
                 return;
             }
             if (Ui.attempt(() -> service.saveThresholds(lag, slot, user))) {
-                Ui.ok("Thresholds saved");
+                Ui.ok(Ui.t("nt.thresholdsSaved"));
                 load();
             }
         });
         FormLayout thresholds = new FormLayout(lagAlert, slotAlert);
         thresholds.setResponsiveSteps(new FormLayout.ResponsiveStep("0", 1), new FormLayout.ResponsiveStep("420px", 2));
-        recipientGrid.setEmptyStateText("No recipients yet. Add a group below.");
-        card.add(recipientGrid, form, Ui.div("pg-row", add), new H2("Alert thresholds"), thresholds,
+        recipientGrid.setEmptyStateText(Ui.t("nt.noRecipients"));
+        card.add(recipientGrid, form, Ui.div("pg-row", add), new H2(Ui.t("nt.thresholds")), thresholds,
                 Ui.div("pg-row", saveThresholds, thresholdsState));
         return card;
     }
 
     private boolean saveRecipients() {
         if (Ui.attempt(() -> service.saveRecipients(recipients, user))) {
-            Ui.ok("Recipients saved");
+            Ui.ok(Ui.t("nt.recipientsSaved"));
             load();
             return true;
         }
@@ -256,41 +255,42 @@ class NotificationsPage extends Div implements BeforeLeaveObserver {
 
     private Div rulesCard() {
         Div card = Ui.card(null);
-        card.add(Ui.div("pg-spread", new H2("Event rules"),
-                Ui.text("pg-note", "The same event is not mailed again within its throttle window")));
+        card.add(Ui.div("pg-spread", new H2(Ui.t("nt.rules")),
+                Ui.text("pg-note", Ui.t("nt.rulesNote"))));
         ruleGrid.addThemeVariants(GridVariant.LUMO_ROW_STRIPES, GridVariant.LUMO_WRAP_CELL_CONTENT);
         ruleGrid.setAllRowsVisible(true);
-        ruleGrid.addColumn(MailRule::label).setHeader("Event").setFlexGrow(1);
+        ruleGrid.addColumn(r -> Ui.tr(r.label())).setHeader(Ui.t("ev.col.event")).setFlexGrow(1);
         ruleGrid.addComponentColumn(r -> Ui.chip(switch (r.severity()) {
-            case CRITICAL -> "Critical";
-            case WARNING -> "Warning";
-            case INFO -> "Info";
-        }, Ui.tone(r.severity()))).setHeader("Severity").setAutoWidth(true);
+            case CRITICAL -> Ui.t("sev.critical");
+            case WARNING -> Ui.t("sev.warning");
+            case INFO -> Ui.t("sev.info");
+        }, Ui.tone(r.severity()))).setHeader(Ui.t("ev.severity")).setAutoWidth(true);
         ruleGrid.addComponentColumn(r -> {
             Select<String> s = new Select<>();
             s.setItems(THROTTLES.keySet());
+            s.setItemLabelGenerator(NotificationsPage::throttleLabel);
             s.setValue(label(rules.get(r).throttleMs()));
-            s.setAriaLabel("Throttle for " + r.label());
+            s.setAriaLabel(Ui.t("nt.throttleFor", Ui.tr(r.label())));
             s.setReadOnly(!admin);
             s.addValueChangeListener(e -> {
                 rules.put(r, new NotificationSettings.Rule(rules.get(r).enabled(), THROTTLES.get(e.getValue())));
                 rulesChanged(e.isFromClient());
             });
             return s;
-        }).setHeader("Throttle").setAutoWidth(true);
+        }).setHeader(Ui.t("nt.throttle")).setAutoWidth(true);
         ruleGrid.addComponentColumn(r -> {
             Checkbox c = new Checkbox(rules.get(r).enabled());
-            c.setAriaLabel("Mail for " + r.label());
+            c.setAriaLabel(Ui.t("nt.mailFor", Ui.tr(r.label())));
             c.setReadOnly(!admin);
             c.addValueChangeListener(e -> {
                 rules.put(r, new NotificationSettings.Rule(e.getValue(), rules.get(r).throttleMs()));
                 rulesChanged(e.isFromClient());
             });
             return c;
-        }).setHeader("Mail").setAutoWidth(true);
+        }).setHeader(Ui.t("nt.mail")).setAutoWidth(true);
         saveRules.addClickListener(e -> {
             if (Ui.attempt(() -> service.saveRules(Map.copyOf(rules), user))) {
-                Ui.ok("Rules saved");
+                Ui.ok(Ui.t("nt.rulesSaved"));
                 load();
             }
         });
@@ -308,11 +308,21 @@ class NotificationsPage extends Div implements BeforeLeaveObserver {
         return ms / 60_000 + " min";
     }
 
+    /** "None", "5 min", "1 h" in the page's language; the values stay as they are. */
+    private static String throttleLabel(String v) {
+        if ("None".equals(v)) {
+            return Ui.t("nt.none");
+        }
+        return v.replace(" min", " " + Ui.t("unit.min")).replace(" h", " " + Ui.t("unit.h"));
+    }
+
     private Div previewCard() {
-        Div card = Ui.card("Mail preview · sample automatic failover");
+        Div card = Ui.card(Ui.t("nt.preview"));
         preview.addClassNames("pg-log", "pg-preview");
-        card.add(Ui.text("pg-note", "Sample data, not a real failover: this is how the mail looks with the settings"
-                + " above."), preview);
+        // the mails themselves are written in English, whatever the console's language
+        preview.getElement().setAttribute("dir", "ltr");
+        preview.getElement().setAttribute("lang", "en");
+        card.add(Ui.text("pg-note", Ui.t("nt.previewNote")), preview);
         return card;
     }
 
@@ -322,7 +332,7 @@ class NotificationsPage extends Div implements BeforeLeaveObserver {
         port.setValue(v.smtp().port());
         security.setValue(v.smtp().security());
         smtpUser.setValue(v.smtp().user() == null ? "" : v.smtp().user());
-        password.setPlaceholder(v.smtp().passwordSet() ? "Stored encrypted (leave empty to keep)" : "Not set");
+        password.setPlaceholder(Ui.t(v.smtp().passwordSet() ? "nt.storedKeep" : "nt.notSet"));
         from.setValue(v.smtp().from() == null ? "" : v.smtp().from());
         recipients.clear();
         recipients.addAll(v.recipients());
@@ -367,14 +377,14 @@ class NotificationsPage extends Div implements BeforeLeaveObserver {
 
     /** Each card says when it has changes that are not saved yet, and its Save button only works then. */
     private void showDirty() {
-        smtpState.setText(smtpDirty ? "Unsaved changes" : "");
-        thresholdsState.setText(thresholdsDirty ? "Unsaved changes" : "");
-        rulesState.setText(rulesDirty ? "Unsaved changes" : "");
+        smtpState.setText(smtpDirty ? Ui.t("nt.unsaved") : "");
+        thresholdsState.setText(thresholdsDirty ? Ui.t("nt.unsaved") : "");
+        rulesState.setText(rulesDirty ? Ui.t("nt.unsaved") : "");
         saveSmtp.setEnabled(admin && smtpDirty);
         saveThresholds.setEnabled(admin && thresholdsDirty);
         saveRules.setEnabled(admin && rulesDirty);
         testMail.setEnabled(admin && !smtpDirty);
-        testMail.setTooltipText(smtpDirty ? "Save the SMTP settings first" : null);
+        testMail.setTooltipText(smtpDirty ? Ui.t("nt.saveSmtpFirst") : null);
     }
 
     @Override
@@ -383,10 +393,10 @@ class NotificationsPage extends Div implements BeforeLeaveObserver {
             return;
         }
         BeforeLeaveEvent.ContinueNavigationAction go = event.postpone();
-        ConfirmDialog d = new ConfirmDialog("Leave without saving?", "The changes on this page are not saved yet.",
-                "Leave", e -> go.proceed());
+        ConfirmDialog d = new ConfirmDialog(Ui.t("nt.leaveTitle"), Ui.t("nt.leaveText"), Ui.t("nt.leave"),
+                e -> go.proceed());
         d.setCancelable(true);
-        d.setCancelText("Stay");
+        d.setCancelText(Ui.t("nt.stay"));
         d.setConfirmButtonTheme("error primary");
         d.open();
     }

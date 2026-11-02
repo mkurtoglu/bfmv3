@@ -18,7 +18,6 @@ import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.data.renderer.ComponentRenderer;
 import com.vaadin.flow.shared.Registration;
 import com.vaadin.flow.spring.security.AuthenticationContext;
-import com.bisoft.bfm.common.Lsn;
 import com.bisoft.bfm.core.monitor.LagHistory;
 import com.bisoft.bfm.core.notify.NotificationSettings;
 import com.bisoft.bfm.watcher.service.ConsoleService;
@@ -67,10 +66,10 @@ class ReplicationPage extends Div {
         this.zone = zone;
         addClassName("pg-page");
 
-        H1 title = new H1("Replication");
+        H1 title = new H1(Ui.t("nav.replication"));
         title.addClassName("pg-title");
         stats.addClassName("pg-stats");
-        add(banners, Ui.div("pg-spread", new Div(Ui.text("pg-eyebrow", "Streaming state, lag and slots"), title),
+        add(banners, Ui.div("pg-spread", new Div(Ui.text("pg-eyebrow", Ui.t("rp.eyebrow")), title),
                 refreshed), stats);
 
         buildPrimarySide();
@@ -78,15 +77,15 @@ class ReplicationPage extends Div {
         buildSlots();
 
         Div fromPrimary = Ui.card(null);
-        fromPrimary.add(Ui.div("pg-spread", heading("As the primary sees them"),
-                Ui.text("pg-note", "pg_stat_replication: one row per connected walsender")), primarySide);
+        fromPrimary.add(Ui.div("pg-spread", heading(Ui.t("rp.fromPrimary")),
+                Ui.text("pg-note", Ui.t("rp.fromPrimaryNote"))), primarySide);
 
         Div fromReplicas = Ui.card(null);
-        fromReplicas.add(Ui.div("pg-spread", heading("As each replica reports itself"),
-                Ui.text("pg-note", "the replica's own WAL receiver and recovery state")), replicaSide);
+        fromReplicas.add(Ui.div("pg-spread", heading(Ui.t("rp.fromReplicas")),
+                Ui.text("pg-note", Ui.t("rp.fromReplicasNote"))), replicaSide);
 
-        Div lagCard = Ui.card("Replay lag over time");
-        lagNode.setAriaLabel("Replica");
+        Div lagCard = Ui.card(Ui.t("rp.lagOverTime"));
+        lagNode.setAriaLabel(Ui.t("rp.replica"));
         lagNode.addValueChangeListener(e -> {
             if (e.isFromClient()) {
                 renderLag(last);
@@ -95,8 +94,8 @@ class ReplicationPage extends Div {
         lagCard.add(lagNode, lagChart);
 
         Div slotsCard = Ui.card(null);
-        slotsCard.add(Ui.div("pg-spread", heading("Replication slots"),
-                Ui.text("pg-note", "an inactive slot keeps WAL on the primary until it is dropped")), slots);
+        slotsCard.add(Ui.div("pg-spread", heading(Ui.t("rp.slots")),
+                Ui.text("pg-note", Ui.t("rp.slotsNote"))), slots);
 
         add(fromPrimary, fromReplicas, Ui.div("pg-grid-2", lagCard, slotsCard));
         refresh();
@@ -113,36 +112,35 @@ class ReplicationPage extends Div {
     private void buildPrimarySide() {
         primarySide.addThemeVariants(GridVariant.LUMO_ROW_STRIPES, GridVariant.LUMO_COMPACT);
         primarySide.setAllRowsVisible(true);
-        primarySide.addComponentColumn(r -> bold(r.node())).setHeader("Standby").setAutoWidth(true).setFlexGrow(0);
+        primarySide.addComponentColumn(r -> bold(r.node())).setHeader(Ui.t("rp.col.standby")).setAutoWidth(true).setFlexGrow(0);
         Grid.Column<ReplicaRow> client = primarySide.addColumn(r -> r.clientAddr() == null || r.clientAddr().isBlank()
-                ? "—" : r.clientAddr()).setHeader("Client address").setAutoWidth(true);
+                ? "—" : r.clientAddr()).setHeader(Ui.t("rp.col.client")).setAutoWidth(true);
         primarySide.addComponentColumn(r -> r.peerState() == null
-                        ? Ui.chip("Not connected", Ui.Tone.CRIT)
-                        : Ui.chip(Terms.capitalize(r.peerState()), "streaming".equalsIgnoreCase(r.peerState())
+                        ? Ui.chip(Ui.t("rp.notConnected"), Ui.Tone.CRIT)
+                        : Ui.chip(Ui.tr(Terms.capitalize(r.peerState())), "streaming".equalsIgnoreCase(r.peerState())
                         ? Ui.Tone.OK : Ui.Tone.WARN))
-                .setHeader("Walsender").setAutoWidth(true);
+                .setHeader(Ui.t("rp.col.walsender")).setAutoWidth(true);
         Grid.Column<ReplicaRow> sync = primarySide.addComponentColumn(r -> r.syncState() == null ? Ui.text(null, "—")
-                        : Ui.chip(Terms.capitalize(r.syncState()), "sync".equalsIgnoreCase(r.syncState())
+                        : Ui.chip(Ui.tr(Terms.capitalize(r.syncState())), "sync".equalsIgnoreCase(r.syncState())
                         || "quorum".equalsIgnoreCase(r.syncState()) ? Ui.Tone.OK : Ui.Tone.NEUTRAL))
-                .setHeader("Sync").setAutoWidth(true);
+                .setHeader(Ui.t("ov.col.sync")).setAutoWidth(true);
         Grid.Column<ReplicaRow> sent = primarySide.addComponentColumn(r -> Ui.text("pg-mono", or(r.sentLsn())))
-                .setHeader("Sent").setAutoWidth(true);
+                .setHeader(Ui.t("rp.col.sent")).setAutoWidth(true);
         Grid.Column<ReplicaRow> written = primarySide.addComponentColumn(r -> Ui.text("pg-mono", or(r.writeLsn())))
-                .setHeader("Written").setAutoWidth(true);
+                .setHeader(Ui.t("rp.col.written")).setAutoWidth(true);
         Grid.Column<ReplicaRow> flushed = primarySide.addComponentColumn(r -> Ui.text("pg-mono", or(r.flushLsn())))
-                .setHeader("Flushed").setAutoWidth(true);
+                .setHeader(Ui.t("rp.col.flushed")).setAutoWidth(true);
         Ui.hideBelow(primarySide, 1100, sent, written, flushed);
         Ui.hideBelow(primarySide, 700, client, sync);
         primarySide.addComponentColumn(r -> {
-            Span s = Ui.text(null, ConsoleService.bytes(r.flushBehindBytes()));
+            Span s = Ui.text(null, Ui.size(r.flushBehindBytes()));
             if (r.flushBehindBytes() != null && r.flushBehindBytes() > 0) {
                 s.getStyle().set("color", "var(--pg-warn-fg)").set("font-weight", "600");
             }
             return s;
-        }).setHeader("At risk").setAutoWidth(true)
-                .setTooltipGenerator(r -> "Written on the primary but not yet durable on " + r.node()
-                        + ": what a crash failover to it would lose");
-        primarySide.addColumn(r -> Ui.seconds(r.peerReplayLagMs())).setHeader("Replay lag").setAutoWidth(true);
+        }).setHeader(Ui.t("rp.col.atRisk")).setAutoWidth(true)
+                .setTooltipGenerator(r -> Ui.t("rp.atRiskTip", r.node()));
+        primarySide.addColumn(r -> Ui.seconds(r.peerReplayLagMs())).setHeader(Ui.t("ov.col.lag")).setAutoWidth(true);
     }
 
     private void buildReplicaSide() {
@@ -151,38 +149,38 @@ class ReplicationPage extends Div {
         replicaSide.setDetailsVisibleOnClick(false);
         replicaSide.addComponentColumn(r -> Ui.chevron(openRows.contains(r.node()))).setWidth("40px")
                 .setFlexGrow(0).setHeader("");
-        Grid.Column<ReplicaRow> nodeCol = replicaSide.addComponentColumn(r -> bold(r.node())).setHeader("Node")
+        Grid.Column<ReplicaRow> nodeCol = replicaSide.addComponentColumn(r -> bold(r.node())).setHeader(Ui.t("ov.col.node"))
                 .setAutoWidth(true).setFlexGrow(0);
         Grid.Column<ReplicaRow> stacked = replicaSide.addComponentColumn(r -> {
             Div d = new Div(Ui.div("pg-row", bold(r.node()), stateChip(r)), Ui.text("pg-note",
-                    ConsoleService.bytes(r.replayBehindBytes()) + " behind · " + (r.slotActive() == null ? "no slot"
-                            : r.slot() + (r.slotActive() ? " active" : " inactive"))));
+                    Ui.t("ov.behind", Ui.size(r.replayBehindBytes())) + " · " + (r.slotActive() == null
+                            ? Ui.t("rp.noSlotLower") : Ui.t(r.slotActive() ? "rp.slotActive" : "rp.slotInactive", r.slot()))));
             d.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "4px");
             return d;
-        }).setHeader("Replica").setFlexGrow(1);
-        Grid.Column<ReplicaRow> dc = replicaSide.addColumn(ReplicaRow::dc).setHeader("DC").setAutoWidth(true)
+        }).setHeader(Ui.t("rp.replica")).setFlexGrow(1);
+        Grid.Column<ReplicaRow> dc = replicaSide.addColumn(ReplicaRow::dc).setHeader(Ui.t("ov.col.dc")).setAutoWidth(true)
                 .setFlexGrow(0);
-        Grid.Column<ReplicaRow> state = replicaSide.addComponentColumn(this::stateChip).setHeader("State")
+        Grid.Column<ReplicaRow> state = replicaSide.addComponentColumn(this::stateChip).setHeader(Ui.t("ov.col.state"))
                 .setAutoWidth(true);
-        Grid.Column<ReplicaRow> from = replicaSide.addColumn(r -> or(r.upstream())).setHeader("Streams from")
+        Grid.Column<ReplicaRow> from = replicaSide.addColumn(r -> or(r.upstream())).setHeader(Ui.t("rp.col.streamsFrom"))
                 .setAutoWidth(true);
         Grid.Column<ReplicaRow> tl = replicaSide.addColumn(r -> r.timeline() == null ? "—" : r.timeline().toString())
-                .setHeader("Timeline").setAutoWidth(true);
+                .setHeader(Ui.t("ov.col.timeline")).setAutoWidth(true);
         Grid.Column<ReplicaRow> received = replicaSide.addComponentColumn(r -> Ui.text("pg-mono", or(r.receiveLsn())))
-                .setHeader("Received").setAutoWidth(true);
+                .setHeader(Ui.t("rp.col.received")).setAutoWidth(true);
         Grid.Column<ReplicaRow> replayed = replicaSide.addComponentColumn(r -> Ui.text("pg-mono", or(r.replayLsn())))
-                .setHeader("Replayed").setAutoWidth(true);
-        Grid.Column<ReplicaRow> behind = replicaSide.addColumn(r -> ConsoleService.bytes(r.replayBehindBytes())
+                .setHeader(Ui.t("rp.col.replayed")).setAutoWidth(true);
+        Grid.Column<ReplicaRow> behind = replicaSide.addColumn(r -> Ui.size(r.replayBehindBytes())
                 + (r.replayDelayMs() == null || r.replayBehindBytes() == null || r.replayBehindBytes() == 0 ? ""
-                : " · " + Ui.seconds(r.replayDelayMs()))).setHeader("Behind the primary").setAutoWidth(true);
+                : " · " + Ui.seconds(r.replayDelayMs()))).setHeader(Ui.t("rp.col.behind")).setAutoWidth(true);
         Grid.Column<ReplicaRow> slot = replicaSide.addComponentColumn(r -> {
             if (r.slotActive() == null) {
-                return Ui.chip("No slot", Ui.Tone.WARN);
+                return Ui.chip(Ui.t("rp.noSlot"), Ui.Tone.WARN);
             }
-            return Ui.chip(r.slot() + (r.slotActive() ? " active" : " inactive"),
+            return Ui.chip(Ui.t(r.slotActive() ? "rp.slotActive" : "rp.slotInactive", r.slot()),
                     r.slotActive() ? Ui.Tone.OK : Ui.Tone.WARN);
-        }).setHeader("Slot").setAutoWidth(true);
-        actionsColumn = replicaSide.addComponentColumn(this::actions).setHeader("Actions").setAutoWidth(true)
+        }).setHeader(Ui.t("rp.col.slot")).setAutoWidth(true);
+        actionsColumn = replicaSide.addComponentColumn(this::actions).setHeader(Ui.t("ov.col.actions")).setAutoWidth(true)
                 .setFlexGrow(0).setFrozenToEnd(true);
         Ui.hideBelow(replicaSide, 1180, received, replayed, tl);
         Ui.hideBelow(replicaSide, 900, from, dc);
@@ -194,23 +192,21 @@ class ReplicationPage extends Div {
         });
         replicaSide.setItemDetailsRenderer(new ComponentRenderer<>(r -> {
             Div d = new Div();
-            d.getStyle().set("padding", "4px 8px 8px");
             if (r.error() != null) {
-                d.add(new Paragraph("Error: " + r.error()));
+                d.add(new Paragraph(Ui.t("ov.error", Ui.tr(r.error()))));
             }
             if (r.fenced()) {
-                d.add(new Paragraph("Fenced: " + r.fencedReason()));
+                d.add(new Paragraph(Ui.t("ov.fenced", Ui.tr(r.fencedReason()))));
             }
             if (r.busy() != null) {
-                d.add(new Paragraph("Busy with: " + r.busy()));
+                d.add(new Paragraph(Ui.t("rp.busyWith", Ui.tr(r.busy()))));
             }
-            d.getStyle().set("padding", "4px 8px 8px 48px");
-            d.add(new Paragraph(r.address() + " · streams from " + or(r.upstream()) + " · timeline "
-                    + (r.timeline() == null ? "—" : r.timeline()) + " · received " + or(r.receiveLsn())
-                    + " · replayed " + or(r.replayLsn())));
-            d.add(new Paragraph("Slot " + r.slot()
-                    + (r.slotRetainedBytes() == null ? "" : " holding " + Lsn.bytes(r.slotRetainedBytes()))
-                    + (r.noFailover() ? " · never promoted automatically (noFailover)" : "")));
+            d.getStyle().set("padding-block", "4px 8px").set("padding-inline", "48px 8px");
+            d.add(new Paragraph(Ui.t("rp.detailLine", r.address(), or(r.upstream()),
+                    r.timeline() == null ? "—" : r.timeline(), or(r.receiveLsn()), or(r.replayLsn()))));
+            d.add(new Paragraph(Ui.t("rp.slotLine", r.slot())
+                    + (r.slotRetainedBytes() == null ? "" : " " + Ui.t("rp.holding", Ui.size(r.slotRetainedBytes())))
+                    + (r.noFailover() ? " · " + Ui.t("rp.neverPromoted") : "")));
             return d;
         }));
     }
@@ -218,20 +214,19 @@ class ReplicationPage extends Div {
     private void buildSlots() {
         slots.addThemeVariants(GridVariant.LUMO_COMPACT, GridVariant.LUMO_NO_BORDER);
         slots.setAllRowsVisible(true);
-        slots.addColumn(ConsoleService.SlotRow::name).setHeader("Slot").setAutoWidth(true);
-        slots.addColumn(ConsoleService.SlotRow::consumer).setHeader("Consumer").setAutoWidth(true);
-        slots.addComponentColumn(s -> Ui.chip(s.active() ? "Active" : "Inactive",
-                s.active() ? Ui.Tone.OK : Ui.Tone.WARN)).setHeader("Status").setAutoWidth(true);
-        slots.addColumn(s -> ConsoleService.bytes(s.retainedBytes())).setHeader("Retained WAL").setAutoWidth(true);
+        slots.addColumn(ConsoleService.SlotRow::name).setHeader(Ui.t("rp.col.slot")).setAutoWidth(true);
+        slots.addColumn(ConsoleService.SlotRow::consumer).setHeader(Ui.t("rp.col.consumer")).setAutoWidth(true);
+        slots.addComponentColumn(s -> Ui.chip(Ui.t(s.active() ? "rp.active" : "rp.inactive"),
+                s.active() ? Ui.Tone.OK : Ui.Tone.WARN)).setHeader(Ui.t("rp.col.status")).setAutoWidth(true);
+        slots.addColumn(s -> Ui.size(s.retainedBytes())).setHeader(Ui.t("rp.col.retained")).setAutoWidth(true);
         slots.addComponentColumn(s -> {
             if (!admin || s.active() || !"none".equals(s.consumer())) {
                 return new Span();
             }
-            Button drop = new Button("Drop", e -> {
-                ConfirmDialog d = new ConfirmDialog("Drop slot " + s.name(), "The slot is removed from the primary"
-                        + " and stops holding WAL.", "Drop", ev -> {
+            Button drop = new Button(Ui.t("rp.drop"), e -> {
+                ConfirmDialog d = new ConfirmDialog(Ui.t("rp.dropTitle", s.name()), Ui.t("rp.dropText"), Ui.t("rp.drop"), ev -> {
                     if (Ui.attempt(() -> console.watcher().dropSlot(s.name(), user))) {
-                        Ui.ok("Slot " + s.name() + " dropped");
+                        Ui.ok(Ui.t("rp.dropped", s.name()));
                     }
                     refresh();
                 });
@@ -245,7 +240,7 @@ class ReplicationPage extends Div {
     }
 
     private Span stateChip(ReplicaRow r) {
-        return Ui.chip(r.state(), r.fenced() || !r.agentOnline() ? Ui.Tone.CRIT
+        return Ui.chip(Ui.tr(r.state()), r.fenced() || !r.agentOnline() ? Ui.Tone.CRIT
                 : r.streaming() ? Ui.Tone.OK : Ui.Tone.WARN);
     }
 
@@ -280,7 +275,7 @@ class ReplicationPage extends Div {
             }
         }
         slots.setItems(r.slots());
-        refreshed.setText("Refreshed " + Ui.time(r.observedAtMillis(), zone) + " " + Ui.zone(zone));
+        refreshed.setText(Ui.t("rp.refreshed", Ui.time(r.observedAtMillis(), zone) + " " + Ui.zone(zone)));
         renderLag(r);
     }
 
@@ -288,36 +283,34 @@ class ReplicationPage extends Div {
         banners.removeAll();
         banners.getStyle().set("display", "flex").set("flex-direction", "column").set("gap", "8px");
         if (r.primary() == null) {
-            banners.add(Ui.banner("No primary is recorded, so there is nothing to stream from.", Ui.Tone.WARN));
+            banners.add(Ui.banner(Ui.t("rp.noPrimary"), Ui.Tone.WARN));
             return;
         }
         if (!r.primaryRunning()) {
-            banners.add(Ui.banner("The primary " + r.primary() + " is not answering; the numbers below are the"
-                    + " last ones each replica reported.", Ui.Tone.CRIT));
+            banners.add(Ui.banner(Ui.t("rp.primaryDown", r.primary()), Ui.Tone.CRIT));
         }
         List<String> notConnected = r.replicas().stream()
                 .filter(x -> !x.connectedToPrimary() && x.agentOnline() && !x.fenced() && x.busy() == null)
                 .map(ReplicaRow::node).toList();
         if (r.primaryRunning() && !notConnected.isEmpty()) {
-            banners.add(Ui.banner(String.join(", ", notConnected) + (notConnected.size() == 1 ? " has" : " have")
-                    + " no walsender on " + r.primary() + ": not streaming right now.", Ui.Tone.WARN));
+            banners.add(Ui.banner(Ui.t(notConnected.size() == 1 ? "rp.noWalsenderOne" : "rp.noWalsender",
+                    String.join(", ", notConnected), r.primary()), Ui.Tone.WARN));
         }
     }
 
     private void renderStats(Replication r) {
         stats.removeAll();
-        stats.add(Ui.stat("Primary", r.primary() == null ? "—" : r.primary(),
-                r.primaryRunning() ? r.primaryAddress() + " · timeline " + r.primaryTimeline()
-                        : "not running"));
-        stats.add(Ui.stat("Streaming replicas", r.streamingCount() + " / " + r.replicas().size(),
-                r.replicas().isEmpty() ? "no replicas configured" : "connected and receiving WAL"));
-        stats.add(Ui.stat("Data at risk", ConsoleService.bytes(r.worstFlushBehindBytes()),
-                r.worstFlushBehindBytes() == null ? "no connected replica"
-                        : r.worstFlushBehindBytes() == 0 ? "every replica has it on disk"
-                        : "not yet durable on the furthest-behind replica"));
-        stats.add(Ui.stat("WAL rate", r.walRatePerMinute() == null ? "—"
-                        : Lsn.bytes(r.walRatePerMinute()) + "/min",
-                r.primaryLsn() == null ? "primary position unknown" : "primary at " + r.primaryLsn()));
+        stats.add(Ui.stat(Ui.t("ov.stat.primary"), r.primary() == null ? "—" : r.primary(),
+                r.primaryRunning() ? r.primaryAddress() + " · " + Ui.t("ov.cardTimeline", r.primaryTimeline())
+                        : Ui.t("rp.notRunning")));
+        stats.add(Ui.stat(Ui.t("rp.stat.streaming"), r.streamingCount() + " / " + r.replicas().size(),
+                Ui.t(r.replicas().isEmpty() ? "rp.noReplicas" : "rp.receiving")));
+        stats.add(Ui.stat(Ui.t("rp.stat.risk"), Ui.size(r.worstFlushBehindBytes()),
+                Ui.t(r.worstFlushBehindBytes() == null ? "rp.noConnected"
+                        : r.worstFlushBehindBytes() == 0 ? "rp.allOnDisk" : "rp.notDurable")));
+        stats.add(Ui.stat(Ui.t("rp.stat.walRate"), r.walRatePerMinute() == null ? "—"
+                        : Ui.t("rp.perMinute", Ui.size(r.walRatePerMinute())),
+                r.primaryLsn() == null ? Ui.t("rp.positionUnknown") : Ui.t("rp.primaryAt", r.primaryLsn())));
     }
 
     private void renderLag(Replication r) {
@@ -333,13 +326,13 @@ class ReplicationPage extends Div {
         }
         lagChart.removeAll();
         if (lagNode.getValue() == null) {
-            lagChart.add(Ui.text("pg-note", "No replicas configured."));
+            lagChart.add(Ui.text("pg-note", Ui.t("rp.noReplicasConfigured")));
             return;
         }
         NotificationSettings ns = notifications.current();
         long now = System.currentTimeMillis();
         List<LagHistory.Sample> samples = console.watcher().lagHistory().series(lagNode.getValue(), 60, now);
-        lagChart.add(LagChart.render(samples, ns.lagAlertBytes(), lagNode.getValue(), "last hour", zone, now));
+        lagChart.add(LagChart.render(samples, ns.lagAlertBytes(), lagNode.getValue(), Ui.t("rp.lastHour"), zone, now));
     }
 
     private static Span bold(String text) {

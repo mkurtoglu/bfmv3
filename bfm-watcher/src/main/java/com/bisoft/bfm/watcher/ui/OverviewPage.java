@@ -20,7 +20,6 @@ import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.data.renderer.ComponentRenderer;
 import com.vaadin.flow.shared.Registration;
 import com.vaadin.flow.spring.security.AuthenticationContext;
-import com.bisoft.bfm.common.Lsn;
 import com.bisoft.bfm.core.event.ClusterEvent;
 import com.bisoft.bfm.core.state.RoleChange;
 import com.bisoft.bfm.watcher.service.ConsoleService;
@@ -224,7 +223,7 @@ class OverviewPage extends Div {
     }
 
     private String lagText(NodeRow r) {
-        return r.isPrimary() ? "—" : ConsoleService.bytes(r.lagBytes())
+        return r.isPrimary() ? "—" : Ui.size(r.lagBytes())
                 + (r.replayDelayMs() == null || r.lagBytes() == null || r.lagBytes() == 0 ? ""
                 : " · " + Ui.seconds(r.replayDelayMs()));
     }
@@ -458,7 +457,7 @@ class OverviewPage extends Div {
         boolean failover = "FAILOVER".equals(rc.type());
         String loss = rc.lostBytes() == null ? Ui.t("ov.lossUnknown", rc.from())
                 : rc.lostBytes() == 0 ? Ui.t("ov.noLoss")
-                : Ui.t("ov.loss", Lsn.bytes(rc.lostBytes()), rc.from(), rc.to());
+                : Ui.t("ov.loss", Ui.size(rc.lostBytes()), rc.from(), rc.to());
         String text = Ui.t(failover ? "ov.rcFailover" : "ov.rcSwitchover", (rc.from() == null ? "" : rc.from() + " → ")
                 + rc.to(), Ui.shortTime(rc.atMillis(), zone) + " " + Ui.zone(zone), Ui.duration(rc.durationMs()))
                 + " · " + loss + " · " + Ui.t("ov.epoch", rc.epoch()) + (failover ? "" : " · " + Ui.t("ov.by", rc.by()));
@@ -548,7 +547,7 @@ class OverviewPage extends Div {
             long streaming = o.nodes().stream().filter(n -> !n.isPrimary() && n.streaming()).count();
             summary = Ui.t("ov.healthySummary", o.primary(), streaming, replicas)
                     + (o.vipHolder() == null ? "" : " · " + Ui.t("ov.vipOn", o.vipHolder()))
-                    + " · " + Ui.t("ov.maxLag", ConsoleService.bytes(o.maxLagBytes()));
+                    + " · " + Ui.t("ov.maxLag", Ui.size(o.maxLagBytes()));
         } else if ("Primary down".equals(o.health())) {
             NodeRow p = o.primaryRow();
             summary = p == null || p.stateSinceMillis() <= 0 ? "" : Ui.t("ov.since", Ui.time(p.stateSinceMillis(), zone)
@@ -615,11 +614,11 @@ class OverviewPage extends Div {
         long alert = notifications.current().lagAlertBytes();
         boolean lagging = o.maxLagBytes() != null && o.maxLagBytes() > alert;
         boolean anyStreaming = o.nodes().stream().anyMatch(n -> !n.isPrimary() && n.streaming());
-        stats.add(Ui.stat(Ui.t("ov.stat.maxLag"), ConsoleService.bytes(o.maxLagBytes()), o.maxLagNode() == null
+        stats.add(Ui.stat(Ui.t("ov.stat.maxLag"), Ui.size(o.maxLagBytes()), o.maxLagNode() == null
                 ? Ui.t(anyStreaming ? "ov.lagUnknown" : "ov.noStreaming")
                 : o.maxLagBytes() == 0 ? Ui.t("ov.allReplayed")
                 : o.maxLagNode() + (o.maxLagDelayMs() == null ? "" : " · " + Ui.t("ov.behind",
-                Ui.seconds(o.maxLagDelayMs()))) + (lagging ? " · " + Ui.t("ov.alertAt", Lsn.bytes(alert)) : ""),
+                Ui.seconds(o.maxLagDelayMs()))) + (lagging ? " · " + Ui.t("ov.alertAt", Ui.size(alert)) : ""),
                 lagging ? Ui.Tone.WARN : null));
         stats.add(Ui.stat(Ui.t("ov.stat.lease"), o.lease() == null || !o.lease().granted() ? "—"
                         : Ui.t("ov.leaseLeft", Math.round(o.lease().remainingMs() / 1000.0)),
