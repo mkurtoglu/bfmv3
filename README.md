@@ -369,3 +369,9 @@ rejoin, a failover refused because the VIP cannot come up, and the retry once it
 - Wall clocks of the watchers should be in sync (NTP); Raft observations carry wall-clock times.
 - Without self-fencing, a primary that is cut off from everyone but still serves clients on another network is
   only stopped from taking the VIP back; enable self-fencing (with Raft) where that matters.
+
+## License
+
+BFM is open source under the [Apache License 2.0](LICENSE): free to use, change and redistribute, also
+commercially, with no license key or activation anywhere. Copyright 2026 Bisoft; see [NOTICE](NOTICE) for the
+third-party software bundled in the watcher's jar.

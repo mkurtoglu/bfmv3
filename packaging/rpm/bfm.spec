@@ -11,7 +11,7 @@ Name:           bfm
 Version:        %{?bfm_version}%{!?bfm_version:0.1.0}
 Release:        %{?bfm_release}%{!?bfm_release:1}%{?dist}
 Summary:        PostgreSQL failover manager
-License:        Proprietary
+License:        Apache-2.0
 URL:            https://github.com/mkurtoglu/bfmv3
 BuildArch:      noarch
 
@@ -27,6 +27,8 @@ Source8:        watcher.yml.example
 Source9:        sudoers-minipgagent
 Source10:       README.md
 Source11:       minipgagent@.service
+Source12:       LICENSE
+Source13:       NOTICE
 
 %description
 Automatic failover for PostgreSQL streaming replication clusters, with a virtual IP that follows the primary.
@@ -101,6 +103,8 @@ install -p -m 0600 %{SOURCE7} %{buildroot}%{_sysconfdir}/bfm/minipgagent/agent.p
 install -p -m 0640 %{SOURCE8} %{buildroot}%{_sysconfdir}/bfm/watcher.yml
 install -p -m 0440 %{SOURCE9} %{buildroot}%{_sysconfdir}/sudoers.d/minipgagent
 install -p -m 0644 %{SOURCE10} %{buildroot}%{bfm_home}/README.md
+install -p -m 0644 %{SOURCE12} %{buildroot}%{bfm_home}/LICENSE
+install -p -m 0644 %{SOURCE13} %{buildroot}%{bfm_home}/NOTICE
 
 # ----------------------------------------------------------------------------------------------- scriptlets
 
@@ -166,6 +170,8 @@ systemctl daemon-reload >/dev/null 2>&1 || :
 
 %files -n minipgagent
 %doc %{bfm_home}/README.md
+%license %{bfm_home}/LICENSE
+%license %{bfm_home}/NOTICE
 %dir %{bfm_home}
 %{bfm_home}/minipgagent.jar
 %{_bindir}/minipgagent
@@ -179,6 +185,8 @@ systemctl daemon-reload >/dev/null 2>&1 || :
 
 %files watcher
 %doc %{bfm_home}/README.md
+%license %{bfm_home}/LICENSE
+%license %{bfm_home}/NOTICE
 %dir %{bfm_home}
 %{bfm_home}/bfm-watcher.jar
 %{_bindir}/bfm-watcher

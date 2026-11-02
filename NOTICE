@@ -1,0 +1,15 @@
+BFM - PostgreSQL failover manager
+Copyright 2026 Bisoft
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The watcher's executable jar (bfm-watcher.jar) bundles third-party libraries, each under its own open-source
+licence (mostly the Apache License 2.0; also EPL-2.0, EDL-1.0, CDDL-1.0 and MIT), among them Spring Framework,
+Spring Boot, Spring Security, Vaadin Flow and its core components, Apache Ratis, Apache Tomcat, Jackson, Logback,
+Angus Mail and jsoup. Each library's licence text and notice are inside its own jar (BOOT-INF/lib/*.jar,
+under META-INF/).
+
+The console bundles the fonts Plus Jakarta Sans and JetBrains Mono under the SIL Open Font License 1.1
+(bfm-watcher/src/main/resources/META-INF/resources/fonts/OFL-*.txt).
+
+The agent (minipgagent.jar) uses the JDK only.
