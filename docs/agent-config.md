@@ -90,7 +90,7 @@ vip.dad.probe=192.168.0.1
 #vip.show.command=/usr/sbin/ip -o -4 addr show dev {iface}
 #vip.dad.command=sudo -n /usr/sbin/arping -D -q -c 2 -w 3 -I {iface} {vip}
 #vip.garp.command=sudo -n /usr/sbin/arping -U -q -c 3 -I {iface} {vip}
-#vip.dad.probe.command=sudo -n /usr/sbin/arping -D -q -c 2 -w 3 -I {iface} {probe}
+#vip.dad.probe.command=sudo -n /usr/sbin/arping -D -c 2 -w 3 -I {iface} {probe}
 
 # ---------------------------------------------------------------- self-fencing
 # What this node does to itself when the primary lease runs out (only when the watcher grants a fencing
@@ -228,8 +228,8 @@ another cluster.
 | `vip.prefix` | `24` | Prefix length used in `ip addr add`. |
 | `vip.interface` | required when enabled | Interface on **this** node (`eth0`, `ens192`, `bond0`…). |
 | `vip.dad.enabled` | `true` | Duplicate address detection with `arping -D` before bringing the VIP up: if another host answers, nothing is added and nothing is promoted. |
-| `vip.dad.probe` | — | A live neighbour on the VIP's interface, usually the default gateway (`minipgagent setup` proposes it). At start and before every VIP acquire the agent runs `arping -D` against it three times; each run must get an answer. If not, the duplicate check cannot see other hosts on this network (cloud networks that do not answer ARP probes: there every address reads as free and two nodes can hold the VIP), so the agent refuses to bring the VIP up and `/v1/status` says why. Empty: no self-test, and the agent logs a warning at start. The sudo rule must allow the probe command (setup writes it). |
-| `vip.dad.probe.command` | `sudo -n /usr/sbin/arping -D -q -c 2 -w 3 -I {iface} {probe}` | The self-test. |
+| `vip.dad.probe` | — | A live neighbour on the VIP's interface, usually the default gateway (`minipgagent setup` proposes it). At start and before every VIP acquire the agent runs `arping -D` against it three times; each run must get an answer. If not, the duplicate check cannot see other hosts on this network (cloud networks that do not answer ARP probes: there every address reads as free and two nodes can hold the VIP), so the agent refuses to bring the VIP up and `/v1/status` says why. The test runs again every minute on its own thread, so the status follows the network. Empty: no self-test, and the agent logs a warning at start. The sudo rule must allow the probe command (setup writes it). |
+| `vip.dad.probe.command` | `sudo -n /usr/sbin/arping -D -c 2 -w 3 -I {iface} {probe}` | The self-test. Without `-q`: a run counts as answered only with exit code 1 **and** arping's own `Received N response(s)` line, because `sudo` refusing the command (no matching rule) also exits 1. |
 | `vip.add.command` | `sudo -n /usr/sbin/ip addr add {vip}/{prefix} dev {iface}` | Bring the VIP up. |
 | `vip.del.command` | `sudo -n /usr/sbin/ip addr del {vip}/{prefix} dev {iface}` | Take it down. |
 | `vip.show.command` | `/usr/sbin/ip -o -4 addr show dev {iface}` | Read the interface's addresses (no sudo needed). |

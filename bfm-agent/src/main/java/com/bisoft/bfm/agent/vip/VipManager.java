@@ -24,6 +24,8 @@ public class VipManager {
     private volatile String lastDadError;
     /** Consecutive answered self-test runs needed. */
     static final int DAD_SELF_TEST_RUNS = 3;
+    /** arping's own summary of a reply; exit code 1 alone also comes from sudo refusing the command. */
+    private static final java.util.regex.Pattern ANSWERED = java.util.regex.Pattern.compile("Received [1-9]\\d* response");
 
     public VipManager(AgentConfig cfg, ProcessRunner runner) {
         this.cfg = cfg;
@@ -86,7 +88,7 @@ public class VipManager {
         String why = null;
         for (int i = 0; i < DAD_SELF_TEST_RUNS && why == null; i++) {
             ProcessResult r = run(cfg.vipDadProbeCommand);
-            if (!r.timedOut() && r.exitCode() == 1) {
+            if (answered(r)) {
                 continue; // the neighbour answered: duplicates are visible here
             }
             why = r.ok()
@@ -97,6 +99,14 @@ public class VipManager {
         }
         lastDadError = why;
         return why;
+    }
+
+    /**
+     * Whether an {@code arping -D} run got a reply: exit 1 and arping's "Received N response(s)" line. A sudo that
+     * refuses the command (no matching rule, a password asked) also exits 1, and must not count as an answer.
+     */
+    public static boolean answered(ProcessResult r) {
+        return !r.timedOut() && r.exitCode() == 1 && ANSWERED.matcher(r.stdout() == null ? "" : r.stdout()).find();
     }
 
     /** The result of the last self-test (null = passed or not run). */

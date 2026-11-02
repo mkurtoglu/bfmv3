@@ -91,7 +91,7 @@ public class Prompter {
         if (line == null || line.isBlank()) {
             return dflt;
         }
-        return line.trim().toLowerCase().startsWith("y");
+        return line.trim().toLowerCase(java.util.Locale.ROOT).startsWith("y");
     }
 
     private String readLine() {

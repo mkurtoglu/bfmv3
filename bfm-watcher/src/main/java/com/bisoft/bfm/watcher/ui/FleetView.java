@@ -39,6 +39,8 @@ public class FleetView extends Div implements HasDynamicTitle {
     private final Div summary = Ui.div("pg-row");
     private final com.vaadin.flow.component.html.Span empty = Ui.text("pg-empty", Ui.t("fleet.empty"));
     private Registration poll;
+    /** The filter value for every environment: configured environment names are never blank. */
+    private static final String ALL_ENVIRONMENTS = "";
 
     public FleetView(FleetService fleet, BfmProperties props, ClusterWizardService wizard,
                      com.vaadin.flow.spring.security.AuthenticationContext auth) {
@@ -50,8 +52,8 @@ public class FleetView extends Div implements HasDynamicTitle {
         H1 title = new H1(Ui.t("nav.fleet"));
         title.addClassName("pg-title");
         environment.setLabel(Ui.t("ui.environment"));
-        // the values stay the configured names; only "All environments" is a word of the console
-        environment.setItemLabelGenerator(v -> v.startsWith("All") ? Ui.t("fleet.allEnvs") : v);
+        // the values stay the configured names (never blank); the empty value is "All environments"
+        environment.setItemLabelGenerator(v -> v.isEmpty() ? Ui.t("fleet.allEnvs") : v);
         environment.addValueChangeListener(e -> {
             if (e.isFromClient()) {
                 refresh();
@@ -113,7 +115,7 @@ public class FleetView extends Div implements HasDynamicTitle {
     private void refresh() {
         List<ClusterSummary> all = fleet.clusters();
         List<String> envs = new ArrayList<>();
-        envs.add("All environments");
+        envs.add(ALL_ENVIRONMENTS);
         TreeSet<String> names = new TreeSet<>();
         for (ClusterSummary s : all) {
             if (s.environment() != null && !s.environment().isBlank()) {
@@ -128,7 +130,7 @@ public class FleetView extends Div implements HasDynamicTitle {
         environment.setValue(chosen != null && envs.contains(chosen) ? chosen : envs.get(0));
         environment.setVisible(names.size() > 1);
         String filter = environment.getValue();
-        List<ClusterSummary> shown = all.stream().filter(s -> filter == null || filter.startsWith("All")
+        List<ClusterSummary> shown = all.stream().filter(s -> filter == null || filter.isEmpty()
                 || filter.equalsIgnoreCase(s.environment())).toList();
         grid.setItems(shown);
         grid.setVisible(!all.isEmpty());

@@ -61,7 +61,7 @@ public record BfmProperties(
                 throw new IllegalStateException("two clusters are named " + c.name());
             }
             for (Node n : c.nodes() == null ? List.<Node>of() : c.nodes()) {
-                String url = n.agentUrl() == null ? null : n.agentUrl().replaceAll("/+$", "").toLowerCase();
+                String url = n.agentUrl() == null ? null : n.agentUrl().replaceAll("/+$", "").toLowerCase(java.util.Locale.ROOT);
                 String other = url == null ? null : urls.put(url, c.name() + "/" + n.name());
                 if (other != null) {
                     throw new IllegalStateException("agent-url " + n.agentUrl() + " is given for " + other + " and for "

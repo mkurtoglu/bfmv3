@@ -150,7 +150,7 @@ public final class AgentConfig {
             throw new IllegalArgumentException("vip.dad.probe must be the IPv4 address of a live neighbour (not the VIP)");
         }
         vipDadProbeCommand = p.getProperty("vip.dad.probe.command",
-                "sudo -n /usr/sbin/arping -D -q -c 2 -w 3 -I {iface} {probe}");
+                "sudo -n /usr/sbin/arping -D -c 2 -w 3 -I {iface} {probe}");
 
         fenceAction = p.getProperty("fence.action", "stop");
         if (!fenceAction.equals("stop") && !fenceAction.equals("vip-only")) {

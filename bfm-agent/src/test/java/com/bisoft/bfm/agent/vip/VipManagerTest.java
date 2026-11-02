@@ -133,10 +133,17 @@ class VipManagerTest {
         return new FakeRunner(argv -> {
             String cmd = String.join(" ", argv);
             if (cmd.contains("arping -D") && cmd.endsWith("192.168.0.1")) {
-                return FakeRunner.exit(argv, dadSees ? 1 : 0, "");
+                return dadSees ? reply(argv) : FakeRunner.exit(argv, 0, "");
             }
             return base.run(argv, java.time.Duration.ofSeconds(1), java.util.Map.of());
         });
+    }
+
+    /** What iputils arping -D prints and returns when the neighbour answers. */
+    private static com.bisoft.bfm.agent.exec.ProcessResult reply(List<String> argv) {
+        return new com.bisoft.bfm.agent.exec.ProcessResult(argv, 1,
+                "Unicast reply from 192.168.0.1 [52:54:00:12:34:56]  0.611ms\nSent 1 probes (1 broadcast(s))\n"
+                        + "Received 1 response(s)\n", "", false);
     }
 
     @Test
@@ -162,11 +169,22 @@ class VipManagerTest {
         VipManager flaky = new VipManager(com.bisoft.bfm.agent.AgentConfig.of(p), new FakeRunner(argv -> {
             String cmd = String.join(" ", argv);
             if (cmd.contains("arping -D") && cmd.endsWith("192.168.0.1")) {
-                return FakeRunner.exit(argv, n.incrementAndGet() == 2 ? 0 : 1, "");
+                return n.incrementAndGet() == 2 ? FakeRunner.exit(argv, 0, "") : reply(argv);
             }
             return seeing2.run(argv, java.time.Duration.ofSeconds(1), java.util.Map.of());
         }));
         assertTrue(flaky.dadSelfTest() != null, "one unanswered run of three is enough to distrust the check");
+
+        // sudo refusing the probe also exits 1: that is no answer (a missing or stale sudo line must not open the VIP)
+        VipManager refused = new VipManager(com.bisoft.bfm.agent.AgentConfig.of(p), new FakeRunner(argv -> {
+            String cmd = String.join(" ", argv);
+            if (cmd.contains("arping -D") && cmd.endsWith("192.168.0.1")) {
+                return FakeRunner.exit(argv, 1, "sudo: a password is required");
+            }
+            return seeing2.run(argv, java.time.Duration.ofSeconds(1), java.util.Map.of());
+        }));
+        assertThrows(AgentException.class, refused::acquire);
+        assertTrue(refused.lastDadError().contains("self-test failed"), refused.lastDadError());
 
         // without a probe address nothing is self-tested (and nothing refused)
         assertFalse(new VipManager(TestConfigs.config(dir), host(new AtomicBoolean(), false, false)).dadSelfTested());

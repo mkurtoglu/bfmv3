@@ -40,6 +40,9 @@ public class Messages implements I18NProvider {
     public static final List<Locale> LOCALES = List.of(ENGLISH, TURKISH, ARABIC);
 
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{([a-zA-Z_][a-zA-Z0-9_]*)}");
+    private static final Pattern NUMBERED = Pattern.compile("\\{(\\d{1,2})}");
+    /** Translated runtime texts kept per language; the least recently used go first. */
+    private static final int CACHE_SIZE = 5_000;
 
     private final Map<String, Properties> bundles = new ConcurrentHashMap<>();
     private final Map<String, Catalog> catalogs = new ConcurrentHashMap<>();
@@ -80,16 +83,23 @@ public class Messages implements I18NProvider {
         return fill(text, params);
     }
 
-    /** {@code {0}}, {@code {1}}... replaced by the arguments' text. */
+    /**
+     * {@code {0}}, {@code {1}}... replaced by the arguments' text in one pass, so an argument that itself contains
+     * "{1}" (a name, an error text) is shown as it is.
+     */
     static String fill(String text, Object... params) {
         if (params == null || params.length == 0) {
             return text;
         }
-        String out = text;
-        for (int i = 0; i < params.length; i++) {
-            out = out.replace("{" + i + "}", params[i] == null ? "" : String.valueOf(params[i]));
+        Matcher m = NUMBERED.matcher(text);
+        StringBuilder out = new StringBuilder(text.length() + 32);
+        while (m.find()) {
+            int i = Integer.parseInt(m.group(1));
+            String v = i < params.length ? (params[i] == null ? "" : String.valueOf(params[i])) : m.group();
+            m.appendReplacement(out, Matcher.quoteReplacement(v));
         }
-        return out;
+        m.appendTail(out);
+        return out.toString();
     }
 
     /** A text made outside the views, for the screen in {@code locale}; unknown texts come back unchanged. */
@@ -150,12 +160,19 @@ public class Messages implements I18NProvider {
 
     /** English text or template → translation; templates are tried longest first. */
     private static final class Catalog {
-        private record Template(Pattern rx, List<String> names, String translation) {
+        /** A template with its literal start and end, checked before the regex (most texts fail there). */
+        private record Template(String prefix, String suffix, Pattern rx, List<String> names, String translation) {
         }
 
         final Map<String, String> texts;
         private final List<Template> templates = new ArrayList<>();
-        private final Map<String, String> cache = new ConcurrentHashMap<>();
+        private final Map<String, String> cache = java.util.Collections.synchronizedMap(
+                new java.util.LinkedHashMap<>(256, 0.75f, true) {
+                    @Override
+                    protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+                        return size() > CACHE_SIZE;
+                    }
+                });
 
         Catalog(Map<String, String> texts) {
             this.texts = texts;
@@ -167,13 +184,18 @@ public class Messages implements I18NProvider {
                 StringBuilder rx = new StringBuilder();
                 List<String> names = new ArrayList<>();
                 int last = 0;
+                int first = -1;
                 while (m.find()) {
+                    if (first < 0) {
+                        first = m.start();
+                    }
                     rx.append(Pattern.quote(en.substring(last, m.start()))).append("(.+?)");
                     names.add(m.group(1));
                     last = m.end();
                 }
                 rx.append(Pattern.quote(en.substring(last)));
-                templates.add(new Template(Pattern.compile(rx.toString(), Pattern.DOTALL), names, texts.get(en)));
+                templates.add(new Template(en.substring(0, first), en.substring(last),
+                        Pattern.compile(rx.toString(), Pattern.DOTALL), names, texts.get(en)));
             }
         }
 
@@ -188,21 +210,39 @@ public class Messages implements I18NProvider {
             if (out == null) {
                 out = text;
                 for (Template t : templates) {
+                    if (!text.startsWith(t.prefix()) || !text.endsWith(t.suffix())) {
+                        continue;
+                    }
                     Matcher m = t.rx().matcher(text);
                     if (m.matches()) {
-                        out = t.translation();
+                        Map<String, String> values = new java.util.HashMap<>();
                         for (int i = 0; i < t.names().size(); i++) {
-                            String v = m.group(i + 1);
-                            out = out.replace("{" + t.names().get(i) + "}", depth < 2 ? translate(v, depth + 1) : v);
+                            values.put(t.names().get(i), value(m.group(i + 1), depth));
                         }
+                        // one pass: a value that contains "{node}" is shown as it is
+                        Matcher p = PLACEHOLDER.matcher(t.translation());
+                        StringBuilder b = new StringBuilder();
+                        while (p.find()) {
+                            p.appendReplacement(b, Matcher.quoteReplacement(values.getOrDefault(p.group(1), p.group())));
+                        }
+                        p.appendTail(b);
+                        out = b.toString();
                         break;
                     }
                 }
             }
-            if (depth == 0 && cache.size() < 20_000) {
+            if (depth == 0) {
                 cache.put(text, out);
             }
             return out;
+        }
+
+        /**
+         * A template's value: a phrase ("maintenance mode is on") is translated again, a single word is not, so node,
+         * slot and host names stay what watcher.yml says even when one is called "primary".
+         */
+        private String value(String v, int depth) {
+            return depth < 2 && v.indexOf(' ') >= 0 ? translate(v, depth + 1) : v;
         }
     }
 }

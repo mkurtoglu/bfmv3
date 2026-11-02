@@ -225,14 +225,56 @@ public final class ClusterHub implements AutoCloseable {
     }
 
     /**
-     * The ids of every watcher of this group (the Raft peers, or this watcher alone): the CNs of the certificates the
-     * watchers call the agents with, so an enrolled agent can refuse every other certificate of the CA.
+     * The certificate names of every watcher of this group, for an enrolling agent's {@code tls.allowed.clients}: the
+     * ids of the Raft peers, or this watcher's alone. Only when the watchers' certificates are named after their ids
+     * ({@code bfm-watcher setup} with its own CA does that), which this watcher checks on its own certificate;
+     * otherwise (certificates from bfm-make-certs with other names) empty, and the agents accept any certificate of
+     * the CA as before.
      */
     public List<String> watcherIds() {
+        String own = ownCertificateName();
+        if (own == null || !own.equals(props.watcherId())) {
+            return List.of();
+        }
         if (props.raft().enabled() && !props.raft().peers().isEmpty()) {
             return props.raft().peers().stream().map(BfmProperties.Peer::id).toList();
         }
         return List.of(props.watcherId());
+    }
+
+    private volatile String ownCertificateName;
+
+    /** The CN of the certificate this watcher calls the agents with, or null (no TLS, unreadable). */
+    private String ownCertificateName() {
+        String cached = ownCertificateName;
+        if (cached != null) {
+            return cached.isEmpty() ? null : cached;
+        }
+        String cn = "";
+        BfmProperties.Tls tls = props.agent().tls();
+        if (tls.enabled() && tls.keystore() != null) {
+            try (java.io.InputStream in = java.nio.file.Files.newInputStream(tls.keystore())) {
+                char[] pw = tls.keystorePasswordFile() == null ? new char[0]
+                        : java.nio.file.Files.readString(tls.keystorePasswordFile()).trim().toCharArray();
+                java.security.KeyStore ks = java.security.KeyStore.getInstance("PKCS12");
+                ks.load(in, pw);
+                for (String alias : java.util.Collections.list(ks.aliases())) {
+                    if (ks.isKeyEntry(alias) && ks.getCertificate(alias) instanceof java.security.cert.X509Certificate x) {
+                        for (javax.naming.ldap.Rdn rdn
+                                : new javax.naming.ldap.LdapName(x.getSubjectX500Principal().getName()).getRdns()) {
+                            if ("CN".equalsIgnoreCase(rdn.getType())) {
+                                cn = String.valueOf(rdn.getValue());
+                            }
+                        }
+                        break;
+                    }
+                }
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "cannot read this watcher's certificate name from " + tls.keystore(), e);
+            }
+        }
+        ownCertificateName = cn;
+        return cn.isEmpty() ? null : cn;
     }
 
     private static List<String> names(List<BfmProperties.Cluster> list) {

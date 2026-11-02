@@ -135,4 +135,33 @@ class EnrollmentTest {
         assertTrue(Keytool.parse(pem).get(0).getSubjectX500Principal().getName().contains("Site CA"));
         assertThrows(IllegalStateException.class, () -> ca.create("again"), "one CA per watcher group");
     }
+
+    @Test
+    void agentsLearnTheWatchersOnlyWhenTheCertificatesAreNamedAfterThem() throws Exception {
+        // tls.allowed.clients on an enrolled agent: the watcher ids, but only if this watcher's own certificate is
+        // named after its id (bfm-watcher setup with its CA); bfm-make-certs names such as "watcher1" give no list
+        for (String[] c : new String[][] {{"w1", "[w1]"}, {"watcher1", "[]"}}) {
+            Path ks = dir.resolve(c[0] + ".p12");
+            Keytool.createKeyPair(ks, "changeit-1234", "me", c[0]);
+            java.nio.file.Files.writeString(dir.resolve(c[0] + ".pass"), "changeit-1234");
+            Map<String, String> m = new java.util.HashMap<>(Map.of(
+                    "bfm.data-dir", dir.resolve("d-" + c[0]).toString(),
+                    "bfm.cluster.name", "crm",
+                    "bfm.cluster.nodes[0].name", "crm-a1",
+                    "bfm.cluster.nodes[0].agent-url", "https://10.0.0.11:8009",
+                    "bfm.cluster.nodes[0].pg-host", "10.0.0.11",
+                    "bfm.cluster.nodes[1].name", "crm-a2",
+                    "bfm.cluster.nodes[1].agent-url", "https://10.0.0.12:8009",
+                    "bfm.cluster.nodes[1].pg-host", "10.0.0.12"));
+            m.put("bfm.agent.tls.keystore", ks.toString());
+            m.put("bfm.agent.tls.keystore-password-file", dir.resolve(c[0] + ".pass").toString());
+            BfmProperties props = new Binder(new MapConfigurationPropertySource(m)).bind("bfm", BfmProperties.class)
+                    .get();
+            SecretBox secrets = SecretBox.fromKeyFile(dir.resolve("secret-" + c[0] + ".key"));
+            try (ClusterHub other = new ClusterHub(props, LocalStateStore.inMemory("w1"),
+                    new FakeCluster(time), time, new MailNotifier(secrets), secrets)) {
+                assertEquals(c[1], other.watcherIds().toString(), c[0]);
+            }
+        }
+    }
 }

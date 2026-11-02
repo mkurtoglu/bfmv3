@@ -99,7 +99,7 @@ final class Ui {
 
     static Span chip(String text, Tone tone) {
         Span s = new Span(text);
-        s.addClassNames("pg-chip", tone.name().toLowerCase());
+        s.addClassNames("pg-chip", tone.name().toLowerCase(java.util.Locale.ROOT));
         return s;
     }
 
@@ -130,7 +130,7 @@ final class Ui {
     /** A banner: its text, then any actions passed (links or buttons) at the end of the line. */
     static Div banner(String text, Tone tone, Component... actions) {
         Div d = new Div();
-        d.addClassNames("pg-banner", tone.name().toLowerCase());
+        d.addClassNames("pg-banner", tone.name().toLowerCase(java.util.Locale.ROOT));
         d.add(new Span(text));
         if (actions.length > 0) {
             d.add(div("pg-banner-actions", actions));
@@ -173,7 +173,7 @@ final class Ui {
     }
 
     static Span env(String env) {
-        Span s = text("pg-env " + envTone(env).name().toLowerCase(), env);
+        Span s = text("pg-env " + envTone(env).name().toLowerCase(java.util.Locale.ROOT), env);
         s.getElement().setAttribute("title", t("ui.environment"));
         return s;
     }

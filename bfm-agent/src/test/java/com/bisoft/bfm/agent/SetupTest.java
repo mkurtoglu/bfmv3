@@ -131,7 +131,7 @@ class SetupTest {
     @Test
     void theSelfTestNeighbourGetsItsOwnSudoLine() {
         String r = Sudoers.rule("192.168.0.60", "24", "eth0", "192.168.0.1");
-        assertTrue(r.contains("/usr/sbin/arping -D -q -c 2 -w 3 -I eth0 192.168.0.1, \\\n"), r);
+        assertTrue(r.contains("/usr/sbin/arping -D -c 2 -w 3 -I eth0 192.168.0.1, \\\n"), r);
         assertTrue(r.contains("/usr/sbin/arping -D -q -c 2 -w 3 -I eth0 192.168.0.60, \\\n"), r);
         assertEquals(Sudoers.rule("192.168.0.60", "24", "eth0"), Sudoers.rule("192.168.0.60", "24", "eth0", null));
         assertThrows(Prompter.SetupException.class, () -> Sudoers.rule("192.168.0.60", "24", "eth0", "192.168.0.60"));

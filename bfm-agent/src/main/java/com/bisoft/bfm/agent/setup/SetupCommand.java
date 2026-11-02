@@ -369,14 +369,17 @@ public final class SetupCommand {
             out.println("   ! no self-test: the agent cannot tell a network that hides duplicates (cloud) from a free VIP");
             probe = null;
         } else {
-            ProcessResult seen = host.runner.run(List.of("arping", "-D", "-q", "-c", "2", "-w", "3", "-I", iface, probe),
+            ProcessResult seen = host.runner.run(List.of("arping", "-D", "-c", "2", "-w", "3", "-I", iface, probe),
                     Duration.ofSeconds(10));
-            if (!seen.timedOut() && seen.exitCode() == 1) {
+            if (com.bisoft.bfm.agent.vip.VipManager.answered(seen)) {
                 out.println("   ✔ arping -D sees " + probe + ": duplicates are visible on " + iface);
             } else if (seen.ok()) {
                 out.println("   ! arping -D reports " + probe + " as free: this network hides duplicates, so the agent"
                         + " will refuse to bring the VIP up (vip.dad.enabled=false only if the VIP is protected"
                         + " otherwise)");
+            } else {
+                out.println("   ! arping -D against " + probe + " on " + iface + " failed (" + seen.summary() + "): check"
+                        + " the interface and the address; the agent keeps the VIP down until the neighbour answers");
             }
         }
         net.put("vip", vip);
@@ -487,6 +490,9 @@ public final class SetupCommand {
         if (!join.watchers().isEmpty()) {
             // only the watchers' certificates may call this agent, not the other database hosts' (same CA)
             props.put("tls.allowed.clients", String.join(",", join.watchers()));
+        } else if (join.clusterId() != null) {
+            out.println("   ! the watcher sent no certificate names: tls.allowed.clients stays empty, so any certificate"
+                    + " of the CA may call this agent (set it to the watchers' certificate names)");
         }
         props.put("state.dir", host.path("/var/lib/minipgagent/" + instance).toString());
         props.put("pg.bin", pg.binDir().toString());

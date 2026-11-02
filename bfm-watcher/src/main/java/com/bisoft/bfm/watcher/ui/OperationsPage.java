@@ -41,7 +41,7 @@ class OperationsPage extends Div {
                 .setHeader(Ui.t("ov.col.node")).setAutoWidth(true);
         Grid.Column<OperationProgress.Snapshot> by = grid.addColumn(OperationProgress.Snapshot::startedBy)
                 .setHeader(Ui.t("ops.col.by")).setAutoWidth(true);
-        grid.addComponentColumn(s -> Ui.chip(Ui.t("op." + s.state().name().toLowerCase()), Ui.tone(s.state())))
+        grid.addComponentColumn(s -> Ui.chip(Ui.t("op." + s.state().name().toLowerCase(java.util.Locale.ROOT)), Ui.tone(s.state())))
                 .setHeader(Ui.t("ov.col.state")).setAutoWidth(true);
         grid.addColumn(s -> s.running() ? Ui.t("ops.soFar", Ui.ago(s.startedAtMillis(), System.currentTimeMillis()))
                 : Ui.duration(s.durationMs())).setHeader(Ui.t("ops.col.took")).setAutoWidth(true);

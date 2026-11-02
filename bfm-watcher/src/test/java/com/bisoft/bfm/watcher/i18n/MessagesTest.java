@@ -99,6 +99,9 @@ class MessagesTest {
         assertTrue(messages.getTranslation("header.watchers", Messages.TURKISH, 2, 3, "w1").contains("Watcher'lar 2/3"));
         assertTrue(messages.getTranslation("ov.leaseLeft", Messages.ARABIC, 12).contains("12"));
         assertEquals("no.such.key", messages.getTranslation("no.such.key", Messages.TURKISH));
+        // arguments go in once: a name that contains "{1}" is shown as it is
+        assertEquals("Watchers 2/{1} · leader w1", messages.getTranslation("header.watchers", Messages.ENGLISH, 2,
+                "{1}", "w1"));
         assertEquals(Messages.TURKISH, Messages.supported(Locale.forLanguageTag("tr-TR")));
         assertEquals(Messages.ENGLISH, Messages.supported(Locale.GERMAN));
         assertTrue(Messages.rightToLeft(Messages.ARABIC));
@@ -137,6 +140,9 @@ class MessagesTest {
                 messages.runtime("the VIP is on pg-a1 now, as expected; it moves to pg-a2 after pg-a1 stops", Messages.TURKISH));
         assertEquals("pg-dr1, pg-a1 üzerinden yeniden oluşturuldu (admin tarafından)",
                 messages.runtime("pg-dr1 re-initialized from pg-a1 (by admin)", Messages.TURKISH));
+        // a single-word value is a name and stays as it is, even a node called "primary"
+        assertEquals("primary, pg-a1 üzerinden yeniden oluşturuldu",
+                messages.runtime("primary re-initialized from pg-a1", Messages.TURKISH));
     }
 
     @Test

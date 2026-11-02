@@ -57,6 +57,13 @@ public class AgentService {
         return t;
     });
 
+    /** Its own thread: a blind network makes a self-test take seconds, which must never delay the lease tick. */
+    private final ScheduledExecutorService dadScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "minipgagent-dad");
+        t.setDaemon(true);
+        return t;
+    });
+
     private volatile PgSnapshot snapshot = PgSnapshot.stopped(ControlData.UNKNOWN, "not probed yet");
     private volatile boolean vipHeld;
     private final Psql psql;
@@ -85,12 +92,28 @@ public class AgentService {
         this.watchdog = cfg.watchdogEnabled ? new Watchdog(cfg.watchdogDevice) : null;
     }
 
+    private void safeDadSelfTest() {
+        try {
+            String before = vip.lastDadError();
+            String now = vip.dadSelfTest();
+            if (now != null && !now.equals(before)) {
+                LOG.severe("VIP: " + now);
+            } else if (now == null && before != null) {
+                LOG.info("VIP: the duplicate address check sees other hosts again");
+            }
+        } catch (RuntimeException e) {
+            LOG.log(Level.WARNING, "duplicate address self-test failed", e);
+        }
+    }
+
     public void start() {
         if (vip.dadSelfTested()) {
             String blind = vip.dadSelfTest();
             if (blind != null) {
                 LOG.severe("VIP: " + blind);
             }
+            // again every minute, so the status shows the network as it is now, not as it was at start
+            dadScheduler.scheduleWithFixedDelay(this::safeDadSelfTest, 60, 60, TimeUnit.SECONDS);
         } else if (vip.enabled() && cfg.vipDadEnabled) {
             LOG.warning("VIP: the duplicate address check is not self-tested; set vip.dad.probe to a live neighbour");
         }
@@ -142,6 +165,7 @@ public class AgentService {
 
     public void stop() {
         scheduler.shutdownNow();
+        dadScheduler.shutdownNow();
         ops.shutdown();
         if (watchdog != null) {
             // A clean stop is not a hang: leave the timer off, or the machine resets once it runs out.

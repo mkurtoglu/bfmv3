@@ -267,7 +267,7 @@ class OverviewPage extends Div {
             Ui.Tone t = stateTone(r);
             Div card = Ui.div("pg-node-card");
             if (t == Ui.Tone.CRIT || t == Ui.Tone.WARN) {
-                card.addClassName(t.name().toLowerCase());
+                card.addClassName(t.name().toLowerCase(java.util.Locale.ROOT));
             }
             Span name = new Span(r.name());
             name.getStyle().set("font-weight", "800").set("color", "var(--pg-ink)").set("font-size", "16px");
@@ -540,7 +540,7 @@ class OverviewPage extends Div {
     private void renderHealth(Overview o) {
         health.removeAll();
         Ui.Tone t = healthTone(o.health());
-        health.setClassName("pg-health " + t.name().toLowerCase());
+        health.setClassName("pg-health " + t.name().toLowerCase(java.util.Locale.ROOT));
         String summary;
         if ("Healthy".equals(o.health())) {
             long replicas = o.nodes().stream().filter(n -> !n.isPrimary()).count();

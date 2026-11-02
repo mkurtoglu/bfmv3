@@ -25,7 +25,7 @@ public final class Lsn {
         if (value < 0) {
             return null;
         }
-        return Long.toHexString(value >>> 32).toUpperCase() + "/" + Long.toHexString(value & 0xFFFFFFFFL).toUpperCase();
+        return Long.toHexString(value >>> 32).toUpperCase(java.util.Locale.ROOT) + "/" + Long.toHexString(value & 0xFFFFFFFFL).toUpperCase(java.util.Locale.ROOT);
     }
 
     /** Bytes from {@code behind} to {@code ahead}; null when either side is unknown. Never negative. */
@@ -57,6 +57,7 @@ public final class Lsn {
         if (u == 0) {
             return bytes + " B";
         }
-        return (b >= 10 ? String.format("%.0f", b) : String.format("%.1f", b)) + " " + units[u];
+        // Locale.ROOT: "1.5 MB" on every host, also one running with a Turkish or Arabic default locale
+        return String.format(java.util.Locale.ROOT, b >= 10 ? "%.0f" : "%.1f", b) + " " + units[u];
     }
 }

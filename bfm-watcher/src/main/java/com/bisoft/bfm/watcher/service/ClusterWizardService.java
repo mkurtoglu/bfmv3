@@ -181,7 +181,7 @@ public class ClusterWizardService {
     }
 
     private static String normalize(String url) {
-        return url == null ? "" : url.replaceAll("/+$", "").toLowerCase();
+        return url == null ? "" : url.replaceAll("/+$", "").toLowerCase(java.util.Locale.ROOT);
     }
 
     public EnrollmentService.Issued token(String cluster, String node, String user) {

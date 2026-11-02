@@ -275,6 +275,10 @@ public final class WatcherSetup {
                         + trustPass + " " + data.resolve("secret.key") + " root@" + peerMap.get(p) + ":/tmp/");
             }
         }
+        if (!copies.isEmpty()) {
+            out.println("   Database hosts enrolled before these watchers existed only accept the watchers they knew:"
+                    + " add every watcher id to tls.allowed.clients in their agent.properties and restart the agents");
+        }
         out.println("   Back up " + data.resolve("secret.key") + " and keep the CA key safe: it lives in the shared"
                 + " state, encrypted with secret.key.");
         return 0;
@@ -447,7 +451,7 @@ public final class WatcherSetup {
         out.flush();
         try {
             String line = in.readLine();
-            return line == null || line.isBlank() ? dflt : line.trim().toLowerCase().startsWith("y");
+            return line == null || line.isBlank() ? dflt : line.trim().toLowerCase(java.util.Locale.ROOT).startsWith("y");
         } catch (IOException e) {
             return dflt;
         }

@@ -36,7 +36,7 @@ public final class Sudoers {
                 + "postgres ALL=(root) NOPASSWD: /usr/sbin/ip addr add " + a + " dev " + iface + ", \\\n"
                 + pad + "/usr/sbin/ip addr del " + a + " dev " + iface + ", \\\n"
                 + pad + "/usr/sbin/arping -D -q -c 2 -w 3 -I " + iface + " " + vip + ", \\\n"
-                + (probe == null ? "" : pad + "/usr/sbin/arping -D -q -c 2 -w 3 -I " + iface + " " + probe + ", \\\n")
+                + (probe == null ? "" : pad + "/usr/sbin/arping -D -c 2 -w 3 -I " + iface + " " + probe + ", \\\n")
                 + pad + "/usr/sbin/arping -U -q -c 3 -I " + iface + " " + vip + "\n";
     }
 }
