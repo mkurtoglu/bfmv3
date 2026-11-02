@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds the installation guide (English and Turkish), the user guide and the installation reference as single HTML files, screenshots and style inside, so they
+# Builds the installation guide and the architecture (English and Turkish), the user guide and the installation reference as single HTML files, screenshots and style inside, so they
 # open anywhere without a network connection.
 #
 #   scripts/docs-html.sh [OUT_DIR]      default: target/docs-html
@@ -31,5 +31,7 @@ build() {  # source title [language]
 
 build install-rpm.md "BFM installation (RPM)"
 build install-rpm.tr.md "BFM kurulumu (RPM)" tr
+build architecture.md "BFM architecture"
+build architecture.tr.md "BFM mimarisi" tr
 build user-guide.md "BFM user guide"
 build install.md "BFM installation reference"

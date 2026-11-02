@@ -20,7 +20,9 @@ from the outside.
 
 - [ ] **PostgreSQL 13 or newer**, the same major version on every node of a cluster. One node holds the data;
       the others can be empty (a fresh `initdb`) or already streaming from it — the console's *Build* start
-      copies the data to them with `pg_basebackup`.
+      copies the data to them with `pg_basebackup`. A fresh `initdb` that is running is a primary of its own:
+      stop PostgreSQL on those nodes before you create the cluster ([step 5](#5-create-the-cluster)), or the
+      checks refuse several primaries.
 - [ ] **Java 21.** The packages require `java-21-headless`; `dnf` installs it from AppStream (Rocky 8.9+ / 9.3+).
 - [ ] **Clocks in sync** on every host (chrony): leases and the console's times depend on them.
 - [ ] **Node names chosen**: short, lowercase, unique — `erp-a1`, `erp-a2`, `erp-dr1`. A node's name becomes its
@@ -39,10 +41,10 @@ from the outside.
 
 Every port can be changed: see [Ports](#ports).
 
-PostgreSQL itself needs what streaming replication always needs — `wal_level = replica`, a replication role,
-`pg_hba.conf` entries for the other nodes — plus `wal_log_hints = on` (or data checksums) so a former primary can
-come back with `pg_rewind`. You do not have to get this right beforehand: `minipgagent setup` checks each item
-and offers the fix (see [step 4](#4-install-the-agent-on-every-database-host)). [install.md §2](install.md#2-prepare-postgresql)
+PostgreSQL itself needs what streaming replication always needs — `wal_level = replica`, `listen_addresses`
+that the other nodes can reach (a fresh install listens on localhost only), a replication role, `pg_hba.conf`
+entries for every node — plus `wal_log_hints = on` (or data checksums) so a former primary can come back with
+`pg_rewind`. You do not have to get this right beforehand: `minipgagent setup` checks each item and offers the fix (see [step 4](#4-install-the-agent-on-every-database-host)). [install.md §2](install.md#2-prepare-postgresql)
 explains each setting.
 
 ---
@@ -198,9 +200,12 @@ The wizard:
    must see it, or the network hides duplicates (some cloud networks do) and the agent will keep the VIP down
    rather than trust a check that sees nothing. Answer `none` only for a node without a VIP.
 4. **Checks PostgreSQL** and offers each fix separately: version, the cluster's database, `wal_level`,
-   `wal_log_hints`, senders and slots, `hot_standby`, the replication role, `pg_hba.conf` entries for the other
-   nodes, room for a re-initialize. It never restarts PostgreSQL: a setting that needs a restart is written and
-   reported.
+   `wal_log_hints`, senders and slots, `hot_standby`, `listen_addresses`, the replication role (on a primary it
+   creates it with the password you give, which also goes into `.pgpass`, and grants it the functions
+   `pg_rewind` needs: the agent rewinds as this role, no superuser logs in over the network), `pg_hba.conf`
+   entries for every node — this one included, because the file is copied with the data when another node is
+   built from it — and room for a re-initialize. It never restarts PostgreSQL: a setting that needs a restart is
+   written and reported with the command to restart it.
 5. **Shows every change** and asks once.
 6. **Applies**: `/etc/bfm/minipgagent/<instance>/` (settings, the node's certificate, the CA, the watchers whose
    certificates may call the agent), the sudo rule for the VIP and its self-test (checked with `visudo` first), the `.pgpass` line, disables the PostgreSQL service (PostgreSQL keeps
@@ -221,10 +226,21 @@ A run looks like this (shortened; the values are an example):
    ✔ pg_rewind possible: wal_log_hints on
    ✔ Senders and slots: max_wal_senders 10, max_replication_slots 10
    ✔ hot_standby: on
+   ✔ listen_addresses: *
    ✔ Replication role: replicator can log in and replicate
-   ✔ pg_hba.conf: every other node may replicate
+   ✔ pg_rewind role: replicator may run pg_rewind
+   ✔ pg_hba.conf: every node may replicate
    ✔ Room for a re-initialize: 220 GB free next to 37 GB of databases
 ```
+
+When setup reports settings that take effect after a restart (`listen_addresses`, `wal_log_hints` on a fresh
+install), restart PostgreSQL before you create the cluster, with the command it prints, for example:
+
+```bash
+runuser -u postgres -- /usr/pgsql-16/bin/pg_ctl -D /var/lib/pgsql/16/data restart -m fast -l /var/lib/pgsql/16/data/log/restart.log
+```
+
+On the nodes that *Build* will copy the data to, stop PostgreSQL instead (`… pg_ctl -D … stop -m fast`).
 
 Open the agent port:
 
@@ -256,7 +272,8 @@ Back in the console, *Enroll* shows each node as enrolled once its agent answers
 
 - **Checks**: across the nodes (every agent answers and belongs to no other cluster, one PostgreSQL major version,
   at most one primary, one database, one node per host, clocks) and each node's own settings. A red line blocks
-  creation; yellow lines say what to do after it.
+  creation; yellow lines say what to do after it. *All run as primary* means PostgreSQL still runs on nodes that
+  *Build* will copy the data to: stop it there and run the checks again.
 - **Start**: *Adopt* when one node already runs as primary and the others stream from it (nothing is
   restarted), or *Build*: the chosen node starts as primary and every other node is re-initialized from it.
 - **Review**: type the cluster's name and create it. The console opens the Operations page, where the build
@@ -286,6 +303,12 @@ switch back. On a test cluster, also stop the primary's host and watch the autom
 [user guide](user-guide.md#when-the-primary-fails) shows what the console says while it happens.
 
 **Mail.** Set the SMTP server, recipients and rules on the *Notifications* page and send a test mail.
+
+**How long a failover takes.** When the primary's host crashes, its agent and port stop answering at once and the
+failover finishes in about 15–20 s. When the host is only cut off from the network, nothing tells the replicas:
+they keep reporting the stream until PostgreSQL's `wal_receiver_timeout` (60 s by default) ends it, every replica
+that still "streams" blocks the failover, and a blocked attempt is retried after `failover-retry` (60 s). On the
+cloud test that took 60–105 s. A lower `wal_receiver_timeout` on every node makes the replicas notice sooner.
 
 ---
 
@@ -404,6 +427,9 @@ port in the firewall and restart the service.
 | The node shows *Wrong identity* | The agent address reaches another node's or another cluster's agent: fix the address |
 | A node's error says *certificate CN=w2 may not call this agent* | The agent was enrolled before that watcher existed: add it to `tls.allowed.clients` in `agent.properties` and restart the agent ([step 7](#7-three-watchers-raft)) |
 | A node's error says *the duplicate address check cannot see other hosts* | `arping -D` gets no answer from `vip.dad.probe` (the gateway) on this network, so a VIP held elsewhere would look free; the agent keeps the VIP down. Check the address and interface; on a network that never answers ARP probes protect the VIP another way and set `vip.dad.enabled=false` |
+| The checks say *… all run as primary* | PostgreSQL runs on nodes that *Build* will copy the data to: stop it there (`runuser -u postgres -- pg_ctl -D <data> stop -m fast`) and run the checks again |
+| After a switchover or failover a replica stays *Not streaming*; the new primary's log says *no pg_hba.conf entry for replication connection from host "<the replica's address>"* | Agents set up before version 0.1.0-3 added `pg_hba.conf` lines for the other nodes only, and the file travels with the data: add the node's own two lines on every node and reload |
+| A rejoin fails: *pg_rewind … no pg_hba.conf entry for host …, user "postgres"* | Agents set up before version 0.1.0-3 rewind as `postgres`: set `rewind.user=replicator` in `agent.properties`, grant the role the functions `pg_rewind` needs on the primary ([install.md §2.2](install.md#22-roles)), restart the agent, then *Re-initialize* the node once |
 | A node's error says *duplicate address self-test failed: … sudo* | The sudo rule lacks the self-test line: run setup again, or add `/usr/sbin/arping -D -c 2 -w 3 -I <iface> <probe>` to `/etc/sudoers.d/minipgagent-<instance>` |
 
 More cases: [install.md §12](install.md#12-troubleshooting).

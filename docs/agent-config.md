@@ -215,7 +215,7 @@ another cluster.
 | --- | --- | --- |
 | `replication.user` | `replicator` | Role in `primary_conninfo` and in `pg_basebackup`. Needs `REPLICATION LOGIN`. |
 | `replication.passfile` | — | libpq password file (`.pgpass`) for that role and for the rewind role. The agent never writes a password into `postgresql.auto.conf` or onto a command line. |
-| `rewind.user` | same as `pg.user` | Role `pg_rewind` connects as, to `dbname=postgres`. Superuser, or a role with the grants `pg_rewind` documents. |
+| `rewind.user` | same as `pg.user` | Role `pg_rewind` connects as, to `dbname=postgres`. Superuser, or a role with the grants `pg_rewind` documents. `minipgagent setup` sets it to the replication role and grants that role those functions, so no superuser logs in over the network. |
 | `replication.conninfo.extra` | `sslmode=prefer` | Appended to every connection string the agent builds (`sslmode=require`, `sslrootcert=…`, `application_name` is already set to the node name). |
 | `reinit.keep.old` | `true` | On re-initialize, rename the old data directory to `<data>.bfm-old-<timestamp>` instead of deleting it. Keeps the disk busy but makes a mistake recoverable. |
 

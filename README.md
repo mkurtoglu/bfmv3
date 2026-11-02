@@ -127,7 +127,8 @@ them when the cluster is idle. JVM options go into `/etc/bfm/minipgagent/agent.e
 
 Step by step, with screenshots: [docs/install-rpm.md](docs/install-rpm.md) (installation; in Turkish:
 [docs/install-rpm.tr.md](docs/install-rpm.tr.md)) and
-[docs/user-guide.md](docs/user-guide.md) (the console); `scripts/docs-html.sh` turns them into single HTML files
+[docs/user-guide.md](docs/user-guide.md) (the console); how it works inside: [docs/architecture.md](docs/architecture.md)
+(Turkish: [docs/architecture.tr.md](docs/architecture.tr.md)). `scripts/docs-html.sh` turns them into single HTML files
 with the screenshots inside. The short version, with the wizards:
 
 1. **Watcher**: install the RPM and run `bfm-watcher setup` (as root). It asks for the watcher id, the console's

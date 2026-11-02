@@ -166,13 +166,23 @@ CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'choose-a-password';
 ```
 
 `pg_rewind` connects as `rewind.user` (default `postgres`) to database `postgres`. A superuser works; to avoid
-one, create a role with the [grants `pg_rewind` documents](https://www.postgresql.org/docs/current/app-pgrewind.html)
-and set `rewind.user` to it.
+one, give the replication role the [grants `pg_rewind` documents](https://www.postgresql.org/docs/current/app-pgrewind.html)
+and set `rewind.user=replicator` — what `minipgagent setup` does:
+
+```sql
+GRANT EXECUTE ON FUNCTION pg_catalog.pg_ls_dir(text, boolean, boolean) TO replicator;
+GRANT EXECUTE ON FUNCTION pg_catalog.pg_stat_file(text, boolean) TO replicator;
+GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text) TO replicator;
+GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text, bigint, bigint, boolean) TO replicator;
+```
+
+Run them on the primary; the replicas get them through replication.
 
 ### 2.3 `pg_hba.conf`
 
-Every node must accept, from every other node, a replication connection as `replicator` and a normal connection
-as the rewind role:
+Every node must accept, from every node — itself included, because `pg_hba.conf` lives in the data directory
+and is copied with it when another node is built from this one — a replication connection as `replicator` and a
+normal connection as the rewind role:
 
 ```
 # TYPE  DATABASE     USER        ADDRESS         METHOD

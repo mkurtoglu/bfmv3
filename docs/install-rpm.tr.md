@@ -20,7 +20,9 @@ sunucusunun çöktüğünü dışarıdan görebilmesi gerekir.
 
 - [ ] **PostgreSQL 13 veya üstü**, bir kümenin tüm node'larında aynı ana sürüm. Veriyi bir node tutar; diğerleri
       boş olabilir (yeni bir `initdb`) ya da ondan zaten streaming yapıyor olabilir — konsolun *Kur* başlatma
-      seçeneği veriyi onlara `pg_basebackup` ile kopyalar.
+      seçeneği veriyi onlara `pg_basebackup` ile kopyalar. Çalışan yeni bir `initdb` kendi başına bir primary'dir:
+      kümeyi oluşturmadan önce ([5. adım](#5-kümeyi-oluşturun)) bu node'larda PostgreSQL'i durdurun, yoksa kontroller
+      birden fazla primary olduğu için reddeder.
 - [ ] **Java 21.** Paketler `java-21-headless` ister; `dnf` onu AppStream'den kurar (Rocky 8.9+ / 9.3+).
 - [ ] **Saatler eşit** her sunucuda (chrony): lease'ler ve konsoldaki zamanlar buna dayanır.
 - [ ] **Node adları belirlenmiş**: kısa, küçük harf, benzersiz — `erp-a1`, `erp-a2`, `erp-dr1`. Node'un adı
@@ -39,10 +41,11 @@ sunucusunun çöktüğünü dışarıdan görebilmesi gerekir.
 
 Her port değiştirilebilir: bkz. [Portlar](#portlar).
 
-PostgreSQL'in kendisi, streaming replikasyonun her zaman istediğini ister — `wal_level = replica`, bir replikasyon
-rolü, diğer node'lar için `pg_hba.conf` kayıtları — ve eski bir primary'nin `pg_rewind` ile geri dönebilmesi için
-`wal_log_hints = on` (veya data checksums). Bunları önceden ayarlamanız gerekmez: `minipgagent setup` her birini
-kontrol eder ve düzeltmeyi önerir (bkz. [4. adım](#4-her-veritabanı-sunucusuna-agentı-kurun)).
+PostgreSQL'in kendisi, streaming replikasyonun her zaman istediğini ister — `wal_level = replica`, diğer node'ların
+ulaşabileceği bir `listen_addresses` (yeni kurulum yalnızca localhost'u dinler), bir replikasyon rolü, her node için
+`pg_hba.conf` kayıtları — ve eski bir primary'nin `pg_rewind` ile geri dönebilmesi için `wal_log_hints = on` (veya
+data checksums). Bunları önceden ayarlamanız gerekmez: `minipgagent setup` her birini kontrol eder ve düzeltmeyi
+önerir (bkz. [4. adım](#4-her-veritabanı-sunucusuna-agentı-kurun)).
 [install.md §2](install.md#2-prepare-postgresql) her ayarı açıklar.
 
 ---
@@ -200,9 +203,12 @@ Sihirbaz (soruları İngilizcedir):
    görmelidir; göremiyorsa ağ çakışmaları gizliyor demektir (bazı bulut ağları böyledir) ve agent hiçbir şey
    görmeyen bir kontrole güvenmek yerine VIP'i kapalı tutar. `none` cevabını yalnızca VIP'siz bir node için verin.
 4. **PostgreSQL'i kontrol eder** ve her düzeltmeyi ayrı ayrı önerir: sürüm, kümenin veritabanı, `wal_level`,
-   `wal_log_hints`, sender'lar ve slot'lar, `hot_standby`, replikasyon rolü, diğer node'lar için `pg_hba.conf`
-   kayıtları, yeniden oluşturma için yer. PostgreSQL'i asla yeniden başlatmaz: yeniden başlatma gerektiren bir ayar
-   yazılır ve bildirilir.
+   `wal_log_hints`, sender'lar ve slot'lar, `hot_standby`, `listen_addresses`, replikasyon rolü (primary'de rolü
+   verdiğiniz parolayla oluşturur — aynı parola `.pgpass`'e de yazılır — ve `pg_rewind`'in ihtiyaç duyduğu
+   fonksiyon yetkilerini verir: agent bu rolle rewind yapar, ağ üzerinden hiçbir süper kullanıcı bağlanmaz), her
+   node için `pg_hba.conf` kayıtları — node'un kendisi dahil, çünkü başka bir node ondan oluşturulurken dosya veriyle
+   birlikte kopyalanır — ve yeniden oluşturma için yer. PostgreSQL'i asla yeniden başlatmaz: yeniden başlatma
+   gerektiren bir ayar yazılır ve yeniden başlatma komutuyla birlikte bildirilir.
 5. **Her değişikliği gösterir** ve bir kez sorar.
 6. **Uygular**: `/etc/bfm/minipgagent/<instance>/` (ayarlar, node'un sertifikası, CA, agent'ı çağırabilecek
    watcher'lar), VIP ve kendini sınaması için sudo kuralı (önce `visudo` ile kontrol edilir), `.pgpass` satırı;
@@ -224,10 +230,21 @@ Bir çalıştırma şöyle görünür (kısaltılmış; değerler örnektir):
    ✔ pg_rewind possible: wal_log_hints on
    ✔ Senders and slots: max_wal_senders 10, max_replication_slots 10
    ✔ hot_standby: on
+   ✔ listen_addresses: *
    ✔ Replication role: replicator can log in and replicate
-   ✔ pg_hba.conf: every other node may replicate
+   ✔ pg_rewind role: replicator may run pg_rewind
+   ✔ pg_hba.conf: every node may replicate
    ✔ Room for a re-initialize: 220 GB free next to 37 GB of databases
 ```
+
+Setup yeniden başlatmadan sonra geçerli olacak ayarlar bildirirse (yeni bir kurulumda `listen_addresses`,
+`wal_log_hints`), kümeyi oluşturmadan önce PostgreSQL'i yazdırdığı komutla yeniden başlatın, örneğin:
+
+```bash
+runuser -u postgres -- /usr/pgsql-16/bin/pg_ctl -D /var/lib/pgsql/16/data restart -m fast -l /var/lib/pgsql/16/data/log/restart.log
+```
+
+*Kur*'un veriyi kopyalayacağı node'larda ise PostgreSQL'i durdurun (`… pg_ctl -D … stop -m fast`).
 
 Agent portunu açın:
 
@@ -259,7 +276,9 @@ Konsola dönün: *Kayıt* adımı, agent'ı yanıt veren her node'u kayıtlı ol
 
 - **Kontroller**: node'lar arası (her agent yanıt veriyor ve başka bir kümeye ait değil, tek PostgreSQL ana sürümü,
   en fazla bir primary, tek veritabanı, her sunucuda bir node, saatler) ve her node'un kendi ayarları. Kırmızı bir
-  satır oluşturmayı engeller; sarı satırlar oluşturduktan sonra ne yapılacağını söyler.
+  satır oluşturmayı engeller; sarı satırlar oluşturduktan sonra ne yapılacağını söyler. *Hepsi primary olarak
+  çalışıyor* uyarısı, *Kur*'un veriyi kopyalayacağı node'larda PostgreSQL'in hâlâ çalıştığı anlamına gelir: orada
+  durdurun ve kontrolleri yeniden çalıştırın.
 - **Başlatma**: bir node zaten primary olarak çalışıyor ve diğerleri ondan streaming yapıyorsa *Benimse* (hiçbir şey
   yeniden başlatılmaz), ya da *Kur*: seçilen node primary olarak başlar ve diğer her node ondan yeniden oluşturulur.
 - **Gözden geçirme**: kümenin adını yazın ve oluşturun. Konsol, kurulumun adım adım yürüdüğü *İşlemler* sayfasını
@@ -289,6 +308,13 @@ alın. Bir test kümesinde primary'nin sunucusunu da durdurup otomatik failover'
 
 **E-posta.** SMTP sunucusunu, alıcıları ve kuralları *Bildirimler* sayfasında ayarlayın ve bir test e-postası
 gönderin.
+
+**Failover ne kadar sürer.** Primary'nin sunucusu çöktüğünde agent'ı ve portu hemen yanıt vermez olur ve failover
+yaklaşık 15–20 saniyede biter. Sunucu yalnızca ağdan koparsa replica'lara bunu söyleyen bir şey olmaz: PostgreSQL'in
+`wal_receiver_timeout` süresi (varsayılan 60 sn) dolana kadar stream'i sürüyor gösterirler, hâlâ "streaming" yapan
+her replica failover'ı engeller ve engellenen bir deneme `failover-retry` (60 sn) sonra yinelenir. Bulut testinde bu
+60–105 saniye sürdü. Her node'da daha düşük bir `wal_receiver_timeout`, replica'ların durumu daha erken fark
+etmesini sağlar.
 
 ---
 
@@ -409,6 +435,9 @@ duvarında açın ve servisi yeniden başlatın.
 | Node *Yanlış kimlik* gösteriyor | Agent adresi başka bir node'un veya başka bir kümenin agent'ına ulaşıyor: adresi düzeltin |
 | Node hatasında *certificate CN=w2 may not call this agent* yazıyor | Agent o watcher yokken kaydolmuş: onu `agent.properties` içindeki `tls.allowed.clients` ayarına ekleyin ve agent'ı yeniden başlatın ([7. adım](#7-üç-watcher-raft)) |
 | Node hatasında *the duplicate address check cannot see other hosts* yazıyor | `arping -D` bu ağda `vip.dad.probe` adresinden (ağ geçidi) cevap alamıyor; başka yerde tutulan bir VIP boş görünürdü, bu yüzden agent VIP'i kapalı tutuyor. Adresi ve arayüzü kontrol edin; ARP sorgularına hiç cevap vermeyen bir ağda VIP'i başka bir yolla koruyun ve `vip.dad.enabled=false` yapın |
+| Kontroller *… all run as primary* diyor | *Kur*'un veriyi kopyalayacağı node'larda PostgreSQL çalışıyor: orada durdurun (`runuser -u postgres -- pg_ctl -D <veri> stop -m fast`) ve kontrolleri yeniden çalıştırın |
+| Switchover veya failover sonrası bir replica *Streaming yapmıyor* durumunda kalıyor; yeni primary'nin günlüğünde *no pg_hba.conf entry for replication connection from host "<replica'nın adresi>"* yazıyor | 0.1.0-3 sürümünden önce kurulan agent'lar `pg_hba.conf`'a yalnızca diğer node'ları ekliyordu ve dosya veriyle birlikte taşınıyor: her node'a node'un kendi iki satırını ekleyip reload edin |
+| Yeniden katılma başarısız: *pg_rewind … no pg_hba.conf entry for host …, user "postgres"* | 0.1.0-3 sürümünden önce kurulan agent'lar `postgres` olarak rewind yapar: `agent.properties`'e `rewind.user=replicator` yazın, primary'de role `pg_rewind`'in istediği fonksiyon yetkilerini verin ([install.md §2.2](install.md#22-roles)), agent'ı yeniden başlatın ve node'u bir kez *Yeniden oluştur*'un |
 | Node hatasında *duplicate address self-test failed: … sudo* yazıyor | Sudo kuralında kendini sınama satırı yok: setup'ı yeniden çalıştırın veya `/etc/sudoers.d/minipgagent-<instance>` dosyasına `/usr/sbin/arping -D -c 2 -w 3 -I <arayüz> <komşu>` ekleyin |
 
 Diğer durumlar: [install.md §12](install.md#12-troubleshooting) (İngilizce).
