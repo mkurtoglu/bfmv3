@@ -61,7 +61,8 @@ public final class Readiness {
         try {
             settings = sql.query("SELECT name, setting FROM pg_settings WHERE name IN ('server_version',"
                     + " 'server_version_num', 'wal_level', 'wal_log_hints', 'data_checksums', 'max_wal_senders',"
-                    + " 'max_replication_slots', 'hot_standby', 'hba_file', 'listen_addresses')");
+                    + " 'max_replication_slots', 'hot_standby', 'hba_file', 'listen_addresses',"
+                    + " 'wal_receiver_timeout')");
         } catch (Exception e) {
             out.add(new Check("PostgreSQL answers", Level.FAIL, "cannot query it: " + e.getMessage(),
                     "start PostgreSQL (or check the socket directory and port), then run the checks again",
@@ -115,6 +116,7 @@ public final class Readiness {
                 + " hot_standby = on, then restart", List.of("ALTER SYSTEM SET hot_standby = on"), List.of(), true));
 
         out.add(listening(sql, s.get("listen_addresses"), peers));
+        out.add(receiverTimeout(s.get("wal_receiver_timeout")));
         Check role = role(sql, replicationUser);
         out.add(role);
         if (role.level() == Level.OK) {
@@ -174,6 +176,30 @@ public final class Readiness {
         return new Check("listen_addresses", replica ? Level.WARN : Level.FAIL, "listen_addresses is '" + value
                 + "': the other nodes cannot connect", "ALTER SYSTEM SET listen_addresses = '*', then restart",
                 List.of("ALTER SYSTEM SET listen_addresses = '*'"), List.of(), true);
+    }
+
+    /** The value setup proposes: replicas notice a primary that went silent within 10 s. */
+    static final int RECEIVER_TIMEOUT_MS = 10_000;
+
+    /**
+     * How long a replica keeps reporting a primary that went silent (a network cut sends no TCP reset): until then it
+     * still "streams" and holds an automatic failover back (cloud test 2026-11-02: 60 s, the default). 10 s is enough
+     * on an idle primary too, because the WAL receiver asks for a reply after half of it. A setting reloaded, not
+     * restarted for; replicas built from the primary get it with the data.
+     */
+    private static Check receiverTimeout(String value) {
+        if (value == null) {
+            return Check.ok("wal_receiver_timeout", "not reported");
+        }
+        int ms = parse(value, -1);
+        if (ms > 0 && ms <= RECEIVER_TIMEOUT_MS) {
+            return Check.ok("wal_receiver_timeout", (ms % 1000 == 0 ? ms / 1000 + " s" : ms + " ms"));
+        }
+        return new Check("wal_receiver_timeout", Level.WARN, "wal_receiver_timeout is "
+                + (ms <= 0 ? "off" : ms / 1000 + " s") + ": a replica keeps reporting a primary cut off from the network"
+                + " that long, and holds an automatic failover back", "ALTER SYSTEM SET wal_receiver_timeout = '10s';"
+                + " SELECT pg_reload_conf()", List.of("ALTER SYSTEM SET wal_receiver_timeout = '10s'",
+                "SELECT pg_reload_conf()"), List.of(), false);
     }
 
     /**

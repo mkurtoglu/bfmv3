@@ -204,6 +204,9 @@ systemctl daemon-reload >/dev/null 2>&1 || :
   creates the replication role with the grants pg_rewind needs and rewinds as it; pg_hba.conf lines for every
   node, itself included; the duplicate-check self-test neighbour on the VIP's interface
 - the services end as "inactive", not "failed", when stopped
+- a failover held back only by a replica that still reached the old primary is looked at again at the next poll
+  (not after failover-retry); setup proposes wal_receiver_timeout = 10s: a network cut failed over in 37 s, not 105 s
+- snapshot releases carry the build time, so a later build upgrades an earlier one on the same day
 * Sat Oct 31 2026 BFM <bfm@localhost> - 0.1.0-2
 - minipgagent@.service for several PostgreSQL instances per host; agents bind to one cluster
 - minipgagent setup / remove and bfm-watcher setup; enrollment with one-time tokens

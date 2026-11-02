@@ -198,6 +198,34 @@ class SetupTest {
         assertTrue(rewindRole.fixSql().get(0).startsWith("GRANT EXECUTE ON FUNCTION pg_catalog.pg_ls_dir("),
                 rewindRole.fixSql().get(0));
         assertTrue(rewindRole.fixSql().stream().allMatch(g -> g.endsWith(" TO \"replicator\"")));
+        // not reported in this fake: no opinion
+        assertEquals(Readiness.Level.OK, find(checks, "wal_receiver_timeout").level());
+    }
+
+    @Test
+    void aLongReceiverTimeoutIsReportedWithItsFix() {
+        // cloud test 2026-11-02: with the default 60 s a network cut held the failover back for a minute
+        for (String[] c : new String[][] {{"60000", "WARN"}, {"0", "WARN"}, {"10000", "OK"}, {"5000", "OK"}}) {
+            Map<String, List<List<String>>> answers = Map.of(
+                    "pg_settings", List.of(List.of("server_version", "16.4"), List.of("server_version_num", "160004"),
+                            List.of("wal_level", "replica"), List.of("wal_log_hints", "on"),
+                            List.of("data_checksums", "off"), List.of("max_wal_senders", "10"),
+                            List.of("max_replication_slots", "10"), List.of("hot_standby", "on"),
+                            List.of("listen_addresses", "*"), List.of("wal_receiver_timeout", c[0])),
+                    "pg_control_system", List.of(List.of("7000")),
+                    "pg_roles", List.of(List.of("t", "t")),
+                    "has_function_privilege", List.of(List.of("t", "f")),
+                    "pg_hba_file_rules", List.of());
+            Readiness.Sql sql = q -> answers.entrySet().stream().filter(e -> q.contains(e.getKey())).findFirst()
+                    .map(Map.Entry::getValue).orElseThrow(() -> new IllegalStateException("unexpected " + q));
+            Readiness.Check t = find(Readiness.run(sql, "replicator", List.of(), null, null), "wal_receiver_timeout");
+            assertEquals(Readiness.Level.valueOf(c[1]), t.level(), c[0]);
+            if (t.level() == Readiness.Level.WARN) {
+                assertEquals(List.of("ALTER SYSTEM SET wal_receiver_timeout = '10s'", "SELECT pg_reload_conf()"),
+                        t.fixSql());
+                assertFalse(t.needsRestart(), "a reload is enough");
+            }
+        }
     }
 
     @Test

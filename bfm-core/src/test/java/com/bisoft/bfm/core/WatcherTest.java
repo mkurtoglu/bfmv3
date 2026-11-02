@@ -93,6 +93,10 @@ class WatcherTest {
         return watcher.events(500).stream().anyMatch(e -> e.type() == type);
     }
 
+    private long events(EventType type) {
+        return watcher.events(500).stream().filter(e -> e.type() == type).count();
+    }
+
     private ClusterEvent event(EventType type) {
         return watcher.events(500).stream().filter(e -> e.type() == type).findFirst()
                 .orElseThrow(() -> new AssertionError("no " + type + " in " + watcher.events(50)));
@@ -224,6 +228,15 @@ class WatcherTest {
         assertTrue(hasEvent(EventType.PRIMARY_UNREACHABLE));
         ticks(3);
         assertEquals(epoch, watcher.state().epoch(), "no epoch change while blocked");
+        assertEquals(1, events(EventType.FAILOVER_BLOCKED), "the reason is reported once, not every poll");
+        assertTrue(watcher.operations().stream().noneMatch(o -> o.type().equals("FAILOVER")),
+                "the empty attempts are not kept in the operations list");
+
+        // the replicas lose the primary too (the host goes, or their WAL receivers time out): the next poll fails
+        // over, without waiting failover-retry
+        cluster.node("pg-a1").hostUp = false;
+        ticks(2);
+        assertEquals("pg-a2", watcher.state().primary(), () -> watcher.events(12).toString());
     }
 
     @Test

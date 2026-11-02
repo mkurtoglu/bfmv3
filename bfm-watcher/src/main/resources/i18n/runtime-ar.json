@@ -611,5 +611,7 @@
  "{user} may run pg_rewind": "يستطيع {user} تشغيل pg_rewind",
  "{user} may not run pg_rewind: an old primary would need a full re-initialize": "لا يستطيع {user} تشغيل pg_rewind: سيحتاج الأساسي القديم إلى إعادة تهيئة كاملة",
  "every node may replicate": "يمكن لكل عقدة النسخ المتماثل",
- "listen_addresses is '{value}': the other nodes cannot connect": "listen_addresses هو '{value}': لا تستطيع العقد الأخرى الاتصال"
+ "listen_addresses is '{value}': the other nodes cannot connect": "listen_addresses هو '{value}': لا تستطيع العقد الأخرى الاتصال",
+ "wal_receiver_timeout is {value}: a replica keeps reporting a primary cut off from the network that long, and holds an automatic failover back": "wal_receiver_timeout هو {value}: تستمر النسخة المتماثلة في الإبلاغ عن أساسي انقطع عن الشبكة طوال هذه المدة، فتؤخر تجاوز الفشل التلقائي",
+ "not reported": "غير مُبلَّغ"
 }

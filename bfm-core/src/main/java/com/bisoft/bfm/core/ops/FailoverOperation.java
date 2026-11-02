@@ -39,6 +39,7 @@ public final class FailoverOperation extends Operation {
     private final Set<String> excluded;
     private final Consumer<String> onVipFailure;
     private final Consumer<String> blocked;
+    private volatile boolean vetoedByReplicas;
 
     /**
      * @param oldPrimary    node the shared state names as primary
@@ -87,6 +88,7 @@ public final class FailoverOperation extends Operation {
         } else if (ctx.cfg().confirmWithReplicas()) {
             String veto = confirmWithReplicas(old);
             if (veto != null) {
+                vetoedByReplicas = true;
                 progress.failed("confirm", veto);
                 blocked.accept(veto);
                 throw new Abort("blocked: " + veto);
@@ -259,6 +261,14 @@ public final class FailoverOperation extends Operation {
     protected void onUnexpected(Exception e) {
         endRoleOperation(s -> s);
         event(EventType.FAILOVER_FAILED, oldPrimary, "Automatic failover failed: " + e.getMessage(), report());
+    }
+
+    /**
+     * Whether a replica that still reached the old primary stopped this failover before anything was done (no epoch
+     * raised, nothing fenced): the watcher then looks again at the next poll instead of waiting failover-retry.
+     */
+    public boolean vetoedByReplicas() {
+        return vetoedByReplicas;
     }
 
     /**

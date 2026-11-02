@@ -678,9 +678,22 @@ public class Watcher implements AutoCloseable {
         Runnable task = () -> {
             try {
                 op.run();
-                if (op instanceof FailoverOperation && op.progress().snapshot().state()
+                if (op instanceof FailoverOperation f && op.progress().snapshot().state()
                         == OperationProgress.State.FAILED) {
-                    nextFailoverNanos = time.nanos() + TimeUnit.MILLISECONDS.toNanos(cfg.timing().failoverRetryMs());
+                    if (f.vetoedByReplicas()) {
+                        // A replica still reached the old primary: nothing was done, and the answer changes as soon
+                        // as the replicas lose it (a WAL receiver keeps "streaming" until wal_receiver_timeout on a
+                        // silent network loss), so look again at the next poll. The reason is in the event log once;
+                        // the empty attempt is not kept in the operations list. (Cloud test 2026-11-02: waiting
+                        // failover-retry here made a partition take 105 s instead of about 70 s.)
+                        nextFailoverNanos = time.nanos();
+                        synchronized (history) {
+                            history.remove(op.progress());
+                        }
+                    } else {
+                        nextFailoverNanos = time.nanos()
+                                + TimeUnit.MILLISECONDS.toNanos(cfg.timing().failoverRetryMs());
+                    }
                 }
             } finally {
                 // the operation counts as running until the retry wait is recorded: its progress is already marked

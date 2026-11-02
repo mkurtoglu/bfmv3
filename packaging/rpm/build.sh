@@ -5,7 +5,8 @@
 #
 # Needs Java 21, Maven and rpmbuild (package "rpm-build" on Rocky, "rpm" on Debian/Ubuntu). The packages are
 # noarch, so they can be built on any Linux; the result lands in target/rpm/<dist>/. A snapshot version gets a
-# release like 0.1.20261028git7ac2264 so that later builds upgrade earlier ones.
+# release like 0.1.202610281412git7ac2264 (UTC date and time, then the commit) so that a later build upgrades an
+# earlier one, also on the same day: the commit hash alone does not sort.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -31,7 +32,7 @@ WATCHER_JAR=bfm-watcher/target/bfm-watcher.jar
 pom_version=$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' pom.xml | head -1)
 version=${pom_version%-SNAPSHOT}
 if [ "$pom_version" != "$version" ]; then
-  release="0.1.$(date -u +%Y%m%d)git$(git rev-parse --short HEAD 2>/dev/null || echo local)"
+  release="0.1.$(date -u +%Y%m%d%H%M)git$(git rev-parse --short HEAD 2>/dev/null || echo local)"
 else
   release=1
 fi
