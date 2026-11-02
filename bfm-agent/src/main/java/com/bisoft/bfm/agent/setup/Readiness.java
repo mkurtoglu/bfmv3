@@ -61,7 +61,7 @@ public final class Readiness {
         try {
             settings = sql.query("SELECT name, setting FROM pg_settings WHERE name IN ('server_version',"
                     + " 'server_version_num', 'wal_level', 'wal_log_hints', 'data_checksums', 'max_wal_senders',"
-                    + " 'max_replication_slots', 'hot_standby', 'hba_file')");
+                    + " 'max_replication_slots', 'hot_standby', 'hba_file', 'listen_addresses')");
         } catch (Exception e) {
             out.add(new Check("PostgreSQL answers", Level.FAIL, "cannot query it: " + e.getMessage(),
                     "start PostgreSQL (or check the socket directory and port), then run the checks again",
@@ -114,7 +114,12 @@ public final class Readiness {
                 : new Check("hot_standby", Level.WARN, "off: a replica answers no queries", "ALTER SYSTEM SET"
                 + " hot_standby = on, then restart", List.of("ALTER SYSTEM SET hot_standby = on"), List.of(), true));
 
-        out.add(role(sql, replicationUser));
+        out.add(listening(sql, s.get("listen_addresses"), peers));
+        Check role = role(sql, replicationUser);
+        out.add(role);
+        if (role.level() == Level.OK) {
+            out.add(rewindGrants(sql, replicationUser));
+        }
         out.add(hba(sql, replicationUser, peers, s.get("hba_file")));
         if (dataDir != null) {
             out.add(space(sql, dataDir));
@@ -138,6 +143,112 @@ public final class Readiness {
             return new Check("Database", Level.WARN, "system identifier unknown: " + e.getMessage(), null,
                     List.of(), List.of(), false);
         }
+    }
+
+    /**
+     * The other nodes reach this server over the network: a fresh PGDG or Debian install listens on localhost only,
+     * and then replicas cannot stream from it and pg_basebackup cannot copy it. Blocks on a primary; a replica that is
+     * re-initialized from the primary gets the primary's setting, so there it only warns.
+     */
+    private static Check listening(Sql sql, String listen, List<Peer> peers) {
+        if (listen == null) {
+            return Check.ok("listen_addresses", "not reported");
+        }
+        String value = listen.trim();
+        boolean localOnly = true;
+        for (String a : value.split(",")) {
+            String x = a.trim();
+            if (!x.isEmpty() && !x.equals("localhost") && !x.startsWith("127.") && !x.equals("::1")) {
+                localOnly = false;
+            }
+        }
+        if (!localOnly || peers.isEmpty()) {
+            return Check.ok("listen_addresses", value.isEmpty() ? "none" : value);
+        }
+        boolean replica;
+        try {
+            replica = "t".equals(sql.query("SELECT pg_is_in_recovery()").get(0).get(0));
+        } catch (Exception e) {
+            replica = false;
+        }
+        return new Check("listen_addresses", replica ? Level.WARN : Level.FAIL, "listen_addresses is '" + value
+                + "': the other nodes cannot connect", "ALTER SYSTEM SET listen_addresses = '*', then restart",
+                List.of("ALTER SYSTEM SET listen_addresses = '*'"), List.of(), true);
+    }
+
+    /**
+     * A SCRAM-SHA-256 verifier for {@code password}, as PostgreSQL stores it and as psql's \password sends it: the
+     * password itself then never appears on a command line or in the server's log.
+     */
+    public static String scramVerifier(String password, byte[] salt) {
+        try {
+            int iterations = 4096;
+            javax.crypto.SecretKeyFactory f = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+            byte[] salted = f.generateSecret(new javax.crypto.spec.PBEKeySpec(password.toCharArray(), salt,
+                    iterations, 256)).getEncoded();
+            byte[] clientKey = hmac(salted, "Client Key");
+            byte[] storedKey = java.security.MessageDigest.getInstance("SHA-256").digest(clientKey);
+            byte[] serverKey = hmac(salted, "Server Key");
+            java.util.Base64.Encoder b64 = java.util.Base64.getEncoder();
+            return "SCRAM-SHA-256$" + iterations + ":" + b64.encodeToString(salt) + "$"
+                    + b64.encodeToString(storedKey) + ":" + b64.encodeToString(serverKey);
+        } catch (java.security.GeneralSecurityException e) {
+            throw new IllegalStateException("cannot compute a SCRAM verifier", e);
+        }
+    }
+
+    private static byte[] hmac(byte[] key, String text) throws java.security.GeneralSecurityException {
+        javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+        mac.init(new javax.crypto.spec.SecretKeySpec(key, "HmacSHA256"));
+        return mac.doFinal(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    /** CREATE ROLE for the replication user with a SCRAM verifier (never the password itself). */
+    public static String createReplicationRole(String user, String password) {
+        byte[] salt = new byte[16];
+        new java.security.SecureRandom().nextBytes(salt);
+        return "CREATE ROLE " + ident(user) + " WITH REPLICATION LOGIN PASSWORD " + literal(scramVerifier(password,
+                salt));
+    }
+
+    /** The functions pg_rewind calls on the source server, as its documentation lists them for a non-superuser. */
+    static final List<String> REWIND_FUNCTIONS = List.of("pg_catalog.pg_ls_dir(text, boolean, boolean)",
+            "pg_catalog.pg_stat_file(text, boolean)", "pg_catalog.pg_read_binary_file(text)",
+            "pg_catalog.pg_read_binary_file(text, bigint, bigint, boolean)");
+
+    /**
+     * The grants that let the replication role run pg_rewind against this server, so the agents rewind as that role
+     * ({@code rewind.user}) and no superuser logs in over the network.
+     */
+    public static List<String> rewindGrants(String user) {
+        return REWIND_FUNCTIONS.stream().map(f -> "GRANT EXECUTE ON FUNCTION " + f + " TO " + ident(user)).toList();
+    }
+
+    private static Check rewindGrants(Sql sql, String user) {
+        try {
+            StringBuilder q = new StringBuilder("SELECT ");
+            for (int i = 0; i < REWIND_FUNCTIONS.size(); i++) {
+                q.append(i == 0 ? "" : " AND ").append("has_function_privilege(").append(literal(user)).append(", ")
+                        .append(literal(REWIND_FUNCTIONS.get(i))).append(", 'EXECUTE')");
+            }
+            q.append(", pg_is_in_recovery()");
+            List<String> r = sql.query(q.toString()).get(0);
+            if ("t".equals(r.get(0))) {
+                return Check.ok("pg_rewind role", user + " may run pg_rewind");
+            }
+            boolean replica = "t".equals(r.get(1));
+            // GRANT is written on the primary and reaches the replicas through replication
+            return new Check("pg_rewind role", Level.WARN, user + " may not run pg_rewind: an old primary would need a"
+                    + " full re-initialize", (replica ? "on the primary: " : "") + String.join("; ", rewindGrants(user)),
+                    replica ? List.of() : rewindGrants(user), List.of(), false);
+        } catch (Exception e) {
+            return new Check("pg_rewind role", Level.WARN, "cannot check: " + e.getMessage(), null, List.of(),
+                    List.of(), false);
+        }
+    }
+
+    static String ident(String v) {
+        return "\"" + v.replace("\"", "\"\"") + "\"";
     }
 
     private static Check role(Sql sql, String user) {
@@ -184,7 +295,7 @@ public final class Readiness {
             }
         }
         if (missing.isEmpty()) {
-            return Check.ok("pg_hba.conf", "every other node may replicate");
+            return Check.ok("pg_hba.conf", "every node may replicate");
         }
         return new Check("pg_hba.conf", Level.FAIL, "no replication entry for " + String.join(", ", missing),
                 "add " + lines.size() + " lines to " + (hbaFile == null ? "pg_hba.conf" : hbaFile) + " and reload",

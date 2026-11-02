@@ -86,6 +86,21 @@ class SetupTest {
     }
 
     @Test
+    void thePackagedExampleSettingsManageNothingUntilTheirUnitRuns() throws Exception {
+        // a fresh RPM install: /etc/bfm/minipgagent/agent.properties names the PGDG default data directory, but
+        // minipgagent.service is neither enabled nor running, so setup must offer that instance (found on the
+        // cloud test: setup refused every freshly installed host)
+        file("/var/lib/pgsql/16/data/PG_VERSION", "16\n");
+        file("/etc/bfm/minipgagent/agent.properties", "node.name=pg-a1\npg.data=/var/lib/pgsql/16/data\n");
+        file("/usr/pgsql-16/bin/pg_ctl", "");
+        assertNull(new Discovery(root, quietRunner()).find(List.of()).get(0).managedBy());
+        FakeRunner enabled = new FakeRunner(argv -> String.join(" ", argv).equals("systemctl is-enabled minipgagent.service")
+                ? FakeRunner.ok(argv, "enabled\n") : FakeRunner.exit(argv, 127, "not here"));
+        assertEquals("minipgagent", new Discovery(root, enabled).find(List.of()).get(0).managedBy(),
+                "an installation by hand runs that file");
+    }
+
+    @Test
     void readsPgLsclustersAndPostmasterPid() {
         List<Discovery.LsCluster> ls = Discovery.parseLsClusters("""
                 Ver Cluster Port Status          Owner    Data directory              Log file
@@ -136,8 +151,11 @@ class SetupTest {
         assertEquals(Sudoers.rule("192.168.0.60", "24", "eth0"), Sudoers.rule("192.168.0.60", "24", "eth0", null));
         assertThrows(Prompter.SetupException.class, () -> Sudoers.rule("192.168.0.60", "24", "eth0", "192.168.0.60"));
         assertThrows(Prompter.SetupException.class, () -> Sudoers.rule("192.168.0.60", "24", "eth0", "1.2.3.4, ALL"));
-        assertEquals("10.0.0.1", Network.defaultGateway("default via 10.0.0.1 dev eth1 proto static metric 101\n"));
-        assertNull(Network.defaultGateway(""));
+        assertEquals("10.0.0.1", Network.defaultGateway("default via 10.0.0.1 dev eth1 proto static metric 101\n",
+                "eth1"));
+        // a cloud host: the default route leaves by the public interface, the VIP lives on the private one
+        assertNull(Network.defaultGateway("default via 203.0.113.1 dev eth0 proto static metric 100\n", "eth1"));
+        assertNull(Network.defaultGateway("", "eth0"));
     }
 
     @Test
@@ -150,6 +168,7 @@ class SetupTest {
                         List.of("hba_file", "/var/lib/pgsql/16/data/pg_hba.conf")),
                 "pg_control_system", List.of(List.of("7999")),
                 "pg_roles", List.of(List.of("t", "t")),
+                "has_function_privilege", List.of(List.of("f", "f")),
                 "pg_hba_file_rules", List.of(
                         List.of("host", "{replication}", "{replicator}", "10.0.0.12", "255.255.255.255"),
                         List.of("host", "{all}", "{all}", "10.0.0.0", "255.255.255.0")));
@@ -171,6 +190,53 @@ class SetupTest {
         assertTrue(hba.hbaLines().get(0).contains("replication") && hba.hbaLines().get(0).contains("10.0.0.13/32"));
         assertEquals(Readiness.Level.OK, find(checks, "Replication role").level());
         assertEquals(Readiness.Level.OK, find(checks, "Senders and slots").level());
+        // found on the cloud test: the agents rewind as the replication role, which had no grants for pg_rewind,
+        // so every returning old primary needed a full re-initialize
+        Readiness.Check rewindRole = find(checks, "pg_rewind role");
+        assertEquals(Readiness.Level.WARN, rewindRole.level());
+        assertEquals(4, rewindRole.fixSql().size());
+        assertTrue(rewindRole.fixSql().get(0).startsWith("GRANT EXECUTE ON FUNCTION pg_catalog.pg_ls_dir("),
+                rewindRole.fixSql().get(0));
+        assertTrue(rewindRole.fixSql().stream().allMatch(g -> g.endsWith(" TO \"replicator\"")));
+    }
+
+    @Test
+    void aFreshPrimaryNeedsTheNetworkAndItsReplicationRole() {
+        // found on the cloud test with fresh PGDG installs: listen_addresses = localhost and no replication role,
+        // so Build could not copy the primary; setup now says so and offers both fixes
+        for (String[] c : new String[][] {{"localhost", "f", "FAIL"}, {"localhost", "t", "WARN"}, {"*", "f", "OK"},
+                {"localhost, 10.0.0.11", "f", "OK"}}) {
+            Map<String, List<List<String>>> answers = Map.of(
+                    "pg_settings", List.of(List.of("server_version", "16.4"), List.of("server_version_num", "160004"),
+                            List.of("wal_level", "replica"), List.of("wal_log_hints", "on"),
+                            List.of("data_checksums", "off"), List.of("max_wal_senders", "10"),
+                            List.of("max_replication_slots", "10"), List.of("hot_standby", "on"),
+                            List.of("hba_file", "/var/lib/pgsql/16/data/pg_hba.conf"),
+                            List.of("listen_addresses", c[0])),
+                    "pg_is_in_recovery", List.of(List.of(c[1])),
+                    "pg_control_system", List.of(List.of("7000")),
+                    "pg_roles", List.of(),
+                    "pg_hba_file_rules", List.of());
+            Readiness.Sql sql = q -> answers.entrySet().stream().filter(e -> q.contains(e.getKey())).findFirst()
+                    .map(Map.Entry::getValue).orElseThrow(() -> new IllegalStateException("unexpected " + q));
+            List<Readiness.Check> checks = Readiness.run(sql, "replicator", List.of(new Readiness.Peer("crm-a2",
+                    "10.0.0.12")), null, null);
+            Readiness.Check listen = find(checks, "listen_addresses");
+            assertEquals(Readiness.Level.valueOf(c[2]), listen.level(), c[0] + " in recovery " + c[1]);
+            if (listen.level() != Readiness.Level.OK) {
+                assertEquals(List.of("ALTER SYSTEM SET listen_addresses = '*'"), listen.fixSql());
+                assertTrue(listen.needsRestart());
+            }
+            assertEquals(Readiness.Level.FAIL, find(checks, "Replication role").level());
+        }
+        // the role is created with a SCRAM verifier, never the password itself (checked against Python's hashlib)
+        assertEquals("SCRAM-SHA-256$4096:AAECAwQFBgcICQoLDA0ODw==$Jwo/fPy/WVhtCkVRhyjS/m5jVXfK1CF0JB9Nb9Mq7Wk="
+                + ":Q4/zhfnaxj8EvJJ89lixKY1O0/lRx/pn9x9GpMNsaFo=", Readiness.scramVerifier("repl-secret",
+                new byte[] {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}));
+        String create = Readiness.createReplicationRole("replicator", "repl-secret");
+        assertTrue(create.startsWith("CREATE ROLE \"replicator\" WITH REPLICATION LOGIN PASSWORD 'SCRAM-SHA-256$4096:"),
+                create);
+        assertFalse(create.contains("repl-secret"));
     }
 
     private static Readiness.Check find(List<Readiness.Check> checks, String name) {
@@ -191,6 +257,7 @@ class SetupTest {
                 vip.address=192.168.0.60
                 vip.interface=eth0
                 vip.prefix=24
+                vip.dad.probe=192.168.0.1
                 node=crm-a1
                 cluster=crm
                 cluster-id=a5443743-ff8b-4a1f-b399-d9765c971c45

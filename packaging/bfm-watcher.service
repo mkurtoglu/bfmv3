@@ -10,6 +10,8 @@ Group=bfm
 EnvironmentFile=-/etc/bfm/watcher.env
 ExecStart=/usr/bin/bfm-watcher
 Restart=always
+# the JVM ends with 143 on SIGTERM: a stopped service is "inactive", not "failed"
+SuccessExitStatus=143
 RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=full

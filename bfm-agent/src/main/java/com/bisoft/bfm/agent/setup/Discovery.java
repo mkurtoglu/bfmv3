@@ -209,7 +209,12 @@ public class Discovery {
     Map<Path, String> managedDataDirs() {
         Map<Path, String> out = new LinkedHashMap<>();
         Path base = at("/etc/bfm/minipgagent");
-        addManaged(out, base.resolve("agent.properties"), "minipgagent");
+        // The RPM puts an example agent.properties there for the single-instance unit. It runs an agent only when
+        // minipgagent.service is enabled or running (an installation by hand); otherwise every fresh install would
+        // find the host's default data directory "already managed" and refuse it.
+        if (unitInUse("minipgagent.service")) {
+            addManaged(out, base.resolve("agent.properties"), "minipgagent");
+        }
         try (DirectoryStream<Path> ds = Files.newDirectoryStream(base)) {
             for (Path p : ds) {
                 // "minipgagent remove" leaves <instance>.removed-<time> behind for the record: it runs nothing.
@@ -221,6 +226,16 @@ public class Discovery {
             // no agent installed yet
         }
         return out;
+    }
+
+    /** Whether systemd has {@code unit} enabled or running (no systemctl: no). */
+    private boolean unitInUse(String unit) {
+        ProcessResult enabled = runner.run(List.of("systemctl", "is-enabled", unit), Duration.ofSeconds(10));
+        if (enabled.ok() && enabled.stdout().trim().startsWith("enabled")) {
+            return true;
+        }
+        ProcessResult active = runner.run(List.of("systemctl", "is-active", unit), Duration.ofSeconds(10));
+        return active.ok() && "active".equals(active.stdout().trim());
     }
 
     private static void addManaged(Map<Path, String> out, Path file, String unit) {

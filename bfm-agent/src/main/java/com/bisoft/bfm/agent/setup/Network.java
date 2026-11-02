@@ -40,11 +40,20 @@ public final class Network {
         return out;
     }
 
-    /** The default gateway from {@code ip -4 route show default} ("default via 10.0.0.1 dev eth0 ..."), or null. */
-    public static String defaultGateway(String ipRouteOutput) {
-        Matcher m = Pattern.compile("^default via (\\d{1,3}(?:\\.\\d{1,3}){3})\\b", Pattern.MULTILINE)
+    /**
+     * The default gateway on {@code iface} from {@code ip -4 route show default} ("default via 10.0.0.1 dev eth0
+     * ..."), or null: a gateway on another interface is no neighbour of the VIP's (cloud hosts route the default over
+     * a public interface and carry the VIP's subnet on a private one).
+     */
+    public static String defaultGateway(String ipRouteOutput, String iface) {
+        Matcher m = Pattern.compile("^default via (\\d{1,3}(?:\\.\\d{1,3}){3}) dev (\\S+)", Pattern.MULTILINE)
                 .matcher(ipRouteOutput == null ? "" : ipRouteOutput);
-        return m.find() ? m.group(1) : null;
+        while (m.find()) {
+            if (m.group(2).equals(iface)) {
+                return m.group(1);
+            }
+        }
+        return null;
     }
 
     static boolean sameNetwork(String a, String b, int prefix) throws UnknownHostException {

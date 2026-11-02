@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.GroupPrincipal;
+import java.nio.file.attribute.UserPrincipal;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.ZoneId;
@@ -249,7 +250,9 @@ public final class WatcherSetup {
         write(etc.resolve("watcher.yml"), yml.getBytes(StandardCharsets.UTF_8), "640");
         write(etc.resolve("watcher.env"), ("BFM_KEYSTORE_PASSWORD=" + consolePass + "\n")
                 .getBytes(StandardCharsets.UTF_8), "640");
-        owner(data, "bfm");
+        // the service runs as bfm and reads secret.key and the CA to import (then moves the CA into the shared state):
+        // everything in the data directory is bfm's, not root's with mode 600 (the watcher would not start)
+        ownTree(data, "bfm");
         if (systemd) {
             Process p = new ProcessBuilder("systemctl", "enable", "--now", "bfm-watcher").inheritIO().start();
             try {
@@ -370,6 +373,35 @@ public final class WatcherSetup {
             }
         } catch (IOException | UnsupportedOperationException ignored) {
             // no bfm user here (a lab): the files stay the caller's
+        }
+    }
+
+    /** Owner and group {@code name} for a directory and everything in it, when that user exists; a lab skips it. */
+    private static void ownTree(Path dir, String name) throws IOException {
+        UserPrincipal user;
+        GroupPrincipal group;
+        try {
+            var lookup = dir.getFileSystem().getUserPrincipalLookupService();
+            user = lookup.lookupPrincipalByName(name);
+            group = lookup.lookupPrincipalByGroupName(name);
+        } catch (IOException | UnsupportedOperationException e) {
+            return; // no bfm user here (a lab): the files stay the caller's
+        }
+        try (var all = Files.walk(dir)) {
+            for (Path p : all.toList()) {
+                PosixFileAttributeView v = Files.getFileAttributeView(p, PosixFileAttributeView.class,
+                        java.nio.file.LinkOption.NOFOLLOW_LINKS);
+                if (v == null) {
+                    continue;
+                }
+                try {
+                    v.setOwner(user);
+                    v.setGroup(group);
+                } catch (java.nio.file.FileSystemException e) {
+                    // not root (a lab with a bfm user): leave it
+                    return;
+                }
+            }
         }
     }
 

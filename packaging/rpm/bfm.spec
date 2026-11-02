@@ -197,6 +197,13 @@ systemctl daemon-reload >/dev/null 2>&1 || :
 %{_unitdir}/bfm-watcher.service
 
 %changelog
+* Mon Nov 02 2026 BFM <bfm@localhost> - 0.1.0-3
+- Apache License 2.0; LICENSE and NOTICE installed
+- bfm-watcher setup gives the data directory to the bfm user (the service could not read secret.key)
+- minipgagent setup: the packaged example settings no longer count as a running agent; checks listen_addresses;
+  creates the replication role with the grants pg_rewind needs and rewinds as it; pg_hba.conf lines for every
+  node, itself included; the duplicate-check self-test neighbour on the VIP's interface
+- the services end as "inactive", not "failed", when stopped
 * Sat Oct 31 2026 BFM <bfm@localhost> - 0.1.0-2
 - minipgagent@.service for several PostgreSQL instances per host; agents bind to one cluster
 - minipgagent setup / remove and bfm-watcher setup; enrollment with one-time tokens

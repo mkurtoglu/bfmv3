@@ -50,6 +50,7 @@ public final class SetupCommand {
     private final Host host;
     private final Prompter ask;
     private final PrintStream out;
+    private String replicationPassword;
     private final Properties opt;
 
     SetupCommand(Host host, Prompter ask, PrintStream out, Properties opt) {
@@ -134,7 +135,19 @@ public final class SetupCommand {
     /** @param agentPort where the watcher reaches the agent, or null when unknown (a bundle) */
     record Join(String clusterId, String cluster, String environment, String node, String dc, Integer agentPort,
                 List<Readiness.Peer> peers, String systemIdentifier, Path nodeStore, String nodePass,
-                Path caStore, String caPass, List<String> watchers) {
+                Path caStore, String caPass, List<String> watchers, String pgHost) {
+
+        /**
+         * Every node that connects for replication, this one included: pg_hba.conf is copied with the data directory
+         * (Build, re-initialize), so the file must already let this node in once another node becomes primary.
+         */
+        List<Readiness.Peer> allNodes() {
+            List<Readiness.Peer> all = new ArrayList<>(peers);
+            if (pgHost != null && !pgHost.isBlank() && all.stream().noneMatch(p -> p.address().equals(pgHost))) {
+                all.add(0, new Readiness.Peer(node, pgHost));
+            }
+            return all;
+        }
     }
 
     int run() throws Exception {
@@ -264,7 +277,7 @@ public final class SetupCommand {
                 out.println("   (dry run: the token is not spent; the console's settings for the node are not known"
                         + " yet)");
                 return new Join(null, "(from the token)", null, "(from the token)", null, 8008, List.of(), null,
-                        nodeStore, nodePass, caStore, caPass, List.of());
+                        nodeStore, nodePass, caStore, caPass, List.of(), null);
             }
             out.println("   Creating this node's key (RSA 3072) and asking " + url + " to certify it…");
             Keytool.createKeyPair(nodeStore, nodePass, "node", "minipgagent");
@@ -284,7 +297,7 @@ public final class SetupCommand {
             return new Join(r.requireStr("clusterId"), r.requireStr("cluster"), r.str("environment"),
                     r.requireStr("node"), r.str("dc"), r.integer("agentPort", 8008), peers,
                     r.str("systemIdentifier"), nodeStore, nodePass, caStore, caPass,
-                    r.has("watchers") ? r.strList("watchers") : List.of());
+                    r.has("watchers") ? r.strList("watchers") : List.of(), r.str("pgHost"));
         }
         String bundle = opt.getProperty("bundle");
         if (bundle == null) {
@@ -310,7 +323,7 @@ public final class SetupCommand {
         }
         return new Join(clusterId.isBlank() ? null : clusterId, clusterName, null, node, null, null, list, null,
                 nodeStore, read(dir.resolve(node + ".pass")).trim(), caStore, read(dir.resolve("ca.pass")).trim(),
-                List.of());
+                List.of(), null);
     }
 
     private Map<String, String> network(Join join, PgInstance pg) {
@@ -361,10 +374,16 @@ public final class SetupCommand {
         }
         // the duplicate check is only worth something if arping -D sees other hosts here: a live neighbour must answer
         // it (cloud test 2026-11-02: on a cloud network every address read as free and two servers held the VIP)
+        // the gateway on the VIP's interface; there is none on a host whose default route leaves by another one, and
+        // then the operator names a neighbour (or none) rather than the wizard guessing one
         String gw = Network.defaultGateway(host.runner.run(List.of("ip", "-4", "route", "show", "default"),
-                Duration.ofSeconds(10)).stdout());
+                Duration.ofSeconds(10)).stdout(), iface);
+        if (gw == null) {
+            out.println("   ! no default gateway on " + iface + ": name a host on " + iface + "'s subnet that is always up"
+                    + " (a router, not another database node)");
+        }
         String probe = ask.ask("vip.dad.probe", "A live neighbour on " + iface
-                + " for the duplicate address self-test (none: no self-test):", gw == null ? "none" : gw);
+                + " for the duplicate address self-test (none: no self-test):", gw);
         if (probe == null || probe.isBlank() || probe.equalsIgnoreCase("none")) {
             out.println("   ! no self-test: the agent cannot tell a network that hides duplicates (cloud) from a free VIP");
             probe = null;
@@ -399,7 +418,7 @@ public final class SetupCommand {
         }
         Path data = Files.exists(host.path(pg.dataDir().toString())) ? host.path(pg.dataDir().toString())
                 : pg.dataDir();
-        List<Readiness.Check> checks = Readiness.run(sql -> host.psql(pg, sql), replUser, join.peers(),
+        List<Readiness.Check> checks = Readiness.run(sql -> host.psql(pg, sql), replUser, join.allNodes(),
                 join.systemIdentifier(), data.toString());
         for (Readiness.Check c : checks) {
             String mark = switch (c.level()) {
@@ -414,6 +433,13 @@ public final class SetupCommand {
         }
         boolean restart = false;
         for (Readiness.Check c : checks) {
+            if (c.name().equals("Replication role") && c.level() == Readiness.Level.FAIL
+                    && c.detail().endsWith("does not exist") && "primary".equals(pg.role())) {
+                // a fresh primary has no replication role yet: create it here with the password that also goes
+                // into .pgpass (replicas get the role through replication)
+                createReplicationRole(pg, replUser);
+                continue;
+            }
             if (c.level() == Readiness.Level.OK || (c.fixSql().isEmpty() && c.hbaLines().isEmpty())) {
                 continue;
             }
@@ -444,10 +470,47 @@ public final class SetupCommand {
             }
         }
         if (restart) {
-            notes.add("restart PostgreSQL (" + pg.dataDir() + ") in a maintenance window for the changed settings;"
-                    + " setup does not restart it");
+            String pgCtl = pg.binDir() == null ? "pg_ctl" : pg.binDir().resolve("pg_ctl").toString();
+            notes.add("restart PostgreSQL for the changed settings before the cluster is created (or in a maintenance"
+                    + " window): runuser -u postgres -- " + pgCtl + " -D " + pg.dataDir() + " restart -m fast"
+                    + " (setup does not restart it)");
         }
         return notes;
+    }
+
+    private void createReplicationRole(PgInstance pg, String replUser) {
+        if (!ask.confirm("fix.replication-role", "Apply now — CREATE ROLE " + replUser
+                + " WITH REPLICATION LOGIN (its password is asked next and also goes into .pgpass)?", false)) {
+            return;
+        }
+        String pw = replicationPassword(replUser);
+        if (pw == null) {
+            out.println("   (no password given: the role is not created)");
+            return;
+        }
+        if (host.dryRun) {
+            out.println("   (dry run: not applied)");
+            return;
+        }
+        try {
+            // a SCRAM verifier, not the password: nothing readable lands on a command line or in the log
+            host.psql(pg, Readiness.createReplicationRole(replUser, pw));
+            for (String grant : Readiness.rewindGrants(replUser)) {
+                host.psql(pg, grant);
+            }
+            out.println("   ✔ applied (with the grants pg_rewind needs)");
+        } catch (Exception e) {
+            out.println("   ✖ could not apply: " + e.getMessage());
+        }
+    }
+
+    /** The replication password, asked once for the role and .pgpass; null when none is given. */
+    private String replicationPassword(String replUser) {
+        if (replicationPassword == null) {
+            replicationPassword = ask.secret("replication.password", "Password of " + replUser
+                    + " (for the role and .pgpass; empty: skip):");
+        }
+        return replicationPassword == null || replicationPassword.isEmpty() ? null : replicationPassword;
     }
 
     private String instanceName(Join join) {
@@ -500,6 +563,8 @@ public final class SetupCommand {
         props.put("pg.port", Integer.toString(pg.port()));
         props.put("pg.socket.dir", pg.socketDir());
         props.put("replication.user", replUser);
+        // pg_rewind as the replication role (granted the functions it needs), not a superuser over the network
+        props.put("rewind.user", replUser);
         props.put("replication.passfile", passfile);
         if (net.get("vip") == null) {
             props.put("vip.enabled", "false");
@@ -552,7 +617,7 @@ public final class SetupCommand {
         }
         String password = null;
         if (!pgpassHas(host.path(passfile), replUser)) {
-            password = ask.secret("replication.password", "Password of " + replUser + " for .pgpass (empty: skip):");
+            password = replicationPassword(replUser);
             if (password != null) {
                 plan.append(host.path(passfile), "*:*:*:" + replUser + ":" + password.replace(":", "\\:") + "\n", "600",
                         "postgres", "1 line for " + replUser);

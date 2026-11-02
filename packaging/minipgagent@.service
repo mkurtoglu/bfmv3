@@ -15,6 +15,8 @@ Environment=MINIPGAGENT_INSTANCE=%i
 EnvironmentFile=-/etc/bfm/minipgagent/%i/agent.env
 ExecStart=/usr/bin/minipgagent /etc/bfm/minipgagent/%i/agent.properties
 Restart=always
+# the JVM ends with 143 on SIGTERM: a stopped service is "inactive", not "failed"
+SuccessExitStatus=143
 RestartSec=2
 # The agent starts and stops PostgreSQL itself; disable that instance's PostgreSQL unit.
 # KillMode=process keeps PostgreSQL running when the agent is restarted or stopped.

@@ -278,7 +278,8 @@ public class ClusterWizardService {
         out.add(primaries.size() <= 1 ? new Check(null, "At most one primary", "OK", primaries.isEmpty()
                 ? "none runs as primary: build the cluster in step 5" : primaries.get(0) + " runs as primary")
                 : new Check(null, "At most one primary", "FAIL", String.join(", ", primaries) + " all run as"
-                + " primary"));
+                + " primary: stop PostgreSQL on every node but the one that holds the data (Build copies it to the"
+                + " others)"));
         if (sysids.size() <= 1) {
             out.add(new Check(null, "One database", "OK", sysids.isEmpty() ? "no system identifier yet"
                     : "system identifier " + sysids.keySet().iterator().next()));
@@ -311,15 +312,14 @@ public class ClusterWizardService {
         if (!same && !hosts.isEmpty()) {
             out.add(new Check(null, "One node per host", "OK", hosts.size() + " hosts"));
         }
-        // Each node's own checks: settings, pg_hba.conf for the others, the replication role, room.
+        // Each node's own checks: settings, pg_hba.conf for every node (itself too: the file is copied with the data
+        // when another node is built from it), the replication role, room.
         for (NodeLive l : online) {
             ClusterSpec.NodeSpec me = spec.nodes().stream().filter(n -> n.name().equals(l.node())).findFirst()
                     .orElseThrow();
             List<Map<String, String>> peers = new ArrayList<>();
             for (ClusterSpec.NodeSpec n : spec.nodes()) {
-                if (!n.name().equals(me.name())) {
-                    peers.add(Map.of("name", n.name(), "address", n.pgHost()));
-                }
+                peers.add(Map.of("name", n.name(), "address", n.pgHost()));
             }
             if (l.status() != null && !l.status().pgRunning()) {
                 out.add(new Check(l.node(), "PostgreSQL running", "WARN", "PostgreSQL is stopped, so its settings"

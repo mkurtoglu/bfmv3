@@ -605,5 +605,11 @@
  "{node} re-initialized from {primary} (by {actor})": "أُعيدت تهيئة {node} من {primary} (بواسطة {actor})",
  "{node} re-initialized from {primary}": "أُعيدت تهيئة {node} من {primary}",
  "{node} rejoined as a replica of {primary} (by {actor})": "أعيد ضمّ {node} كنسخة متماثلة من {primary} (بواسطة {actor})",
- "{node} rejoined as a replica of {primary}": "أعيد ضمّ {node} كنسخة متماثلة من {primary}"
+ "{node} rejoined as a replica of {primary}": "أعيد ضمّ {node} كنسخة متماثلة من {primary}",
+ "{primaries} all run as primary: stop PostgreSQL on every node but the one that holds the data (Build copies it to the others)": "{primaries} تعمل كلها كأساسي: أوقف PostgreSQL على كل عقدة عدا التي تحمل البيانات (يقوم البناء بنسخها إلى العقد الأخرى)",
+ "pg_rewind role": "دور pg_rewind",
+ "{user} may run pg_rewind": "يستطيع {user} تشغيل pg_rewind",
+ "{user} may not run pg_rewind: an old primary would need a full re-initialize": "لا يستطيع {user} تشغيل pg_rewind: سيحتاج الأساسي القديم إلى إعادة تهيئة كاملة",
+ "every node may replicate": "يمكن لكل عقدة النسخ المتماثل",
+ "listen_addresses is '{value}': the other nodes cannot connect": "listen_addresses هو '{value}': لا تستطيع العقد الأخرى الاتصال"
 }

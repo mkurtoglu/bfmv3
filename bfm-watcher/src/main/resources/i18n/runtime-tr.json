@@ -605,5 +605,11 @@
  "{node} re-initialized from {primary} (by {actor})": "{node}, {primary} üzerinden yeniden oluşturuldu ({actor} tarafından)",
  "{node} re-initialized from {primary}": "{node}, {primary} üzerinden yeniden oluşturuldu",
  "{node} rejoined as a replica of {primary} (by {actor})": "{node}, {primary}'nin replica'sı olarak yeniden katıldı ({actor} tarafından)",
- "{node} rejoined as a replica of {primary}": "{node}, {primary}'nin replica'sı olarak yeniden katıldı"
+ "{node} rejoined as a replica of {primary}": "{node}, {primary}'nin replica'sı olarak yeniden katıldı",
+ "{primaries} all run as primary: stop PostgreSQL on every node but the one that holds the data (Build copies it to the others)": "{primaries} hepsi primary olarak çalışıyor: veriyi tutan node dışındaki tüm node'larda PostgreSQL'i durdurun (Kur, veriyi onlara kopyalar)",
+ "pg_rewind role": "pg_rewind rolü",
+ "{user} may run pg_rewind": "{user} pg_rewind çalıştırabilir",
+ "{user} may not run pg_rewind: an old primary would need a full re-initialize": "{user} pg_rewind çalıştıramıyor: eski bir primary tamamen yeniden oluşturulmak zorunda kalır",
+ "every node may replicate": "tüm node'lar replikasyon yapabilir",
+ "listen_addresses is '{value}': the other nodes cannot connect": "listen_addresses '{value}': diğer node'lar bağlanamaz"
 }

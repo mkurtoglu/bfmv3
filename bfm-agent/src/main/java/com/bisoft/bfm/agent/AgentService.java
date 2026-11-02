@@ -548,7 +548,7 @@ public class AgentService {
     }
 
     /**
-     * The readiness checks of setup, live: {@code peers} ([{name, address}]) are the other nodes that must be able
+     * The readiness checks of setup, live: {@code peers} ([{name, address}]) are the nodes (this one included) that must be able
      * to replicate from this one; {@code systemIdentifier} the cluster's. Read only.
      */
     public JsonWritable checks(JsonMap body) {
