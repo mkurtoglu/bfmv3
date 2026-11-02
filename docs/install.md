@@ -1,6 +1,7 @@
 # Installing BFM
 
-The step-by-step guide for the RPM packages with the setup wizards is [install-rpm.md](install-rpm.md); the
+The step-by-step guide for the RPM packages with the setup wizards is [install-rpm.md](install-rpm.md) (Turkish:
+[install-rpm.tr.md](install-rpm.tr.md)); the
 console is described in the [user guide](user-guide.md). This document is the reference: every setting, and the
 manual way.
 

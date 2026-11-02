@@ -5,7 +5,6 @@ import com.vaadin.flow.component.login.LoginForm;
 import com.vaadin.flow.router.BeforeEnterEvent;
 import com.vaadin.flow.router.BeforeEnterObserver;
 import com.vaadin.flow.component.UI;
-import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.login.LoginI18n;
 import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
@@ -61,12 +60,15 @@ public class LoginView extends Div implements BeforeEnterObserver, HasDynamicTit
         // the language is chosen before signing in: each name in its own language
         Div languages = Ui.div("pg-login-languages");
         for (java.util.Locale l : Messages.LOCALES) {
-            Span link = Ui.text("pg-link" + (l.getLanguage().equals(Ui.locale().getLanguage()) ? " pg-current" : ""),
-                    Ui.t("lang." + l.getLanguage()));
+            // real buttons: reachable with the keyboard and announced as such
+            com.vaadin.flow.component.button.Button link = new com.vaadin.flow.component.button.Button(
+                    Ui.t("lang." + l.getLanguage()), e -> LanguageSetup.choose(UI.getCurrent(), l));
+            link.addThemeVariants(com.vaadin.flow.component.button.ButtonVariant.LUMO_TERTIARY_INLINE,
+                    com.vaadin.flow.component.button.ButtonVariant.LUMO_SMALL);
             link.getElement().setAttribute("lang", l.getLanguage());
-            link.getElement().setAttribute("role", "button");
-            link.getElement().setAttribute("tabindex", "0");
-            link.addClickListener(e -> LanguageSetup.choose(UI.getCurrent(), l));
+            if (l.getLanguage().equals(Ui.locale().getLanguage())) {
+                link.getElement().setAttribute("aria-current", "true");
+            }
             languages.add(link);
         }
         Div card = Ui.div("pg-login-card", brand,

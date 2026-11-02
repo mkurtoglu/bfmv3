@@ -486,6 +486,17 @@ vaadin-app-layout::part(drawer) {
   background: var(--pg-bg);
 }
 
+/* The language choice under the sign-in form: each name in its own language. */
+.pg-login-languages {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 16px;
+  padding: 4px 0 12px;
+}
+.pg-login-languages vaadin-button { color: var(--pg-muted); }
+.pg-login-languages vaadin-button[aria-current] { color: var(--lumo-body-text-color); font-weight: 600; }
+
 .pg-login-card {
   background: var(--pg-surface);
   border: 1px solid var(--pg-border);

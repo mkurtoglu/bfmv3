@@ -125,7 +125,8 @@ services either, because a restart would interrupt a running `pg_basebackup`, `p
 them when the cluster is idle. JVM options go into `/etc/bfm/minipgagent/agent.env`
 (`MINIPGAGENT_JAVA_OPTS`) and `/etc/bfm/watcher.env` (`BFM_WATCHER_JAVA_OPTS`).
 
-Step by step, with screenshots: [docs/install-rpm.md](docs/install-rpm.md) (installation) and
+Step by step, with screenshots: [docs/install-rpm.md](docs/install-rpm.md) (installation; in Turkish:
+[docs/install-rpm.tr.md](docs/install-rpm.tr.md)) and
 [docs/user-guide.md](docs/user-guide.md) (the console); `scripts/docs-html.sh` turns them into single HTML files
 with the screenshots inside. The short version, with the wizards:
 

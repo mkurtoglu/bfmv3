@@ -1,5 +1,7 @@
 # Installing BFM from the RPM packages
 
+*English · [Türkçe](install-rpm.tr.md)*
+
 Rocky Linux / RHEL 8 and 9. This guide takes you from two RPM files to a running cluster with automatic
 failover, using the setup wizards. Every step has a manual equivalent in [install.md](install.md); the
 console itself is described in the [user guide](user-guide.md).
@@ -121,6 +123,10 @@ On a Rocky / RHEL workstation: `cp bfm-ca.crt /etc/pki/ca-trust/source/anchors/ 
 Open `https://bfm.example.com:8443` and sign in as the admin. A new watcher has no cluster yet; the Fleet page
 offers *Add cluster*.
 
+The console speaks English, Turkish and Arabic (laid out right to left). It follows the browser's language; the
+globe in the header (or the links under the sign-in form) switches it, and the browser remembers the choice for a
+year. Events, mails and the REST API stay in English, so they read the same for everyone.
+
 ![The sign-in page](images/login.png)
 
 ---
@@ -188,13 +194,16 @@ The wizard:
    the cluster's settings.
 3. **Network**: the agent port (proposed from the agent address given in the console; it must be free on the
    host) and the VIP with its interface and prefix, checked against the host's subnets and with `arping -D`.
+   Then a **live neighbour for the duplicate-address self-test**, proposed from the default gateway: `arping -D`
+   must see it, or the network hides duplicates (some cloud networks do) and the agent will keep the VIP down
+   rather than trust a check that sees nothing. Answer `none` only for a node without a VIP.
 4. **Checks PostgreSQL** and offers each fix separately: version, the cluster's database, `wal_level`,
    `wal_log_hints`, senders and slots, `hot_standby`, the replication role, `pg_hba.conf` entries for the other
    nodes, room for a re-initialize. It never restarts PostgreSQL: a setting that needs a restart is written and
    reported.
 5. **Shows every change** and asks once.
-6. **Applies**: `/etc/bfm/minipgagent/<instance>/` (settings, the node's certificate, the CA), the sudo rule for
-   the VIP (checked with `visudo` first), the `.pgpass` line, disables the PostgreSQL service (PostgreSQL keeps
+6. **Applies**: `/etc/bfm/minipgagent/<instance>/` (settings, the node's certificate, the CA, the watchers whose
+   certificates may call the agent), the sudo rule for the VIP and its self-test (checked with `visudo` first), the `.pgpass` line, disables the PostgreSQL service (PostgreSQL keeps
    running; from now on the agent starts and stops it) and starts `minipgagent@<instance>`.
 
 A run looks like this (shortened; the values are an example):
@@ -228,7 +237,7 @@ Useful options:
 | Option | What it does |
 | --- | --- |
 | `--dry-run` | shows every change, makes none |
-| `--answers FILE` | answers every question from a properties file, for Ansible and the like (keys: `agent.port`, `vip.address`, `vip.interface`, `vip.prefix`, `replication.user`, `replication.password`, `instance`, `fix.<check>`, `proceed`) |
+| `--answers FILE` | answers every question from a properties file, for Ansible and the like (keys: `agent.port`, `vip.address`, `vip.interface`, `vip.prefix`, `vip.dad.probe`, `replication.user`, `replication.password`, `instance`, `fix.<check>`, `proceed`) |
 | `--yes` | answers yes to every confirmation |
 | `--data DIR` | the data directory, when the host has several instances |
 | `--instance NAME` | the agent instance name (default: the cluster's name) |
@@ -393,5 +402,8 @@ port in the firewall and restart the service.
 | A check fails on `pg_hba.conf` or the replication role | Run setup again and accept the fix, or edit `pg_hba.conf` and reload PostgreSQL |
 | The browser warns about the certificate | Trust the BFM CA ([step 2](#trust-the-consoles-certificate)), and use a name given to *Names and addresses* |
 | The node shows *Wrong identity* | The agent address reaches another node's or another cluster's agent: fix the address |
+| A node's error says *certificate CN=w2 may not call this agent* | The agent was enrolled before that watcher existed: add it to `tls.allowed.clients` in `agent.properties` and restart the agent ([step 7](#7-three-watchers-raft)) |
+| A node's error says *the duplicate address check cannot see other hosts* | `arping -D` gets no answer from `vip.dad.probe` (the gateway) on this network, so a VIP held elsewhere would look free; the agent keeps the VIP down. Check the address and interface; on a network that never answers ARP probes protect the VIP another way and set `vip.dad.enabled=false` |
+| A node's error says *duplicate address self-test failed: … sudo* | The sudo rule lacks the self-test line: run setup again, or add `/usr/sbin/arping -D -c 2 -w 3 -I <iface> <probe>` to `/etc/sudoers.d/minipgagent-<instance>` |
 
 More cases: [install.md §12](install.md#12-troubleshooting).
