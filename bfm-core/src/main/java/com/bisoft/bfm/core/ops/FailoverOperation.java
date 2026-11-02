@@ -65,7 +65,7 @@ public final class FailoverOperation extends Operation {
         p.add(new String[]{"confirm", "Confirm with the replicas that " + old + " is gone"});
         p.add(new String[]{"choose", "Choose the replica to promote"});
         p.add(new String[]{"epoch", "Raise the cluster epoch and pause other operations"});
-        p.add(new String[]{"fence", "Fence " + old + " (release VIP, stop PostgreSQL) if its agent answers"});
+        p.add(new String[]{"fence", "Fence " + old + " (release VIP, stop PostgreSQL) if its MiniPG answers"});
         p.add(new String[]{"lease", ctx.cfg().selfFence() ? "Wait until the lease of " + old + " has run out"
                 : "Lease wait (self-fencing is off)"});
         p.add(new String[]{"vip", "Bring up the VIP on the new primary (sudo ip addr add) and send GARP"});
@@ -84,7 +84,7 @@ public final class FailoverOperation extends Operation {
         NodeStatus own = statusOrNull(oldPrimary);
         boolean ownWord = own != null && (!own.pgRunning() || own.isReplica());
         if (ownWord) {
-            progress.skipped("confirm", "the agent on " + oldPrimary + " reports PostgreSQL "
+            progress.skipped("confirm", "the MiniPG on " + oldPrimary + " reports PostgreSQL "
                     + (own.pgRunning() ? "in recovery" : "not running"));
         } else if (ctx.cfg().confirmWithReplicas()) {
             String veto = confirmWithReplicas(old);
@@ -227,7 +227,7 @@ public final class FailoverOperation extends Operation {
                 if (settlesAsPrimary(t, SETTLE_MS)) {
                     madePrimary = t;
                     ctx.lease().granted();
-                    progress.done("promote", "promoted (agent reported: " + e.detail() + ")");
+                    progress.done("promote", "promoted (MiniPG reported: " + e.detail() + ")");
                 } else {
                     progress.failed("promote", e.detail());
                     throw new Abort("promote of " + t + " did not complete: " + e.detail()
@@ -326,7 +326,7 @@ public final class FailoverOperation extends Operation {
                         && Objects.equals(old.pgHost(), r.data().str("upstreamHost"))
                         && (r.data().intOrNull("upstreamPort") == null
                         || r.data().intOrNull("upstreamPort") == old.pgPort());
-                log("agent " + n.name(), "peer check " + old.pgHost() + ":" + old.pgPort() + ": "
+                log("MiniPG " + n.name(), "peer check " + old.pgHost() + ":" + old.pgPort() + ": "
                         + (reachable ? "reachable" : "not reachable (" + r.message() + ")")
                         + (streaming ? ", still streaming from it" : ""));
                 if (reachable || streaming) {
@@ -340,7 +340,7 @@ public final class FailoverOperation extends Operation {
             return String.join(", ", seen) + " still reach" + (seen.size() == 1 ? "es " : " ") + old.name();
         }
         if (answered == 0) {
-            return "no replica agent answered, so the outage cannot be confirmed";
+            return "no replica MiniPG answered, so the outage cannot be confirmed";
         }
         progress.done("confirm", answered + " replica" + (answered == 1 ? "" : "s") + " cannot reach " + old.name()
                 + " either");
@@ -354,9 +354,9 @@ public final class FailoverOperation extends Operation {
             progress.done("fence", r.message());
         } catch (AgentCallException e) {
             if (e.reachable()) {
-                progress.done("fence", "agent refused: " + e.detail());
+                progress.done("fence", "MiniPG refused: " + e.detail());
             } else {
-                progress.skipped("fence", "agent unreachable");
+                progress.skipped("fence", "MiniPG unreachable");
             }
         }
     }

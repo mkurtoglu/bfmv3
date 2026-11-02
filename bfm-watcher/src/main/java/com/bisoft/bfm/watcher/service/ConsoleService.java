@@ -289,7 +289,7 @@ public class ConsoleService {
             if (wrong != null) {
                 out.add(r.name() + " is left alone: " + wrong);
             } else if (!r.agentOnline()) {
-                out.add(r.name() + ": agent unreachable");
+                out.add(r.name() + ": MiniPG unreachable");
             } else if (r.fenced()) {
                 out.add(r.name() + ": fenced");
             } else if (r.busy() != null) {

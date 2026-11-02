@@ -24,13 +24,13 @@ class AgentErrorTextTest {
 
     @Test
     void namesTheCauseInWords() {
-        assertEquals("connection refused by 10.0.0.1:8008 (agent not running, or wrong port)",
+        assertEquals("connection refused by 10.0.0.1:8008 (MiniPG not running, or wrong port)",
                 text(new ConnectException()));
-        assertEquals("connection refused by 10.0.0.1:8008 (agent not running, or wrong port)",
+        assertEquals("connection refused by 10.0.0.1:8008 (MiniPG not running, or wrong port)",
                 text(new IOException("wrapped", new ConnectException("Connection refused"))));
         assertEquals("no answer from 10.0.0.1:8008 within 3.0 s (host down or firewalled)",
                 text(new HttpConnectTimeoutException("HTTP connect timed out")));
-        assertEquals("the agent at 10.0.0.1:8008 did not reply within 3.0 s",
+        assertEquals("the MiniPG at 10.0.0.1:8008 did not reply within 3.0 s",
                 text(new HttpTimeoutException("request timed out")));
         assertEquals("unknown host in 10.0.0.1:8008", text(new IOException(new UnknownHostException("x"))));
         assertEquals("connection to 10.0.0.1:8008 failed: broken pipe", text(new IOException("broken pipe")));

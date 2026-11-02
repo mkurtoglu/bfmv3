@@ -69,7 +69,7 @@ public interface AgentClient {
 
     /** Makes the agent forget its cluster (detach). Agents too old to know it refuse with 404. */
     default ApiResult unbind(long epoch) {
-        throw new AgentCallException(node(), 404, "this agent cannot be unbound");
+        throw new AgentCallException(node(), 404, "this MiniPG cannot be unbound");
     }
 
     /**
@@ -79,6 +79,6 @@ public interface AgentClient {
      */
     default com.bisoft.bfm.common.json.JsonMap checks(java.util.List<java.util.Map<String, String>> peers,
                                                     String systemIdentifier) {
-        throw new AgentCallException(node(), 404, "this agent has no readiness checks");
+        throw new AgentCallException(node(), 404, "this MiniPG has no readiness checks");
     }
 }

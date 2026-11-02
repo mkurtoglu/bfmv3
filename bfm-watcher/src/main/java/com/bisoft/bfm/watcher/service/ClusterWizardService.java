@@ -160,15 +160,15 @@ public class ClusterWizardService {
                 throw new IllegalArgumentException("two nodes are named " + n.name());
             }
             if (!validAgentUrl(n.agentUrl())) {
-                throw new IllegalArgumentException(n.name() + ": the agent address is https://host:port (port 1 to"
+                throw new IllegalArgumentException(n.name() + ": the MiniPG address is https://host:port (port 1 to"
                         + " 65535)");
             }
             String u = normalize(n.agentUrl());
             if (!urls.add(u)) {
-                throw new IllegalArgumentException("two nodes have the agent address " + n.agentUrl());
+                throw new IllegalArgumentException("two nodes have the MiniPG address " + n.agentUrl());
             }
             if (taken.containsKey(u)) {
-                throw new IllegalArgumentException(n.agentUrl() + " is already the agent of " + taken.get(u));
+                throw new IllegalArgumentException(n.agentUrl() + " is already the MiniPG of " + taken.get(u));
             }
             if (n.pgHost() == null || n.pgHost().isBlank()) {
                 throw new IllegalArgumentException(n.name() + ": the PostgreSQL address is required (the node's own,"
@@ -238,10 +238,10 @@ public class ClusterWizardService {
         List<NodeLive> online = live.stream().filter(NodeLive::online).toList();
         for (NodeLive l : live) {
             if (!l.online()) {
-                out.add(new Check(l.node(), "Agent answers", "FAIL", "not enrolled or not running: " + l.error()));
+                out.add(new Check(l.node(), "MiniPG answers", "FAIL", "not enrolled or not running: " + l.error()));
             } else if (l.status().identity().clusterId() != null
                     && !l.status().identity().clusterId().equals(clusterId)) {
-                out.add(new Check(l.node(), "Agent belongs to this cluster", "FAIL", "it is bound to cluster "
+                out.add(new Check(l.node(), "MiniPG belongs to this cluster", "FAIL", "it is bound to cluster "
                         + l.status().identity().cluster()));
             }
         }
@@ -344,7 +344,7 @@ public class ClusterWizardService {
                             || "OK".equals(level) ? "" : " — fix: " + c.str("fix"))));
                 }
             } catch (AgentCallException e) {
-                out.add(new Check(l.node(), "Readiness checks", "WARN", "the agent cannot run them (" + e.detail()
+                out.add(new Check(l.node(), "Readiness checks", "WARN", "the MiniPG cannot run them (" + e.detail()
                         + "); update it, or check with 'minipgagent setup --dry-run'"));
             }
         }
@@ -460,7 +460,7 @@ public class ClusterWizardService {
             ApiResult r = a.unbind(st == null ? 0 : st.epoch());
             unbind = r.message();
         } catch (AgentCallException e) {
-            unbind = "its agent was not unbound (" + e.detail() + ")";
+            unbind = "its MiniPG was not unbound (" + e.detail() + ")";
         }
         hub.registry().saveSpec(c.id(), spec.withNodes(nodes));
         c.watcher().eventLog().publish(EventType.CONTROL_CHANGED, node, "Node " + node + " removed from " + cluster

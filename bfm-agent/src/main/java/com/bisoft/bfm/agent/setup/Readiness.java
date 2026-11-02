@@ -140,7 +140,7 @@ public final class Readiness {
             }
             return new Check("Database", Level.WARN, "this instance holds another database (system identifier "
                     + mine + ", the cluster's is " + cluster + ")", "re-initialize the node from the console once"
-                    + " its agent runs: it is copied from the primary", List.of(), List.of(), false);
+                    + " its MiniPG runs: it is copied from the primary", List.of(), List.of(), false);
         } catch (Exception e) {
             return new Check("Database", Level.WARN, "system identifier unknown: " + e.getMessage(), null,
                     List.of(), List.of(), false);

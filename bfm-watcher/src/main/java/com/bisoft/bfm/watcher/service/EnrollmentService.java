@@ -145,12 +145,12 @@ public class EnrollmentService {
 
     private Issued issue(Target c, String node, String user) {
         if (!ca.exists()) {
-            throw new IllegalStateException("this watcher has no CA, so it cannot enroll agents; create one with"
+            throw new IllegalStateException("this watcher has no CA, so it cannot enroll MiniPGs; create one with"
                     + " 'bfm-watcher ca init' (or import yours with 'bfm-watcher ca import'), or give the node a"
                     + " certificate bundle from bfm-make-certs");
         }
         NodeConfig n = c.node(node).orElseThrow(() ->
-                new IllegalArgumentException("cluster " + c.name() + " has no node " + node + " (with an agent"
+                new IllegalArgumentException("cluster " + c.name() + " has no node " + node + " (with a MiniPG"
                         + " address)"));
         byte[] raw = new byte[16];
         RANDOM.nextBytes(raw);

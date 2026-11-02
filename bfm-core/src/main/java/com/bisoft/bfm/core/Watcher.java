@@ -491,7 +491,7 @@ public class Watcher implements AutoCloseable {
         return check;
     }
 
-    private static final String STILL_SILENT = "; its agent does not answer now";
+    private static final String STILL_SILENT = "; its MiniPG does not answer now";
 
     /** The first time the recorded primary is seen running, its system identifier becomes the cluster's. */
     private String recordSystemIdentifier(ClusterView raw, String primary, String id) {
@@ -528,7 +528,7 @@ public class Watcher implements AutoCloseable {
             String before = seenBinding.put(n.name(), bound == null ? "" : bound);
             if (check.clusterId().equals(bound)) {
                 if ("".equals(before)) {
-                    events.publish(EventType.OPERATION, n.name(), "The MiniPG agent on " + n.name() + " is bound to"
+                    events.publish(EventType.OPERATION, n.name(), "The MiniPG on " + n.name() + " is bound to"
                             + " cluster " + cfg.name() + " (" + check.clusterId() + "); it refuses commands for any"
                             + " other cluster from now on", actor);
                 }
@@ -660,7 +660,7 @@ public class Watcher implements AutoCloseable {
         String key = "epoch-conflict";
         if (max > st.epoch()) {
             if (activeAlerts.add(key)) {
-                events.publish(EventType.EPOCH_CONFLICT, null, "An agent is at epoch " + max + ", newer than the"
+                events.publish(EventType.EPOCH_CONFLICT, null, "A MiniPG is at epoch " + max + ", newer than the"
                         + " watcher state (" + st.epoch() + "). Another watcher may be steering this cluster;"
                         + " automatic actions are paused until an operator starts an operation.", actor);
             }
@@ -1306,7 +1306,7 @@ public class Watcher implements AutoCloseable {
                     || (n.reachable() && !n.status().pgRunning() && !n.busy());
             condition("down/" + name, down,
                     () -> events.publish(EventType.NODE_DOWN, name, n.reachable() ? "PostgreSQL on " + name
-                            + " is not running" : "Agent on " + name + " does not answer (" + n.error() + ")", actor),
+                            + " is not running" : "MiniPG on " + name + " does not answer (" + n.error() + ")", actor),
                     () -> events.publish(EventType.NODE_BACK, name, name + " is back", actor));
             // lag
             Long l = ClusterView.lagBytes(p, n);
@@ -1513,7 +1513,7 @@ public class Watcher implements AutoCloseable {
         ClusterState st = readState();
         if (st == null) {
             throw new StateConflictException("the watcher has not created the cluster state yet; wait for the first"
-                    + " poll of every agent");
+                    + " poll of every MiniPG");
         }
         NodeView pv = st.primary() == null ? null : view.node(st.primary()).orElse(null);
         if (pv != null && pv.runningPrimary() && !st.primary().equals(node)) {

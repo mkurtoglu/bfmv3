@@ -124,8 +124,8 @@ public class AgentHttpServer {
                 // the same CA, must not be able to promote or fence this node
                 LOG.warning("refused a call from certificate CN=" + caller + " (not in tls.allowed.clients)");
                 status = 403;
-                reply = ApiResult.fail("certificate CN=" + caller + " may not call this agent: add it to"
-                        + " tls.allowed.clients in agent.properties and restart the agent");
+                reply = ApiResult.fail("certificate CN=" + caller + " may not call this MiniPG: add it to"
+                        + " tls.allowed.clients in agent.properties and restart the MiniPG");
             } else {
                 String path = ex.getRequestURI().getPath();
                 String key = ex.getRequestMethod() + " " + path;

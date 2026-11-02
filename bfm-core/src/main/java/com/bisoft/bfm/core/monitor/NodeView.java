@@ -47,7 +47,7 @@ public record NodeView(NodeConfig config, NodeStatus status, String error, long 
     public String stateLabel() {
         if (status == null) {
             return error != null && error.startsWith(com.bisoft.bfm.core.state.ClusterIdentity.WRONG_IDENTITY)
-                    ? "Wrong identity" : "Agent unreachable";
+                    ? "Wrong identity" : "MiniPG unreachable";
         }
         if (status.fenced()) {
             return status.pgRunning() ? "Fenced (running)" : "Fenced";

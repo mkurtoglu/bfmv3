@@ -117,7 +117,7 @@ public final class FakeCluster implements AgentClientFactory {
 
         private void reachable() {
             if (wrongCertificate != null) {
-                throw AgentCallException.unreachable(name, "wrong identity: the agent at " + host
+                throw AgentCallException.unreachable(name, "wrong identity: the MiniPG at " + host
                         + ":8008 presents a certificate for " + wrongCertificate + ", not for node " + name);
             }
             if (!agentUp) {
@@ -129,11 +129,11 @@ public final class FakeCluster implements AgentClientFactory {
         private void bind() {
             String sent = sentCluster;
             if (boundCluster != null && sent != null && !boundCluster.equals(sent)) {
-                throw conflict("this agent belongs to cluster " + boundClusterName + " (" + boundCluster + ") as "
+                throw conflict("this MiniPG belongs to cluster " + boundClusterName + " (" + boundCluster + ") as "
                         + name + "; the command is for cluster " + sentClusterName + " (" + sent + ")");
             }
             if (boundCluster != null && sent == null) {
-                throw conflict("this agent belongs to cluster " + boundCluster + "; the command names no cluster");
+                throw conflict("this MiniPG belongs to cluster " + boundCluster + "; the command names no cluster");
             }
             if (boundCluster == null && sent != null) {
                 boundCluster = sent;
@@ -144,7 +144,7 @@ public final class FakeCluster implements AgentClientFactory {
         private void epoch(long e) {
             bind();
             if (e < epoch) {
-                throw new AgentCallException(name, 409, "stale epoch " + e + " (agent is at " + epoch + ")");
+                throw new AgentCallException(name, 409, "stale epoch " + e + " (MiniPG is at " + epoch + ")");
             }
             epoch = e;
         }

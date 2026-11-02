@@ -49,8 +49,8 @@ class AgentIdentityTest {
 
         AgentException other = assertThrows(AgentException.class, () -> b.check(command(2, CRM, "crm")));
         assertEquals(409, other.httpStatus());
-        assertEquals("this agent belongs to cluster erp (" + ERP + ") as pg-a2; the command is for cluster crm ("
-                + CRM + ") (check the agent URL and port)", other.getMessage());
+        assertEquals("this MiniPG belongs to cluster erp (" + ERP + ") as pg-a2; the command is for cluster crm ("
+                + CRM + ") (check the MiniPG URL and port)", other.getMessage());
         AgentException none = assertThrows(AgentException.class, () -> b.check(command(2, null, null)));
         assertTrue(none.getMessage().contains("names no cluster"), none.getMessage());
 

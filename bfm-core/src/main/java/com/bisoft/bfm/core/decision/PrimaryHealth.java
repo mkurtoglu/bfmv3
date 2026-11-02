@@ -40,7 +40,7 @@ public enum PrimaryHealth {
     public String describe(String node) {
         return switch (this) {
             case OK -> node + " is running as primary";
-            case AGENT_UNREACHABLE -> "agent on " + node + " does not answer";
+            case AGENT_UNREACHABLE -> "MiniPG on " + node + " does not answer";
             case PG_DOWN -> "PostgreSQL on " + node + " is not running";
             case FENCED -> node + " is fenced";
             case NOT_PRIMARY -> node + " is running in recovery, not as primary";

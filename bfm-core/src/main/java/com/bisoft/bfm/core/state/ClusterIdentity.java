@@ -93,7 +93,7 @@ public final class ClusterIdentity {
         /** Why this status must not be acted on, or null when it is this cluster's node. */
         public String problem(NodeStatus s) {
             if (boundElsewhere(clusterId, s)) {
-                return "its agent belongs to cluster " + s.identity().cluster() + " (check the agent URL and port)";
+                return "its MiniPG belongs to cluster " + s.identity().cluster() + " (check the MiniPG URL and port)";
             }
             if (foreign(systemId, s)) {
                 return "it holds another database (system identifier " + s.systemIdentifier() + ", this cluster's is "

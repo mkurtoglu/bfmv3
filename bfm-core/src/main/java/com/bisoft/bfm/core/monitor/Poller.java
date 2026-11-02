@@ -52,7 +52,7 @@ public class Poller implements AutoCloseable {
                 status = f.get(waitNanos, TimeUnit.NANOSECONDS);
             } catch (TimeoutException e) {
                 f.cancel(true);
-                error = "agent did not answer in time";
+                error = "MiniPG did not answer in time";
             } catch (ExecutionException e) {
                 error = e.getCause() instanceof AgentCallException ace ? ace.detail()
                         : e.getCause() == null ? e.getMessage() : e.getCause().getMessage();

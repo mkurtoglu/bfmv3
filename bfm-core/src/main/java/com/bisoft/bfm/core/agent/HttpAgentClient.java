@@ -244,7 +244,7 @@ public class HttpAgentClient implements AgentClient {
             Thread.currentThread().interrupt();
             throw new AgentCallException(node, "interrupted", e);
         } catch (IllegalArgumentException e) {
-            throw new AgentCallException(node, "bad agent URL " + baseUrl + ": " + e.getMessage(), e);
+            throw new AgentCallException(node, "bad MiniPG URL " + baseUrl + ": " + e.getMessage(), e);
         }
         int status = resp.statusCode();
         if (status >= 200 && status < 300) {
@@ -284,10 +284,10 @@ public class HttpAgentClient implements AgentClient {
                     + " firewalled)";
         }
         if (e instanceof java.net.http.HttpTimeoutException) {
-            return "the agent at " + where + " did not reply within " + timeout.toMillis() / 1000.0 + " s";
+            return "the MiniPG at " + where + " did not reply within " + timeout.toMillis() / 1000.0 + " s";
         }
         if (root instanceof java.net.ConnectException || e instanceof java.net.ConnectException) {
-            return "connection refused by " + where + " (agent not running, or wrong port)";
+            return "connection refused by " + where + " (MiniPG not running, or wrong port)";
         }
         if (root instanceof java.net.UnknownHostException) {
             return "unknown host in " + where;

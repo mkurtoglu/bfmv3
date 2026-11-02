@@ -6,7 +6,7 @@ package com.bisoft.bfm.core.event;
 public enum MailRule {
     FAILOVER("Automatic failover started / finished", Severity.CRITICAL, 0, true),
     PRIMARY_UNREACHABLE("Primary unreachable by watcher quorum", Severity.CRITICAL, 0, true),
-    AGENT_FENCED("Agent self-fenced (lease lost)", Severity.CRITICAL, 0, true),
+    AGENT_FENCED("MiniPG self-fenced (lease lost)", Severity.CRITICAL, 0, true),
     REPLICA_LAG("Replica lag above threshold", Severity.WARNING, 15 * 60_000L, true),
     INACTIVE_SLOT("Inactive slot holding WAL above threshold", Severity.WARNING, 60 * 60_000L, true),
     WATCHER("Watcher lost or rejoined", Severity.WARNING, 15 * 60_000L, true),

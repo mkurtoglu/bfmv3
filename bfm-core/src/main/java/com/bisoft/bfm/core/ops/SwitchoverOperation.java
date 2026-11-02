@@ -112,7 +112,7 @@ public final class SwitchoverOperation extends Operation {
             return out;
         }
         if (t == null || !t.reachable()) {
-            out.add(PreCheck.fail("Agent on " + target + " online", t == null ? "not polled yet" : t.error()));
+            out.add(PreCheck.fail("MiniPG on " + target + " online", t == null ? "not polled yet" : t.error()));
             return out;
         }
         Integer ptl = p.status().timeline();
@@ -128,13 +128,13 @@ public final class SwitchoverOperation extends Operation {
             out.add(PreCheck.fail("Target is not fenced", t.status().fencedReason()));
         }
         if (t.busy() || p.busy()) {
-            out.add(PreCheck.fail("Agents are idle", (t.busy() ? target : state.primary()) + " is busy"));
+            out.add(PreCheck.fail("MiniPGs are idle", (t.busy() ? target : state.primary()) + " is busy"));
         }
         long e = state.epoch();
         if (p.status().epoch() > e || t.status().epoch() > e) {
-            out.add(PreCheck.warn("Agents on both nodes online, epoch " + e, "an agent reports a newer epoch"));
+            out.add(PreCheck.warn("MiniPGs on both nodes online, epoch " + e, "a MiniPG reports a newer epoch"));
         } else {
-            out.add(PreCheck.pass("Agents on both nodes online, epoch " + e, "Pass"));
+            out.add(PreCheck.pass("MiniPGs on both nodes online, epoch " + e, "Pass"));
         }
         if (vipDryRun) {
             out.add(vipDryRun(ctx, target));
@@ -196,7 +196,7 @@ public final class SwitchoverOperation extends Operation {
 
     /** Runs arping -D through the target agent: proves sudo works and shows whether the VIP is taken. */
     static PreCheck vipDryRun(OpContext ctx, String target) {
-        String title = "Target agent may run sudo ip / arping (dry run)";
+        String title = "Target MiniPG may run sudo ip / arping (dry run)";
         try {
             ApiResult vc = ctx.agent(target).vipCheck();
             String msg = vc.message() == null ? "" : vc.message();
@@ -365,7 +365,7 @@ public final class SwitchoverOperation extends Operation {
                 if (settlesAsPrimary(target, SETTLE_MS)) {
                     madePrimary = target;
                     ctx.lease().granted();
-                    progress.done("promote", "promoted (agent reported: " + e.detail() + ")");
+                    progress.done("promote", "promoted (MiniPG reported: " + e.detail() + ")");
                 } else {
                     progress.failed("promote", e.detail());
                     throw new Abort("promote of " + target + " did not complete and its state is unknown ("
@@ -442,7 +442,7 @@ public final class SwitchoverOperation extends Operation {
             }
         }
         if (oldUnknown) {
-            return target + " stays a replica; the agent on " + oldPrimary + " does not answer, so its state is"
+            return target + " stays a replica; the MiniPG on " + oldPrimary + " does not answer, so its state is"
                     + " unknown";
         }
         if (!oldStopped) {

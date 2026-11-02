@@ -80,8 +80,8 @@ public final class NodeRepairOperation extends Operation {
         }
         NodeStatus me = rawStatus(node);
         if (me == null) {
-            progress.failed("check", "agent unreachable");
-            throw new Abort("the agent on " + node + " does not answer");
+            progress.failed("check", "MiniPG unreachable");
+            throw new Abort("the MiniPG on " + node + " does not answer");
         }
         String problem = ctx.identity().get().problem(me);
         // Another database in this node's data directory can be replaced by a re-initialize an operator asked

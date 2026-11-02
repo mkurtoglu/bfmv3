@@ -490,7 +490,7 @@ class WatcherTest {
         cluster.crash("pg-a1");
         tick();
         Watcher.StateSince down = watcher.stateSince("pg-a1");
-        assertEquals("Agent unreachable", down.label());
+        assertEquals("MiniPG unreachable", down.label());
         assertTrue(down.sinceMillis() > running.sinceMillis());
         assertTrue(watcher.failoverBlockedReason() == null || watcher.failoverBlockedReason().contains("maintenance"));
         ticks(3);
@@ -959,7 +959,7 @@ class WatcherTest {
         assertFalse(hasEvent(EventType.FAILOVER_STARTED));
         assertFalse(watcher.events(20).stream().anyMatch(e -> e.type() == EventType.NODE_BACK
                 && e.message().contains("answers as a node")));
-        assertTrue(watcher.identity().problem("pg-a1").endsWith("its agent does not answer now"));
+        assertTrue(watcher.identity().problem("pg-a1").endsWith("its MiniPG does not answer now"));
         cluster.node("pg-a1").agentUp = true;
         tick();
         assertTrue(watcher.identity().problems().isEmpty());

@@ -146,9 +146,9 @@ public final class NodeNameTrustManager extends X509ExtendedTrustManager {
                 return;
             }
         }
-        throw new NodeNameMismatchException("the agent at " + host + ":" + port + " presents a certificate for "
+        throw new NodeNameMismatchException("the MiniPG at " + host + ":" + port + " presents a certificate for "
                 + (names.isEmpty() ? "no name" : String.join(", ", names)) + ", not for node " + node
-                + " (check the agent URL and port, or turn off bfm.agent.tls.verify-node-name for certificates"
+                + " (check the MiniPG URL and port, or turn off bfm.agent.tls.verify-node-name for certificates"
                 + " issued without node names)");
     }
 

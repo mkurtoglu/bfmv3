@@ -87,7 +87,7 @@ public abstract class Operation implements Runnable {
     }
 
     protected void logResult(String node, String what, ApiResult r) {
-        log("agent " + node, what + (r.message() == null ? " ok" : ": " + r.message()));
+        log("MiniPG " + node, what + (r.message() == null ? " ok" : ": " + r.message()));
     }
 
     // ---- agents ----
@@ -298,7 +298,7 @@ public abstract class Operation implements Runnable {
             }
             List<String> lines = st.log() == null ? List.of() : st.log();
             for (int i = shown; i < lines.size(); i++) {
-                log("agent " + node, lines.get(i));
+                log("MiniPG " + node, lines.get(i));
             }
             shown = Math.max(shown, lines.size());
             if (st.finished()) {

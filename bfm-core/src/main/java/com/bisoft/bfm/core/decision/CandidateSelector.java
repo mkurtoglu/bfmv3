@@ -151,7 +151,7 @@ public final class CandidateSelector {
         }
         if (!v.reachable()) {
             return v.error() != null && v.error().startsWith(com.bisoft.bfm.core.state.ClusterIdentity.WRONG_IDENTITY)
-                    ? v.error() : "agent unreachable";
+                    ? v.error() : "MiniPG unreachable";
         }
         if (v.fenced()) {
             return "fenced";

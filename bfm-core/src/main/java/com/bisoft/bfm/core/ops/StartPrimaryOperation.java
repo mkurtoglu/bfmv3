@@ -70,8 +70,8 @@ public final class StartPrimaryOperation extends Operation {
             me = new NodeView(me.config(), raw, null, me.observedAtMillis(), 0);
         }
         if (!me.reachable()) {
-            progress.failed("check", "agent unreachable");
-            throw new Abort("the agent on " + node + " does not answer");
+            progress.failed("check", "MiniPG unreachable");
+            throw new Abort("the MiniPG on " + node + " does not answer");
         }
         if (me.runningReplica()) {
             progress.failed("check", node + " runs as a replica");
@@ -156,7 +156,7 @@ public final class StartPrimaryOperation extends Operation {
                     progress.done("start", r.message());
                 } catch (AgentCallException e) {
                     if (!refusedBeforeActing(e) && settlesAsPrimary(node, SETTLE_MS)) {
-                        progress.done("start", "started (agent reported: " + e.detail() + ")");
+                        progress.done("start", "started (MiniPG reported: " + e.detail() + ")");
                     } else {
                         progress.failed("start", e.detail());
                         if (refusedBeforeActing(e)) {

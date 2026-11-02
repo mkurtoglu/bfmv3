@@ -32,7 +32,7 @@ public class EpochStore {
     /** Accepts {@code epoch} if it is not older than the stored one and remembers it. */
     public synchronized void accept(long epoch) {
         if (epoch < current) {
-            throw AgentException.conflict("stale epoch " + epoch + " (agent is at " + current + ")");
+            throw AgentException.conflict("stale epoch " + epoch + " (MiniPG is at " + current + ")");
         }
         if (epoch > current) {
             try {

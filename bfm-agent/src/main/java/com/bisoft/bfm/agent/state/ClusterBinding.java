@@ -80,13 +80,13 @@ public class ClusterBinding {
         String sent = blankToNull(body.str("clusterId"));
         String sentName = blankToNull(body.str("clusterName"));
         if (clusterId != null && sent != null && !clusterId.equals(sent)) {
-            throw AgentException.conflict("this agent belongs to cluster " + describe(clusterId, clusterName)
+            throw AgentException.conflict("this MiniPG belongs to cluster " + describe(clusterId, clusterName)
                     + " as " + node + "; the command is for cluster " + describe(sent, sentName)
-                    + " (check the agent URL and port)");
+                    + " (check the MiniPG URL and port)");
         }
         if (clusterId != null && sent == null) {
-            throw AgentException.conflict("this agent belongs to cluster " + describe(clusterId, clusterName)
-                    + " as " + node + "; the command names no cluster (a watcher older than this agent?)");
+            throw AgentException.conflict("this MiniPG belongs to cluster " + describe(clusterId, clusterName)
+                    + " as " + node + "; the command names no cluster (a watcher older than this MiniPG?)");
         }
         if (clusterId == null && sent != null) {
             clusterId = sent;
