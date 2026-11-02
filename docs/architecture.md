@@ -233,19 +233,21 @@ primary) or *Build* (start one node as primary and re-initialize the others from
 | `lease-ttl` / `lease-margin` | 30 s / 5 s | how long a primary lives without renewals (self-fencing), and the extra wait before promoting |
 | `observation-fresh` | 10 s | how old another watcher's observation may be for the quorum |
 | `max-lag` | 16 MB | replicas further behind are not promoted automatically |
-| `failover-retry` | 60 s | wait after a failed or blocked failover |
+| `failover-retry` | 60 s | wait after a failed or blocked failover (not after one a replica's confirmation stopped: that is looked at again at the next poll) |
 | `switchover-catchup` | 60 s | how long a switchover waits for the target to replay the final LSN |
 | agent `probe.interval.ms` | 1 s | how fresh the agent's status is |
 
 Measured on three PostgreSQL 16 servers in a cloud network (no VIP, no self-fencing): the failover itself — epoch,
-promote, record, re-point — takes about 10 s. Detection takes `failure-threshold` polls, about 6–15 s. What decides
-the total is the replica confirmation. When the primary's host crashes, its port stops answering and the
-confirmation passes at once: about 15–20 s in all. When the host is only cut off from the network, no TCP reset
-reaches the replicas: their WAL receivers keep reporting the stream until PostgreSQL's `wal_receiver_timeout` (60 s
-by default) ends it, every such replica blocks the failover, and a blocked attempt is retried after
-`failover-retry` (60 s) — 60 to 105 s on the test. A lower `wal_receiver_timeout` shortens that. With self-fencing,
-the lease wait adds up to `lease-ttl` + `lease-margin` counted from the last renewal; that is the price of ruling
-out two primaries when the old one is only cut off, not dead.
+promote, record, re-point — takes about 10 s, and detection takes `failure-threshold` polls, about 6–15 s (an
+unreachable agent costs its `agent-timeout` per poll). What decides the rest is the replica confirmation. When the
+primary's host is cut off from the network rather than down, no TCP reset reaches the replicas: their WAL receivers
+keep reporting the stream until PostgreSQL's `wal_receiver_timeout` ends it, and while one does the failover waits.
+A failover stopped only by that confirmation has done nothing yet (no epoch raised), so the watcher looks again at
+the next poll and keeps no record of the empty attempt; any other failed or blocked attempt waits `failover-retry`.
+`minipgagent setup` proposes `wal_receiver_timeout = 10s` (the default is 60 s). A network cut then took 37 s in all;
+with the default 60 s and the old 60 s retry wait it took 62–105 s. With self-fencing, the lease wait adds up to
+`lease-ttl` + `lease-margin` counted from the last renewal; that is the price of ruling out two primaries when the
+old one is only cut off, not dead.
 
 The returning old primary of those tests was fenced within 3 s of answering again and rejoined with `pg_rewind` in
 about 35 s, with no data lost (the last WAL position seen on the old primary had reached the new one).

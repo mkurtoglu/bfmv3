@@ -153,7 +153,11 @@ max_wal_senders = 10          # at least (nodes - 1) + 2
 max_replication_slots = 10    # BFM creates one physical slot per replica
 hot_standby = on
 listen_addresses = '*'        # or the node address and the VIP
+wal_receiver_timeout = 10s    # not a default: replicas notice a primary cut off from the network within 10 s
 ```
+
+A primary cut off from the network sends no TCP reset: its replicas keep reporting the stream until
+`wal_receiver_timeout` ends it (60 s by default), and while one does, an automatic failover waits.
 
 `full_page_writes` must stay `on` (the default) for `pg_rewind`.
 

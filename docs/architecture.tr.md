@@ -235,19 +235,21 @@ küme içindir.
 | `lease-ttl` / `lease-margin` | 30 sn / 5 sn | bir primary'nin yenileme almadan ne kadar yaşadığı (self-fencing) ve promote öncesi ek bekleme |
 | `observation-fresh` | 10 sn | çoğunluk kontrolü için başka bir watcher'ın gözleminin en fazla ne kadar eski olabileceği |
 | `max-lag` | 16 MB | daha gerideki replica'lar otomatik promote edilmez |
-| `failover-retry` | 60 sn | başarısız veya engellenen bir failover'dan sonraki bekleme |
+| `failover-retry` | 60 sn | başarısız veya engellenen bir failover'dan sonraki bekleme (bir replica'nın doğrulamasının durdurduğu deneme için değil: o bir sonraki sorguda yeniden bakılır) |
 | `switchover-catchup` | 60 sn | switchover'ın hedefin son LSN'i uygulamasını ne kadar beklediği |
 | agent `probe.interval.ms` | 1 sn | agent durumunun ne kadar taze olduğu |
 
 Bir bulut ağındaki üç PostgreSQL 16 sunucusunda ölçüldü (VIP yok, self-fencing yok). Failover'ın kendisi — epoch,
-promote, kayıt, yeniden yönlendirme — yaklaşık 10 sn sürer. Tespit `failure-threshold` sorgu, yaklaşık 6–15 sn sürer.
-Toplamı belirleyen replica doğrulamasıdır. Primary'nin sunucusu çöktüğünde portu yanıt vermez olur ve doğrulama
-hemen geçer: toplamda yaklaşık 15–20 sn. Sunucu yalnızca ağdan koparsa replica'lara hiçbir TCP sıfırlaması ulaşmaz:
-WAL alıcıları, PostgreSQL'in `wal_receiver_timeout` süresi (varsayılan 60 sn) bitirene kadar stream'i sürüyor
-gösterir, böyle her replica failover'ı engeller ve engellenen bir deneme `failover-retry` (60 sn) sonra yinelenir —
-testte 60 ile 105 sn arası. Daha düşük bir `wal_receiver_timeout` bunu kısaltır. Self-fencing açıkken lease
-beklemesi, son yenilemeden itibaren en fazla `lease-ttl` + `lease-margin` ekler; eski primary ölmemiş, yalnızca
-kopmuşsa iki primary olasılığını dışlamanın bedeli budur.
+promote, kayıt, yeniden yönlendirme — yaklaşık 10 sn sürer; tespit `failure-threshold` sorgu, yaklaşık 6–15 sn sürer
+(ulaşılamayan bir agent her sorguda `agent-timeout` kadar zaman alır). Gerisini replica doğrulaması belirler.
+Primary'nin sunucusu çökmek yerine yalnızca ağdan koparsa replica'lara hiçbir TCP sıfırlaması ulaşmaz: WAL
+alıcıları, PostgreSQL'in `wal_receiver_timeout` süresi bitirene kadar stream'i sürüyor gösterir ve biri bunu yaptıkça
+failover bekler. Yalnızca bu doğrulamanın durdurduğu bir failover henüz hiçbir şey yapmamıştır (epoch artmamıştır);
+bu yüzden watcher bir sonraki sorguda yeniden bakar ve boş denemenin kaydını tutmaz. Başarısız veya engellenen diğer
+her deneme `failover-retry` kadar bekler. `minipgagent setup`, `wal_receiver_timeout = 10s` önerir (varsayılan 60
+sn). Bir ağ kesintisi böylece toplamda 37 sn sürdü; varsayılan 60 sn ve eski 60 sn'lik bekleme ile 62–105 sn
+sürmüştü. Self-fencing açıkken lease beklemesi, son yenilemeden itibaren en fazla `lease-ttl` + `lease-margin`
+ekler; eski primary ölmemiş, yalnızca kopmuşsa iki primary olasılığını dışlamanın bedeli budur.
 
 Bu testlerde geri dönen eski primary, yeniden yanıt vermeye başladıktan sonraki 3 sn içinde fence edildi ve
 yaklaşık 35 sn'de `pg_rewind` ile yeniden katıldı; hiçbir veri kaybolmadı (eski primary'de görülen son WAL konumu

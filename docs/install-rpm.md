@@ -200,7 +200,8 @@ The wizard:
    must see it, or the network hides duplicates (some cloud networks do) and the agent will keep the VIP down
    rather than trust a check that sees nothing. Answer `none` only for a node without a VIP.
 4. **Checks PostgreSQL** and offers each fix separately: version, the cluster's database, `wal_level`,
-   `wal_log_hints`, senders and slots, `hot_standby`, `listen_addresses`, the replication role (on a primary it
+   `wal_log_hints`, senders and slots, `hot_standby`, `listen_addresses`, `wal_receiver_timeout`, the replication
+   role (on a primary it
    creates it with the password you give, which also goes into `.pgpass`, and grants it the functions
    `pg_rewind` needs: the agent rewinds as this role, no superuser logs in over the network), `pg_hba.conf`
    entries for every node — this one included, because the file is copied with the data when another node is
@@ -304,11 +305,13 @@ switch back. On a test cluster, also stop the primary's host and watch the autom
 
 **Mail.** Set the SMTP server, recipients and rules on the *Notifications* page and send a test mail.
 
-**How long a failover takes.** When the primary's host crashes, its agent and port stop answering at once and the
-failover finishes in about 15–20 s. When the host is only cut off from the network, nothing tells the replicas:
-they keep reporting the stream until PostgreSQL's `wal_receiver_timeout` (60 s by default) ends it, every replica
-that still "streams" blocks the failover, and a blocked attempt is retried after `failover-retry` (60 s). On the
-cloud test that took 60–105 s. A lower `wal_receiver_timeout` on every node makes the replicas notice sooner.
+**How long a failover takes.** The failover itself (epoch, promote, record, re-point) takes about 10 s, and
+finding the primary lost takes three polls, about 6–15 s. When the primary's host is cut off from the network
+rather than down, no TCP reset reaches the replicas: they keep reporting the stream until PostgreSQL's
+`wal_receiver_timeout` ends it, and while one does the failover waits (the watcher looks again at every poll).
+`minipgagent setup` therefore proposes `wal_receiver_timeout = 10s` instead of the default 60 s. Measured on cloud
+servers for a network cut: 37 s with 10 s; 62–105 s with the default 60 s before the watcher looked again at every
+poll.
 
 ---
 

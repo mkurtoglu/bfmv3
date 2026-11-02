@@ -203,7 +203,7 @@ Sihirbaz (soruları İngilizcedir):
    görmelidir; göremiyorsa ağ çakışmaları gizliyor demektir (bazı bulut ağları böyledir) ve agent hiçbir şey
    görmeyen bir kontrole güvenmek yerine VIP'i kapalı tutar. `none` cevabını yalnızca VIP'siz bir node için verin.
 4. **PostgreSQL'i kontrol eder** ve her düzeltmeyi ayrı ayrı önerir: sürüm, kümenin veritabanı, `wal_level`,
-   `wal_log_hints`, sender'lar ve slot'lar, `hot_standby`, `listen_addresses`, replikasyon rolü (primary'de rolü
+   `wal_log_hints`, sender'lar ve slot'lar, `hot_standby`, `listen_addresses`, `wal_receiver_timeout`, replikasyon rolü (primary'de rolü
    verdiğiniz parolayla oluşturur — aynı parola `.pgpass`'e de yazılır — ve `pg_rewind`'in ihtiyaç duyduğu
    fonksiyon yetkilerini verir: agent bu rolle rewind yapar, ağ üzerinden hiçbir süper kullanıcı bağlanmaz), her
    node için `pg_hba.conf` kayıtları — node'un kendisi dahil, çünkü başka bir node ondan oluşturulurken dosya veriyle
@@ -309,12 +309,13 @@ alın. Bir test kümesinde primary'nin sunucusunu da durdurup otomatik failover'
 **E-posta.** SMTP sunucusunu, alıcıları ve kuralları *Bildirimler* sayfasında ayarlayın ve bir test e-postası
 gönderin.
 
-**Failover ne kadar sürer.** Primary'nin sunucusu çöktüğünde agent'ı ve portu hemen yanıt vermez olur ve failover
-yaklaşık 15–20 saniyede biter. Sunucu yalnızca ağdan koparsa replica'lara bunu söyleyen bir şey olmaz: PostgreSQL'in
-`wal_receiver_timeout` süresi (varsayılan 60 sn) dolana kadar stream'i sürüyor gösterirler, hâlâ "streaming" yapan
-her replica failover'ı engeller ve engellenen bir deneme `failover-retry` (60 sn) sonra yinelenir. Bulut testinde bu
-60–105 saniye sürdü. Her node'da daha düşük bir `wal_receiver_timeout`, replica'ların durumu daha erken fark
-etmesini sağlar.
+**Failover ne kadar sürer.** Failover'ın kendisi (epoch, promote, kayıt, yeniden yönlendirme) yaklaşık 10 saniye
+sürer; primary'nin kaybolduğunu anlamak üç sorgu, yaklaşık 6–15 saniye alır. Primary'nin sunucusu çökmek yerine
+yalnızca ağdan koparsa replica'lara hiçbir TCP sıfırlaması ulaşmaz: PostgreSQL'in `wal_receiver_timeout` süresi
+bitirene kadar stream'i sürüyor gösterirler ve biri bunu yaptıkça failover bekler (watcher her sorguda yeniden
+bakar). Bu yüzden `minipgagent setup`, varsayılan 60 saniye yerine `wal_receiver_timeout = 10s` önerir. Bulut
+sunucularında ağ kesintisi için ölçülen: 10 sn ile 37 saniye; varsayılan 60 sn ile, watcher her sorguda yeniden
+bakmadan önce 62–105 saniye.
 
 ---
 
