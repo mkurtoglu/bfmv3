@@ -255,6 +255,17 @@ Bu testlerde geri dönen eski primary, yeniden yanıt vermeye başladıktan sonr
 yaklaşık 35 sn'de `pg_rewind` ile yeniden katıldı; hiçbir veri kaybolmadı (eski primary'de görülen son WAL konumu
 yeni primary'ye ulaşmıştı).
 
+Üç watcher ve self-fencing ile, aynı sunucularda (VIP her node'da `ip addr` ile, saniyede bir örneklenerek kontrol
+edildi; bu ağ VIP'i istemcilere taşımaz):
+
+- **Lider durur**: 4 sn sonra başka bir watcher liderdi; küme sağlıklı kaldı, lease'i yeni lider yeniledi.
+- **Primary ağdan kopar**: lease'i dolunca 29 sn sonra kendini durdurdu; watcher'lar yeni primary VIP'i almadan önce o
+  lease'i bekledi, VIP 9 sn sonra yeni primary'deydi; failover kesintiden 43 sn sonra bitti. VIP hiçbir zaman iki
+  node'da birden değildi. Ağa dönen eski primary `pg_rewind` ile yeniden katıldı; veri kaybı yok.
+- **Üç watcher'dan ikisi durur**: çoğunluk olmadan hiçbir watcher hareket edemez; lease yenilenmedi ve primary 33 sn
+  sonra kendini durdurdu — yazma yok, ama ikinci bir primary de yok. Watcher'lar dönünce lider onu agent'ı yanıt veren
+  ama fence edilmiş halde buldu ve yerinde yeniden başlattı; watcher'lar başlatıldıktan 49 sn sonra küme sağlıklıydı.
+
 ## 10. Güvenlik
 
 - **Agent'lar** yalnızca BFM CA'sının imzaladığı bir istemci sertifikasıyla HTTPS konuşur; `tls.allowed.clients`

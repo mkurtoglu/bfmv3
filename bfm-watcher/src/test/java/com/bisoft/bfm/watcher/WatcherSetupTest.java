@@ -65,6 +65,34 @@ class WatcherSetupTest {
     }
 
     @Test
+    void saysThatASingleWatchersStateDoesNotMoveIntoARaftGroup() throws Exception {
+        // cloud test 2026-11-02: setup on a watcher that already ran alone started an empty group without a word,
+        // and its review said "create secret.key" for the key copied from the first watcher
+        Path data = dir.resolve("data");
+        Files.createDirectories(data);
+        Files.writeString(data.resolve("state.json"), "{}");
+        java.security.SecureRandom r = new java.security.SecureRandom();
+        byte[] key = new byte[32];
+        r.nextBytes(key);
+        Files.writeString(data.resolve("secret.key"), java.util.Base64.getEncoder().encodeToString(key));
+        java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream old = System.out;
+        int code;
+        try {
+            System.setOut(new java.io.PrintStream(buf, true, java.nio.charset.StandardCharsets.UTF_8));
+            code = setup("watcher-id=w1\ndata-dir=" + data + "\ntime-zone=UTC\nport=8443\nnames=10.0.9.1\n"
+                    + "admin=admin\nadmin-password=a-long-password\ncertificates=ca\n"
+                    + "peers=w1=10.0.9.1,w2=10.0.9.2,w3=10.0.9.3\nproceed=yes\n");
+        } finally {
+            System.setOut(old);
+        }
+        String out = buf.toString(java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(0, code, out);
+        assertTrue(out.contains("does not move into the Raft group"), out);
+        assertTrue(out.contains("keep    " + data.resolve("secret.key")), out);
+    }
+
+    @Test
     void refusesARaftGroupOfTwoAndAShortPassword() throws Exception {
         assertEquals(1, setup("data-dir=" + dir.resolve("d") + "\nadmin-password=a-long-password\n"
                 + "peers=w1=a,w2=b\nproceed=yes\n"));

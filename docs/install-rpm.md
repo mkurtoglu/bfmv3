@@ -320,6 +320,15 @@ poll.
 One watcher is a single point of decision: while it is down nothing fails over. Three watchers form a Raft group,
 and the leader acts for every cluster; when it goes, another one takes over within seconds.
 
+**From one watcher to three.** The group starts with an empty shared state: the clusters, the CA and the event log
+of a watcher that ran alone do not move into it (setup says so). Detach its clusters first (*Cluster ▾ → Detach…*;
+PostgreSQL keeps running), take the agents off (`minipgagent remove <instance>`), set up the three watchers as below,
+then add the clusters again on the group with new enrollment commands: *Adopt* keeps the running primary and its
+replicas as they are, and the agents enrolled then accept all three watchers.
+
+A watcher needs about 300 MB of memory. On a small host give it less heap in `/etc/bfm/watcher.env`, for example
+`BFM_WATCHER_JAVA_OPTS="-Xmx256m"` (that ran w2 and w3 on 1 GB hosts on the cloud test).
+
 1. On `w1`, run `bfm-watcher setup` with the peers, this watcher included:
    `w1=10.0.9.1,w2=10.0.9.2,w3=10.0.9.3`. It creates the certificates of all three and prints, for `w2` and
    `w3`, the files to copy: `w2.p12`, `w2.pass`, `ca.p12`, `ca.pass` and `secret.key`.

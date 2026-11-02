@@ -252,6 +252,17 @@ old one is only cut off, not dead.
 The returning old primary of those tests was fenced within 3 s of answering again and rejoined with `pg_rewind` in
 about 35 s, with no data lost (the last WAL position seen on the old primary had reached the new one).
 
+With three watchers and self-fencing, on the same servers (the VIP checked with `ip addr` on every node, sampled
+every second; this network does not carry it to clients):
+
+- **The leader stops**: another watcher led 4 s later; the cluster stayed healthy, the lease renewed by the new leader.
+- **The primary is cut off from the network**: it stopped itself 29 s later when its lease ran out; the watchers
+  waited for that lease before the new primary took the VIP, 9 s after; the failover finished 43 s after the cut. The
+  VIP was never on two nodes. The old primary, back on the network, rejoined with `pg_rewind`; no data lost.
+- **Two of the three watchers stop**: no watcher can act without a majority, so the lease was not renewed and the
+  primary stopped itself 33 s later — no writes, but no second primary either. When the watchers came back, the leader
+  found it fenced with its agent answering and restarted it in place; healthy 49 s after the watchers were started.
+
 ## 10. Security
 
 - **Agents** speak HTTPS only with a client certificate signed by the BFM CA; `tls.allowed.clients` narrows that

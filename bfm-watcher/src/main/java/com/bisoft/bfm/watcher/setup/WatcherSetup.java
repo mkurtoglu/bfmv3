@@ -162,6 +162,13 @@ public final class WatcherSetup {
         if (!peerMap.isEmpty() && peerMap.size() < 3) {
             throw new IllegalArgumentException("a Raft group needs three (or five) watchers");
         }
+        if (!peerMap.isEmpty() && Files.exists(data.resolve("state.json"))) {
+            // cloud test 2026-11-02: the group starts with an empty shared state; nothing said so
+            out.println("   ! this watcher already ran on its own: its state (clusters, CA, event log in "
+                    + data.resolve("state.json") + ") does not move into the Raft group. Detach its clusters first"
+                    + " (Cluster ▾ → Detach…), then enroll the agents again and add the clusters on the group (Adopt"
+                    + " keeps a running primary).");
+        }
 
         Path keystore = etc.resolve(id + ".p12");
         Path keyPass = etc.resolve(id + ".pass");
@@ -196,7 +203,9 @@ public final class WatcherSetup {
             out.println("     write   " + data.resolve("ca-import.p12") + "   (moves into the shared state on the"
                     + " first start)");
         }
-        out.println("     create  " + data.resolve("secret.key") + "   (encrypts stored passwords; back it up)");
+        out.println(Files.exists(data.resolve("secret.key"))
+                ? "     keep    " + data.resolve("secret.key") + "   (encrypts stored passwords; the same on every watcher)"
+                : "     create  " + data.resolve("secret.key") + "   (encrypts stored passwords; back it up)");
         out.println("     " + (systemd ? "run    " : "(skip) ") + " systemctl enable --now bfm-watcher");
         if (dryRun) {
             out.println();

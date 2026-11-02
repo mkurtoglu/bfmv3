@@ -324,6 +324,15 @@ bakmadan önce 62–105 saniye.
 Tek watcher tek bir karar noktasıdır: o kapalıyken hiçbir şey failover yapmaz. Üç watcher bir Raft grubu oluşturur
 ve lider her küme için karar verir; lider gidince birkaç saniye içinde bir diğeri devralır.
 
+**Tek watcher'dan üçe geçiş.** Grup boş bir paylaşılan durumla başlar: tek başına çalışmış bir watcher'ın kümeleri, CA'sı
+ve olay günlüğü gruba taşınmaz (setup bunu söyler). Önce kümelerini ayırın (*Küme ▾ → Ayır…*; PostgreSQL çalışmaya
+devam eder), agent'ları kaldırın (`minipgagent remove <instance>`), üç watcher'ı aşağıdaki gibi kurun, ardından
+kümeleri yeni kayıt komutlarıyla grupta yeniden ekleyin: *Benimse* çalışan primary'yi ve replica'larını olduğu gibi
+bırakır, o sırada kaydolan agent'lar üç watcher'ı da kabul eder.
+
+Bir watcher yaklaşık 300 MB bellek ister. Küçük bir sunucuda `/etc/bfm/watcher.env` içinde daha az heap verin, örneğin
+`BFM_WATCHER_JAVA_OPTS="-Xmx256m"` (bulut testinde w2 ve w3 1 GB'lık sunucularda böyle çalıştı).
+
 1. `w1` üzerinde `bfm-watcher setup`'ı, bu watcher dahil eşlerle çalıştırın:
    `w1=10.0.9.1,w2=10.0.9.2,w3=10.0.9.3`. Üçünün de sertifikalarını oluşturur ve `w2` ile `w3` için kopyalanacak
    dosyaları yazar: `w2.p12`, `w2.pass`, `ca.p12`, `ca.pass` ve `secret.key`.
