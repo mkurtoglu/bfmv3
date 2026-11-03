@@ -1,0 +1,67 @@
+# Tests, then the el8 and el9 RPMs (docs/build-rpm.md). Needs a Runner with the Docker executor.
+
+variables:
+  CI_BUILD_IMAGE: "maven:3.9.9-eclipse-temurin-21"
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+  MAVEN_CLI_OPTS: "-B --no-transfer-progress"
+
+default:
+  image: $CI_BUILD_IMAGE
+  cache:
+    key: maven-$CI_COMMIT_REF_SLUG
+    fallback_keys:
+      - maven-$CI_DEFAULT_BRANCH
+    paths:
+      - .m2/repository
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+stages:
+  - test
+  - package
+
+test:
+  stage: test
+  script:
+    - mvn $MAVEN_CLI_OPTS verify
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - "*/target/surefire-reports/TEST-*.xml"
+    expire_in: 7 days
+
+rpm:
+  stage: package
+  needs: [test]
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - when: on_success
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends rpm git >/dev/null
+  script:
+    - packaging/rpm/build.sh --dist "el8 el9"
+    - ls -l target/rpm/el8 target/rpm/el9
+  artifacts:
+    name: "bfm-rpm-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - target/rpm/el8/*.rpm
+      - target/rpm/el9/*.rpm
+    expire_in: 30 days
+
+rpm-release:
+  extends: rpm
+  rules:
+    - if: $CI_COMMIT_TAG
+  artifacts:
+    name: "bfm-rpm-$CI_COMMIT_TAG"
+    paths:
+      - target/rpm/el8/*.rpm
+      - target/rpm/el9/*.rpm
+    expire_in: never

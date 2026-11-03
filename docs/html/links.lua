@@ -2,7 +2,8 @@
 local base = os.getenv("BFM_DOCS_BASE") or "https://github.com/mkurtoglu/bfmv3/blob/main/"
 local html = { ["install-rpm.md"] = "install-rpm.html", ["install-rpm.tr.md"] = "install-rpm.tr.html",
   ["user-guide.md"] = "user-guide.html", ["install.md"] = "install.html",
-  ["architecture.md"] = "architecture.html", ["architecture.tr.md"] = "architecture.tr.html" }
+  ["architecture.md"] = "architecture.html", ["architecture.tr.md"] = "architecture.tr.html",
+  ["build-rpm.md"] = "build-rpm.html", ["build-rpm.tr.md"] = "build-rpm.tr.html" }
 
 function Link(el)
   local target = el.target

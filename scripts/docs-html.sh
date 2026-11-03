@@ -35,3 +35,5 @@ build architecture.md "BFM architecture"
 build architecture.tr.md "BFM mimarisi" tr
 build user-guide.md "BFM user guide"
 build install.md "BFM installation reference"
+build build-rpm.md "Building the BFM RPMs"
+build build-rpm.tr.md "BFM RPM paketlerini derlemek" tr

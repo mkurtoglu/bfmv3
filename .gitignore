@@ -12,3 +12,4 @@ bfm-watcher/package-lock.json
 bfm-watcher/tsconfig.json
 bfm-watcher/types.d.ts
 /data/
+.m2/
