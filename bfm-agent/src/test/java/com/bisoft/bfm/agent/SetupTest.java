@@ -136,18 +136,32 @@ class SetupTest {
     @Test
     void theSudoRuleNamesExactlyOneAddressOnOneInterface() {
         String r = Sudoers.rule("192.168.0.60", "24", "eth0");
-        assertTrue(r.contains("/usr/sbin/ip addr add 192.168.0.60/24 dev eth0, \\"));
-        assertTrue(r.contains("/usr/sbin/arping -U -q -c 3 -I eth0 192.168.0.60\n"));
+        assertTrue(r.contains(SystemTools.ip() + " addr add 192.168.0.60/24 dev eth0, \\"));
+        assertTrue(r.contains(SystemTools.arping() + " -U -q -c 3 -I eth0 192.168.0.60\n"));
         assertThrows(Prompter.SetupException.class, () -> Sudoers.rule("192.168.0.60, ALL", "24", "eth0"));
         assertThrows(Prompter.SetupException.class, () -> Sudoers.rule("192.168.0.60", "24", "eth0 ALL"));
         assertThrows(Prompter.SetupException.class, () -> Sudoers.rule("192.168.0.60", "33", "eth0"));
     }
 
     @Test
+    void arpingIsFoundWhereTheDistributionPutsIt() throws Exception {
+        Path sbin = Files.createDirectories(root.resolve("tools/usr/sbin"));
+        Path bin = Files.createDirectories(root.resolve("tools/usr/bin"));
+        List<String> dirs = List.of(sbin.toString(), bin.toString());
+        assertEquals("/usr/sbin/arping", SystemTools.find("arping", dirs), "nothing installed: the RHEL path");
+        Path ubuntu = Files.writeString(bin.resolve("arping"), "");
+        ubuntu.toFile().setExecutable(true);
+        assertEquals(ubuntu.toString(), SystemTools.find("arping", dirs), "Ubuntu: /usr/bin/arping");
+        Path rhel = Files.writeString(sbin.resolve("arping"), "");
+        rhel.toFile().setExecutable(true);
+        assertEquals(rhel.toString(), SystemTools.find("arping", dirs), "RHEL: /usr/sbin first");
+    }
+
+    @Test
     void theSelfTestNeighbourGetsItsOwnSudoLine() {
         String r = Sudoers.rule("192.168.0.60", "24", "eth0", "192.168.0.1");
-        assertTrue(r.contains("/usr/sbin/arping -D -c 2 -w 3 -I eth0 192.168.0.1, \\\n"), r);
-        assertTrue(r.contains("/usr/sbin/arping -D -q -c 2 -w 3 -I eth0 192.168.0.60, \\\n"), r);
+        assertTrue(r.contains(SystemTools.arping() + " -D -c 2 -w 3 -I eth0 192.168.0.1, \\\n"), r);
+        assertTrue(r.contains(SystemTools.arping() + " -D -q -c 2 -w 3 -I eth0 192.168.0.60, \\\n"), r);
         assertEquals(Sudoers.rule("192.168.0.60", "24", "eth0"), Sudoers.rule("192.168.0.60", "24", "eth0", null));
         assertThrows(Prompter.SetupException.class, () -> Sudoers.rule("192.168.0.60", "24", "eth0", "192.168.0.60"));
         assertThrows(Prompter.SetupException.class, () -> Sudoers.rule("192.168.0.60", "24", "eth0", "1.2.3.4, ALL"));

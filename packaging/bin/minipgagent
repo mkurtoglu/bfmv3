@@ -1,15 +1,33 @@
 #!/bin/bash
 # Starts the MiniPG agent. Settings: /etc/bfm/minipgagent/agent.properties (or the file given as the first
-# argument). JVM options can be set in MINIPGAGENT_JAVA_OPTS, for example in /etc/bfm/minipgagent/agent.env.
+# argument). JVM options can be set in MINIPGAGENT_JAVA_OPTS, the Java runtime in BFM_JAVA, for example in
+# /etc/bfm/minipgagent/agent.env.
 #
 #   minipgagent setup ...        turn a PostgreSQL instance on this host into a node (run as root; --help)
 #   minipgagent remove INSTANCE  take an agent instance off this host (PostgreSQL keeps running)
 JAR=/usr/share/bfm/minipgagent.jar
+# Java 21 or newer: BFM_JAVA, else a Java 21 runtime from the distribution's packages (the default "java" may be an
+# older one on hosts that have several), else the first java on PATH.
+java_bin() {
+  if [ -n "${BFM_JAVA:-}" ]; then
+    echo "$BFM_JAVA"
+    return
+  fi
+  for j in /usr/lib/jvm/jre-21/bin/java /usr/lib/jvm/jre-21-openjdk/bin/java /usr/lib/jvm/java-21-openjdk/bin/java \
+           /usr/lib/jvm/java-21-openjdk-*/bin/java /usr/lib/jvm/jre-21-openjdk-*/bin/java; do
+    if [ -x "$j" ]; then
+      echo "$j"
+      return
+    fi
+  done
+  echo java
+}
+JAVA=$(java_bin)
 case "${1:-}" in
   setup|remove)
-    exec java -Xmx256m -jar "$JAR" "$@"
+    exec "$JAVA" -Xmx256m -jar "$JAR" "$@"
     ;;
   *)
-    exec java ${MINIPGAGENT_JAVA_OPTS:--Xmx128m} -jar "$JAR" "${1:-/etc/bfm/minipgagent/agent.properties}"
+    exec "$JAVA" ${MINIPGAGENT_JAVA_OPTS:--Xmx128m} -jar "$JAR" "${1:-/etc/bfm/minipgagent/agent.properties}"
     ;;
 esac

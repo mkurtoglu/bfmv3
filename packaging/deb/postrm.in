@@ -1,0 +1,22 @@
+#!/bin/sh
+set -e
+@HELPER@
+# the helper's set -u would trip debconf's confmodule (Ubuntu 22.04 reads DEBIAN_HAS_FRONTEND unset)
+set +u
+
+case "$1" in
+  remove)
+    if [ -d /run/systemd/system ]; then
+      systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    ;;
+  purge)
+    purge
+    if [ -e /usr/share/debconf/confmodule ]; then
+      . /usr/share/debconf/confmodule
+      db_purge
+      db_stop
+    fi
+    ;;
+esac
+exit 0

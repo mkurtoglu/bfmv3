@@ -1,0 +1,29 @@
+# Build environment for the BFM packages (docs/build-packages.md): Rocky Linux 9.7 with Java 21, Maven 3.9 and
+# rpmbuild, from Rocky's own repositories. packaging/build.sh needs no privileges, no systemd and no container
+# runtime inside, so the image runs as an AWS Fargate task as well as under Docker or Podman.
+#
+#   docker build -f packaging/Containerfile.build -t bfm-build .
+#   docker run --rm -v "$PWD:/src" bfm-build                    # the packages land in target/packages/
+#
+# Behind a proxy that inspects TLS, give its CA certificate as a build secret:
+#   docker build --secret id=extra-ca,src=company-ca.crt -f packaging/Containerfile.build -t bfm-build .
+
+FROM docker.io/rockylinux/rockylinux:9.7
+
+RUN --mount=type=secret,id=extra-ca,required=false \
+    if [ -s /run/secrets/extra-ca ]; then \
+      cp /run/secrets/extra-ca /etc/pki/ca-trust/source/anchors/extra-ca.crt && update-ca-trust; \
+    fi \
+ && dnf -y module enable maven:3.9 \
+ && dnf -y install --setopt=install_weak_deps=False \
+      java-21-openjdk-devel maven-openjdk21 rpm-build git tar xz gzip findutils \
+ && dnf clean all \
+ && rm -rf /var/cache/dnf
+
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk \
+    LANG=C.UTF-8
+# git refuses a checkout owned by another user (a mounted or copied source tree) unless told it is safe
+RUN git config --system --add safe.directory '*'
+
+WORKDIR /src
+CMD ["packaging/build.sh"]

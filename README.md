@@ -77,8 +77,9 @@ Java 21 and Maven 3.9:
 mvn package
 ```
 
-The el8 and el9 RPMs: `packaging/rpm/build.sh` ([docs/build-rpm.md](docs/build-rpm.md); GitLab CI builds them on
-every push to `main`).
+The packages, RPM for Rocky / RHEL 8, 9 and 10 and DEB for Ubuntu 22.04, 24.04 and 26.04, all built on Rocky
+Linux 9: `packaging/build.sh` ([docs/build-packages.md](docs/build-packages.md); the build image
+`packaging/Containerfile.build` runs on AWS Fargate, and GitLab CI builds them on every push to `main`).
 
 The jars are `bfm-agent/target/bfm-agent.jar` (JDK only, ~100 KB) and
 `bfm-watcher/target/bfm-watcher.jar` (Spring Boot executable jar). The console uses Vaadin's pre-compiled

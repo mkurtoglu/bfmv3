@@ -1,0 +1,33 @@
+#!/bin/sh
+set -e
+H=/usr/share/bfm/pkg/@PKG@.sh
+
+if [ "$1" = configure ]; then
+  # runs the config script first when apt did not preconfigure; the answer is read before anything is printed:
+  # with debconf loaded, standard output belongs to it
+  . /usr/share/debconf/confmodule
+  keep=true
+  if db_get @PKG@/use-existing-config; then
+    keep=$RET
+  fi
+  db_stop
+
+  "$H" users
+  if "$H" take-install-mark; then
+    if [ -n "$("$H" found)" ]; then
+      if [ "$keep" = false ]; then
+        "$H" fresh
+      else
+        "$H" notice-kept
+      fi
+    fi
+  elif [ -n "${2:-}" ]; then
+    @UPGRADE_NOTE@
+  fi
+  "$H" seed
+  rm -f /run/bfm-pkg-@PKG@.asked
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  fi
+fi
+exit 0

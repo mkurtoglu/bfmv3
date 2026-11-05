@@ -1,67 +1,18 @@
 #!/bin/bash
-# Builds the minipgagent and bfm-watcher RPMs for Rocky / RHEL 8 and 9.
+# Kept for scripts that call it: builds only the RPMs, into target/rpm/<dist>/. packaging/build.sh builds the RPMs
+# and the DEBs (docs/build-packages.md).
 #
-#   packaging/rpm/build.sh [--skip-maven] [--dist "el8 el9"]
-#
-# Needs Java 21, Maven and rpmbuild (package "rpm-build" on Rocky, "rpm" on Debian/Ubuntu). The packages are
-# noarch, so they can be built on any Linux; the result lands in target/rpm/<dist>/. A snapshot version gets a
-# release like 0.1.202610281412git7ac2264 (UTC date and time, then the commit) so that a later build upgrades an
-# earlier one, also on the same day: the commit hash alone does not sort.
+#   packaging/rpm/build.sh [--skip-maven] [--dist "el8 el9 el10"]
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-DISTS="el8 el9"
-MAVEN=1
+args=()
+dists="el8 el9 el10"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --skip-maven) MAVEN=0 ;;
-    --dist) DISTS=$2; shift ;;
+    --skip-maven) args+=(--skip-maven) ;;
+    --dist) dists=$2; shift ;;
     *) echo "unknown option $1" >&2; exit 64 ;;
   esac
   shift
 done
-
-cd "$ROOT"
-if [ "$MAVEN" = 1 ]; then
-  mvn -B -q -DskipTests package
-fi
-AGENT_JAR=bfm-agent/target/minipgagent.jar
-WATCHER_JAR=bfm-watcher/target/bfm-watcher.jar
-[ -f "$AGENT_JAR" ] && [ -f "$WATCHER_JAR" ] || { echo "jars missing; run without --skip-maven" >&2; exit 1; }
-
-pom_version=$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' pom.xml | head -1)
-version=${pom_version%-SNAPSHOT}
-if [ "$pom_version" != "$version" ]; then
-  release="0.1.$(date -u +%Y%m%d%H%M)git$(git rev-parse --short HEAD 2>/dev/null || echo local)"
-else
-  release=1
-fi
-
-TOP="$ROOT/target/rpm"
-rm -rf "$TOP"
-mkdir -p "$TOP"/{SOURCES,SPECS,BUILD,RPMS,SRPMS}
-cp "$AGENT_JAR" "$WATCHER_JAR" "$TOP/SOURCES/"
-cp packaging/bin/minipgagent packaging/bin/bfm-watcher packaging/bin/bfm-make-certs "$TOP/SOURCES/"
-cp packaging/minipgagent.service 'packaging/minipgagent@.service' packaging/bfm-watcher.service "$TOP/SOURCES/"
-cp packaging/agent.properties.example packaging/watcher.yml.example packaging/sudoers-minipgagent "$TOP/SOURCES/"
-cp README.md LICENSE NOTICE "$TOP/SOURCES/"
-cp packaging/rpm/bfm.spec "$TOP/SPECS/"
-
-for d in $DISTS; do
-  out="$TOP/$d"
-  mkdir -p "$out"
-  # xz payload and sha256 digests: readable by rpm 4.14 on EL8 as well as EL9
-  rpmbuild -ba "$TOP/SPECS/bfm.spec" \
-    --define "_topdir $TOP" \
-    --define "dist .$d" \
-    --define "bfm_version $version" \
-    --define "bfm_release $release" \
-    --define "_binary_payload w6.xzdio" \
-    --define "_source_payload w6.xzdio" \
-    --define "_build_id_links none" \
-    --quiet
-  mv "$TOP"/RPMS/noarch/*.rpm "$out/"
-  mv "$TOP"/SRPMS/*.rpm "$out/"
-  echo "$d:"
-  ls -1 "$out"
-done
+exec "$ROOT/packaging/build.sh" "${args[@]}" --rpm "$dists" --deb none --out "$ROOT/target/rpm"

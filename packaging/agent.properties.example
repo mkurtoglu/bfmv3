@@ -1,5 +1,5 @@
 # MiniPG agent settings: /etc/bfm/minipgagent/agent.properties, readable by the postgres user only (600).
-# Start: minipgagent (installed by the RPM with minipgagent.service; runs /usr/share/bfm/minipgagent.jar)
+# Start: minipgagent (installed by the package with minipgagent.service; runs /usr/share/bfm/minipgagent.jar)
 # Several PostgreSQL instances on this host: one agent instance each, minipgagent@<instance>.service, with
 # this file at /etc/bfm/minipgagent/<instance>/agent.properties (see docs/install.md, "Several clusters on
 # one host").

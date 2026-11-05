@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+case "$1" in
+  install)
+    # a first installation, or one after a removal ($2: the removed version): postinst looks for earlier settings
+    : > /run/bfm-pkg-@PKG@.install
+    ;;
+esac
+exit 0

@@ -1,0 +1,12 @@
+Template: minipgagent/use-existing-config
+Type: boolean
+Default: true
+Description: Use the settings of the earlier MiniPG agent installation?
+ This host still has the settings an earlier minipgagent installation left:
+ ${found}
+ .
+ Keeping them leaves the agents as they were (start each with: systemctl
+ enable --now minipgagent@<instance>). Otherwise they are moved, sudo rules
+ included, to /etc/bfm/backup/ and the example settings are installed;
+ minipgagent setup then starts from scratch. PostgreSQL is not touched either
+ way.

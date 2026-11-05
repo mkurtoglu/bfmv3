@@ -1,7 +1,12 @@
-# BFM RPM packages for Rocky / RHEL 8 and 9. Built by packaging/rpm/build.sh from the jars that mvn package
-# produced; the jars are pure Java, so one noarch build serves every architecture and both distributions differ
-# only in the dist tag. Scriptlets are written out in plain shell (not %systemd_* macros) so the spec builds on
-# any host that has rpmbuild.
+# BFM RPM packages for Rocky / RHEL 8, 9 and 10. Built by packaging/build.sh from the jars that mvn package
+# produced; the jars are pure Java, so one noarch build serves every architecture and the distributions differ only
+# in the dist tag. Scriptlets are written out in plain shell (not %systemd_* macros) so the spec builds on any host
+# that has rpmbuild, Rocky 9 included, for every target.
+#
+# The packages own no file under /etc. The settings are made from the examples in /usr/share/bfm/examples when they
+# are missing (%posttrans, through /usr/share/bfm/pkg/<package>.sh) and are not touched again: an upgrade leaves no
+# .rpmnew or .rpmsave behind, a removal keeps them, and a reinstall uses them and says so (bfm-watcher setup asks
+# before replacing them).
 
 %global bfm_home %{_datadir}/bfm
 %{!?_unitdir: %global _unitdir /usr/lib/systemd/system}
@@ -29,6 +34,8 @@ Source10:       README.md
 Source11:       minipgagent@.service
 Source12:       LICENSE
 Source13:       NOTICE
+Source14:       minipgagent-pkg.sh
+Source15:       bfm-watcher-pkg.sh
 
 %description
 Automatic failover for PostgreSQL streaming replication clusters, with a virtual IP that follows the primary.
@@ -44,6 +51,8 @@ Requires:       iputils
 Requires:       sudo
 Requires:       util-linux
 Requires:       systemd
+Requires:       coreutils
+Requires:       sed
 Requires(pre):  shadow-utils
 
 %description -n minipgagent
@@ -51,11 +60,8 @@ Runs as the postgres user next to one PostgreSQL server. It reports the node's s
 virtual IP up and down with sudo ip addr, promotes only while the VIP is up on this node, and fences itself when
 the primary lease from the watchers runs out.
 
-Settings: /etc/bfm/minipgagent/agent.properties. Sudo rule for the VIP: /etc/sudoers.d/minipgagent (set the
-address and the interface). Disable the PostgreSQL unit and let the agent start PostgreSQL.
-
-Several PostgreSQL instances on one host: one agent instance each, minipgagent@<instance>.service, with its
-settings in /etc/bfm/minipgagent/<instance>/ and its state in /var/lib/minipgagent/<instance>/.
+Set it up with minipgagent setup. Settings: /etc/bfm/minipgagent/; several PostgreSQL instances on one host run
+one agent each, minipgagent@<instance>.service. The settings stay when the package is removed.
 
 # --------------------------------------------------------------------------------------------------- watcher
 
@@ -64,14 +70,16 @@ Summary:        BFM watcher: failover decisions, web console and REST API
 Requires:       java-21-headless
 Requires:       openssl
 Requires:       systemd
+Requires:       coreutils
+Requires:       sed
 Requires(pre):  shadow-utils
 
 %description watcher
 Polls the agents, keeps the primary's lease, decides failovers and runs switchovers, and serves the web console
 and the REST API. One watcher works alone; three form an Apache Ratis (Raft) group.
 
-Settings: /etc/bfm/watcher.yml. Password hashes for the console users: bfm-watcher hash-password.
-Certificates for mutual TLS: bfm-make-certs.
+Set it up with bfm-watcher setup. Settings: /etc/bfm/watcher.yml; state: /var/lib/bfm-watcher. Both stay when the
+package is removed.
 
 # -----------------------------------------------------------------------------------------------------------
 
@@ -82,11 +90,10 @@ Certificates for mutual TLS: bfm-make-certs.
 # the jars were built by Maven
 
 %install
-install -d -m 0755 %{buildroot}%{bfm_home}
+install -d -m 0755 %{buildroot}%{bfm_home}/examples %{buildroot}%{bfm_home}/pkg
 install -d -m 0755 %{buildroot}%{_bindir}
 install -d -m 0755 %{buildroot}%{_sysconfdir}/bfm
 install -d -m 0750 %{buildroot}%{_sysconfdir}/bfm/minipgagent
-install -d -m 0750 %{buildroot}%{_sysconfdir}/sudoers.d
 install -d -m 0755 %{buildroot}%{_unitdir}
 install -d -m 0700 %{buildroot}/var/lib/minipgagent
 install -d -m 0700 %{buildroot}/var/lib/bfm-watcher
@@ -99,14 +106,17 @@ install -p -m 0755 %{SOURCE4} %{buildroot}%{_bindir}/bfm-make-certs
 install -p -m 0644 %{SOURCE5} %{buildroot}%{_unitdir}/minipgagent.service
 install -p -m 0644 %{SOURCE11} %{buildroot}%{_unitdir}/minipgagent@.service
 install -p -m 0644 %{SOURCE6} %{buildroot}%{_unitdir}/bfm-watcher.service
-install -p -m 0600 %{SOURCE7} %{buildroot}%{_sysconfdir}/bfm/minipgagent/agent.properties
-install -p -m 0640 %{SOURCE8} %{buildroot}%{_sysconfdir}/bfm/watcher.yml
-install -p -m 0440 %{SOURCE9} %{buildroot}%{_sysconfdir}/sudoers.d/minipgagent
+install -p -m 0644 %{SOURCE7} %{buildroot}%{bfm_home}/examples/agent.properties.example
+install -p -m 0644 %{SOURCE8} %{buildroot}%{bfm_home}/examples/watcher.yml.example
+install -p -m 0644 %{SOURCE9} %{buildroot}%{bfm_home}/examples/sudoers-minipgagent.example
+install -p -m 0755 %{SOURCE14} %{buildroot}%{bfm_home}/pkg/minipgagent.sh
+install -p -m 0755 %{SOURCE15} %{buildroot}%{bfm_home}/pkg/bfm-watcher.sh
 install -p -m 0644 %{SOURCE10} %{buildroot}%{bfm_home}/README.md
 install -p -m 0644 %{SOURCE12} %{buildroot}%{bfm_home}/LICENSE
 install -p -m 0644 %{SOURCE13} %{buildroot}%{bfm_home}/NOTICE
 
 # ----------------------------------------------------------------------------------------------- scriptlets
+# $1 in %pre/%post: 1 installation, 2 upgrade. In %preun/%postun: 0 removal, 1 upgrade.
 
 %pre -n minipgagent
 # The postgres user normally exists already (PostgreSQL packages create it with uid 26); create it the same way
@@ -118,29 +128,48 @@ if ! getent passwd postgres >/dev/null; then
     useradd -r -N -g postgres -u 26 -d /var/lib/pgsql -s /bin/bash -c "PostgreSQL Server" postgres 2>/dev/null \
         || useradd -r -N -g postgres -d /var/lib/pgsql -s /bin/bash -c "PostgreSQL Server" postgres
 fi
+if [ $1 -eq 1 ]; then
+    # an installation, not an upgrade: %%posttrans names the settings an earlier installation left
+    : > /run/bfm-pkg-minipgagent.install 2>/dev/null || :
+fi
 exit 0
 
 %post -n minipgagent
-systemctl daemon-reload >/dev/null 2>&1 || :
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || :
+fi
 if [ $1 -eq 1 ]; then
     # first installation: apply the preset policy (disabled unless the site enables it)
     systemctl --no-reload preset minipgagent.service >/dev/null 2>&1 || :
 fi
-# An upgrade does not restart the agent: a restart would interrupt a running pg_basebackup or pg_rewind.
-# Restart it when the node is idle: systemctl restart minipgagent
+exit 0
 
 %preun -n minipgagent
 if [ $1 -eq 0 ]; then
     # removal, not upgrade. KillMode=process keeps PostgreSQL running.
-    systemctl --no-reload disable --now minipgagent.service >/dev/null 2>&1 || :
-    for u in $(systemctl list-units --all --plain --no-legend 'minipgagent@*.service' 2>/dev/null \
-            | awk '{print $1}'); do
-        systemctl --no-reload disable --now "$u" >/dev/null 2>&1 || :
-    done
+    %{bfm_home}/pkg/minipgagent.sh stop
+    %{bfm_home}/pkg/minipgagent.sh notice-removed
 fi
+exit 0
 
 %postun -n minipgagent
-systemctl daemon-reload >/dev/null 2>&1 || :
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || :
+fi
+if [ $1 -ge 1 ]; then
+    # An upgrade does not restart the agent: a restart would interrupt a running pg_basebackup or pg_rewind.
+    echo "minipgagent: restart the agents when the node is idle: systemctl restart 'minipgagent*'"
+fi
+exit 0
+
+%posttrans -n minipgagent
+# After the whole transaction: an upgrade from a package that still owned the settings has moved an edited one
+# to .rpmsave by now, and seed puts it back.
+%{bfm_home}/pkg/minipgagent.sh seed
+if %{bfm_home}/pkg/minipgagent.sh take-install-mark; then
+    %{bfm_home}/pkg/minipgagent.sh notice-kept
+fi
+exit 0
 
 %pre watcher
 if ! getent group bfm >/dev/null; then
@@ -149,22 +178,43 @@ fi
 if ! getent passwd bfm >/dev/null; then
     useradd -r -N -g bfm -d /var/lib/bfm-watcher -s /sbin/nologin -c "BFM watcher" bfm
 fi
+if [ $1 -eq 1 ]; then
+    : > /run/bfm-pkg-bfm-watcher.install 2>/dev/null || :
+fi
 exit 0
 
 %post watcher
-systemctl daemon-reload >/dev/null 2>&1 || :
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || :
+fi
 if [ $1 -eq 1 ]; then
     systemctl --no-reload preset bfm-watcher.service >/dev/null 2>&1 || :
 fi
-# An upgrade does not restart the watcher: restart it when no operation is running: systemctl restart bfm-watcher
+exit 0
 
 %preun watcher
 if [ $1 -eq 0 ]; then
-    systemctl --no-reload disable --now bfm-watcher.service >/dev/null 2>&1 || :
+    %{bfm_home}/pkg/bfm-watcher.sh stop
+    %{bfm_home}/pkg/bfm-watcher.sh notice-removed
 fi
+exit 0
 
 %postun watcher
-systemctl daemon-reload >/dev/null 2>&1 || :
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || :
+fi
+if [ $1 -ge 1 ]; then
+    # An upgrade does not restart the watcher: it would interrupt a running switchover or re-initialize.
+    echo "bfm-watcher: restart it when no operation runs: systemctl restart bfm-watcher"
+fi
+exit 0
+
+%posttrans watcher
+%{bfm_home}/pkg/bfm-watcher.sh seed
+if %{bfm_home}/pkg/bfm-watcher.sh take-install-mark; then
+    %{bfm_home}/pkg/bfm-watcher.sh notice-kept
+fi
+exit 0
 
 # ---------------------------------------------------------------------------------------------------- files
 
@@ -173,12 +223,15 @@ systemctl daemon-reload >/dev/null 2>&1 || :
 %license %{bfm_home}/LICENSE
 %license %{bfm_home}/NOTICE
 %dir %{bfm_home}
+%dir %{bfm_home}/examples
+%dir %{bfm_home}/pkg
 %{bfm_home}/minipgagent.jar
+%{bfm_home}/examples/agent.properties.example
+%{bfm_home}/examples/sudoers-minipgagent.example
+%{bfm_home}/pkg/minipgagent.sh
 %{_bindir}/minipgagent
 %dir %{_sysconfdir}/bfm
 %attr(0750,root,postgres) %dir %{_sysconfdir}/bfm/minipgagent
-%config(noreplace) %attr(0600,postgres,postgres) %{_sysconfdir}/bfm/minipgagent/agent.properties
-%config(noreplace) %attr(0440,root,root) %{_sysconfdir}/sudoers.d/minipgagent
 %attr(0700,postgres,postgres) %dir /var/lib/minipgagent
 %{_unitdir}/minipgagent.service
 %{_unitdir}/minipgagent@.service
@@ -188,15 +241,25 @@ systemctl daemon-reload >/dev/null 2>&1 || :
 %license %{bfm_home}/LICENSE
 %license %{bfm_home}/NOTICE
 %dir %{bfm_home}
+%dir %{bfm_home}/examples
+%dir %{bfm_home}/pkg
 %{bfm_home}/bfm-watcher.jar
+%{bfm_home}/examples/watcher.yml.example
+%{bfm_home}/pkg/bfm-watcher.sh
 %{_bindir}/bfm-watcher
 %{_bindir}/bfm-make-certs
 %dir %{_sysconfdir}/bfm
-%config(noreplace) %attr(0640,root,bfm) %{_sysconfdir}/bfm/watcher.yml
 %attr(0700,bfm,bfm) %dir /var/lib/bfm-watcher
 %{_unitdir}/bfm-watcher.service
 
 %changelog
+* Thu Nov 05 2026 BFM <bfm@localhost> - 0.1.0-4
+- Rocky / RHEL 10 as well; built on Rocky 9 for every target
+- the packages own no file under /etc: settings come from /usr/share/bfm/examples when missing, an upgrade leaves no
+  .rpmnew or .rpmsave, a removal keeps them, a reinstall names them; settings an older package had moved to
+  .rpmsave are put back
+- the start scripts pick a Java 21 runtime when the default java is an older one (BFM_JAVA overrides)
+- bfm-watcher setup asks before replacing settings an earlier installation left, not about the example
 * Mon Nov 02 2026 BFM <bfm@localhost> - 0.1.0-3
 - Apache License 2.0; LICENSE and NOTICE installed
 - bfm-watcher setup gives the data directory to the bfm user (the service could not read secret.key)

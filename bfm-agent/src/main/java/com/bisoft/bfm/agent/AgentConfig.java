@@ -139,18 +139,18 @@ public final class AgentConfig {
         vipAddress = vipEnabled ? req(p, "vip.address") : p.getProperty("vip.address");
         vipPrefix = Integer.parseInt(p.getProperty("vip.prefix", "24"));
         vipInterface = vipEnabled ? req(p, "vip.interface") : p.getProperty("vip.interface", "");
-        vipAddCommand = p.getProperty("vip.add.command", "sudo -n /usr/sbin/ip addr add {vip}/{prefix} dev {iface}");
-        vipDelCommand = p.getProperty("vip.del.command", "sudo -n /usr/sbin/ip addr del {vip}/{prefix} dev {iface}");
-        vipShowCommand = p.getProperty("vip.show.command", "/usr/sbin/ip -o -4 addr show dev {iface}");
+        vipAddCommand = p.getProperty("vip.add.command", "sudo -n " + SystemTools.ip() + " addr add {vip}/{prefix} dev {iface}");
+        vipDelCommand = p.getProperty("vip.del.command", "sudo -n " + SystemTools.ip() + " addr del {vip}/{prefix} dev {iface}");
+        vipShowCommand = p.getProperty("vip.show.command", SystemTools.ip() + " -o -4 addr show dev {iface}");
         vipDadEnabled = Boolean.parseBoolean(p.getProperty("vip.dad.enabled", "true"));
-        vipDadCommand = p.getProperty("vip.dad.command", "sudo -n /usr/sbin/arping -D -q -c 2 -w 3 -I {iface} {vip}");
-        vipGarpCommand = p.getProperty("vip.garp.command", "sudo -n /usr/sbin/arping -U -q -c 3 -I {iface} {vip}");
+        vipDadCommand = p.getProperty("vip.dad.command", "sudo -n " + SystemTools.arping() + " -D -q -c 2 -w 3 -I {iface} {vip}");
+        vipGarpCommand = p.getProperty("vip.garp.command", "sudo -n " + SystemTools.arping() + " -U -q -c 3 -I {iface} {vip}");
         vipDadProbe = blankToNull(p.getProperty("vip.dad.probe"));
         if (vipDadProbe != null && (!vipDadProbe.matches("\\d{1,3}(\\.\\d{1,3}){3}") || vipDadProbe.equals(vipAddress))) {
             throw new IllegalArgumentException("vip.dad.probe must be the IPv4 address of a live neighbour (not the VIP)");
         }
         vipDadProbeCommand = p.getProperty("vip.dad.probe.command",
-                "sudo -n /usr/sbin/arping -D -c 2 -w 3 -I {iface} {probe}");
+                "sudo -n " + SystemTools.arping() + " -D -c 2 -w 3 -I {iface} {probe}");
 
         fenceAction = p.getProperty("fence.action", "stop");
         if (!fenceAction.equals("stop") && !fenceAction.equals("vip-only")) {

@@ -1,0 +1,12 @@
+Template: bfm-watcher/use-existing-config
+Type: boolean
+Default: true
+Description: Use the settings of the earlier BFM watcher installation?
+ This host still has the settings an earlier bfm-watcher installation left:
+ ${found}
+ .
+ Keeping them leaves the watcher as it was (start it with: systemctl enable
+ --now bfm-watcher). Otherwise they are moved to /etc/bfm/backup/ and the
+ example settings are installed; bfm-watcher setup then starts from scratch.
+ The watcher's state in /var/lib/bfm-watcher (secret.key included) is kept
+ either way.

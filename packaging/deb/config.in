@@ -1,0 +1,31 @@
+#!/bin/sh
+# debconf questions of @PKG@. Asked only when the package is installed, not upgraded, and finds the settings an
+# earlier installation left; dpkg-preconfigure runs this before the files are unpacked, so it looks for them itself.
+set -e
+. /usr/share/debconf/confmodule
+
+PKG=@PKG@
+ASKED=/run/bfm-pkg-$PKG.asked
+[ -e "$ASKED" ] && exit 0
+
+# An installation: preinst marked it, or (before unpacking) dpkg has the package as not installed or removed.
+installing=no
+[ -e "/run/bfm-pkg-$PKG.install" ] && installing=yes
+case "$(dpkg-query -W -f='${db:Status-Status}' "$PKG" 2>/dev/null || true)" in
+  ""|not-installed|config-files) installing=yes ;;
+esac
+[ "$installing" = yes ] || exit 0
+
+found=""
+add() {
+  found="$found${found:+, }$1"
+}
+@FIND@
+[ -n "$found" ] || exit 0
+
+db_subst "$PKG/use-existing-config" found "$found"
+db_fset "$PKG/use-existing-config" seen false
+db_input high "$PKG/use-existing-config" || true
+db_go || true
+: > "$ASKED" 2>/dev/null || true
+exit 0

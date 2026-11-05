@@ -364,7 +364,8 @@ dnf upgrade ./bfm-watcher-*.noarch.rpm
 dnf upgrade ./minipgagent-*.noarch.rpm
 ```
 
-`/etc/bfm` altındaki ayarlar korunur. **Güncelleme servisleri yeniden başlatmaz** — yeniden başlatma çalışan bir
+`/etc/bfm` altındaki ayarlara dokunulmaz (paketler orada hiçbir dosyanın sahibi değildir): geride `.rpmnew` ya da
+`.rpmsave` kalmaz. **Güncelleme servisleri yeniden başlatmaz** — yeniden başlatma çalışan bir
 `pg_basebackup`, `pg_rewind` veya switchover'ı yarıda keserdi. Hiçbir şey çalışmıyorken yeniden başlatın (*İşlemler*
 sayfası gösterir):
 
@@ -399,8 +400,11 @@ minipgagent remove erp
 systemctl enable postgresql-16
 ```
 
-- **Paketler**: `dnf remove minipgagent` / `dnf remove bfm-watcher`. `/etc/bfm` ve `/var/lib` altındaki ayarlar ve
-  durum korunur.
+- **Paketler**: `dnf remove minipgagent` / `dnf remove bfm-watcher`. `/etc/bfm` altındaki ayarlar, sudo kuralları ve
+  `/var/lib` altındaki durum korunur. Paket yeniden kurulduğunda bunları kullanır ve adlarıyla söyler;
+  `bfm-watcher setup` onları değiştirmeden önce sorar. dnf ajanla birlikte `sudo`'yu da kaldıracağı için
+  reddederse `dnf remove --noautoremove minipgagent` kullanın. Ayrıntılar ve Ubuntu paketleri:
+  [build-packages.tr.md](build-packages.tr.md#güncelleme-kaldırma-ve-yeniden-kurulum).
 
 ---
 

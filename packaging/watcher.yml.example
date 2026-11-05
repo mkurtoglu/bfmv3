@@ -1,5 +1,5 @@
 # BFM watcher settings: /etc/bfm/watcher.yml
-# Start: bfm-watcher (installed by the RPM with bfm-watcher.service)
+# Start: bfm-watcher (installed by the package with bfm-watcher.service)
 
 server:
   port: 8443

@@ -112,4 +112,16 @@ class WatcherSetupTest {
             out.put(prefix, v.toString());
         }
     }
+
+    @Test
+    void thePackagedExampleIsNotAConfigurationButAnEarlierOneIs() throws Exception {
+        Path example = Files.writeString(dir.resolve("watcher.yml.example"), "server:\n  port: 8443\n");
+        Path yml = dir.resolve("watcher.yml");
+        assertFalse(WatcherSetup.isConfiguration(yml, example), "nothing there");
+        Files.copy(example, yml);
+        assertFalse(WatcherSetup.isConfiguration(yml, example), "the example the package put there");
+        Files.writeString(yml, "server:\n  port: 9443\n");
+        assertTrue(WatcherSetup.isConfiguration(yml, example), "settings kept from an earlier installation");
+        assertTrue(WatcherSetup.isConfiguration(yml, dir.resolve("absent")), "no example to compare: a lab");
+    }
 }

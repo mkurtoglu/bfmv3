@@ -46,6 +46,9 @@ public final class WatcherSetup {
                               admin, admin-password, certificates=ca|files, keystore, truststore, peers, proceed)
               --etc DIR       write the settings there instead of /etc/bfm (a lab)""";
 
+    /** The example settings the packages copy to /etc/bfm/watcher.yml when there is none. */
+    static final Path PACKAGED_EXAMPLE = Path.of("/usr/share/bfm/examples/watcher.yml.example");
+
     private final Properties answers;
     private final BufferedReader in;
     private final PrintStream out;
@@ -112,9 +115,13 @@ public final class WatcherSetup {
     int run() throws IOException {
         out.println();
         out.println(" BFM watcher setup" + (dryRun ? "   (dry run: nothing is changed)" : ""));
-        if (Files.exists(etc.resolve("watcher.yml")) && !confirm("overwrite", etc.resolve("watcher.yml")
-                + " exists. Replace it (the old one is kept as .bak)?", false)) {
-            out.println(" Nothing was changed.");
+        // The packages put their example there when there is none; only a real configuration is asked about, as
+        // after a reinstall, where the package kept the earlier one.
+        if (isConfiguration(etc.resolve("watcher.yml"), PACKAGED_EXAMPLE) && !confirm("overwrite",
+                etc.resolve("watcher.yml") + " holds the settings of an earlier installation or setup. Start fresh"
+                        + " (the old file is kept as watcher.yml.bak)? No uses them as they are.", false)) {
+            out.println(" Nothing was changed: the watcher uses " + etc.resolve("watcher.yml") + ". Start it with:"
+                    + " systemctl enable --now bfm-watcher");
             return 2;
         }
 
@@ -475,6 +482,14 @@ public final class WatcherSetup {
         } catch (IOException e) {
             return dflt;
         }
+    }
+
+    /** Whether {@code yml} is a configuration of this host: it exists and is not the packages' example. */
+    public static boolean isConfiguration(Path yml, Path example) throws IOException {
+        if (!Files.exists(yml)) {
+            return false;
+        }
+        return !Files.isRegularFile(example) || Files.mismatch(yml, example) != -1L;
     }
 
     private boolean confirm(String key, String question, boolean dflt) {

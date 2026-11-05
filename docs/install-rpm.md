@@ -359,7 +359,8 @@ dnf upgrade ./bfm-watcher-*.noarch.rpm
 dnf upgrade ./minipgagent-*.noarch.rpm
 ```
 
-Settings under `/etc/bfm` are kept. **An upgrade does not restart the services** — a restart would interrupt a
+The settings under `/etc/bfm` are not touched (the packages own no file there): no `.rpmnew` or `.rpmsave` is
+left behind. **An upgrade does not restart the services** — a restart would interrupt a
 running `pg_basebackup`, `pg_rewind` or switchover. Restart them when nothing runs (the Operations page shows it):
 
 ```bash
@@ -393,8 +394,11 @@ minipgagent remove erp
 systemctl enable postgresql-16
 ```
 
-- **The packages**: `dnf remove minipgagent` / `dnf remove bfm-watcher`. Settings and state under `/etc/bfm` and
-  `/var/lib` are kept.
+- **The packages**: `dnf remove minipgagent` / `dnf remove bfm-watcher`. The settings under `/etc/bfm`, the sudo
+  rules and the state under `/var/lib` are kept. Installing the package again uses them and names them;
+  `bfm-watcher setup` asks before replacing them. If dnf refuses because it would remove `sudo` with the agent,
+  use `dnf remove --noautoremove minipgagent`. Details, and the Ubuntu packages:
+  [build-packages.md](build-packages.md#upgrade-removal-and-reinstallation).
 
 ---
 
