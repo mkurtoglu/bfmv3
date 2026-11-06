@@ -2,18 +2,19 @@
 
 Status: **implemented** (decisions in §13, phases in §12). All four phases are done: host safety, one watcher
 (or Raft group) for many clusters, the terminal wizards with enrollment, and the console wizards (Add cluster,
-Add node, Remove node, Detach). Per-cluster permissions remain for later (§13).
+Add node, Remove node, Detach). Per-cluster permissions remain for later (§13). The sections below describe the
+design; **§14 lists where the code that was built differs from it**, and the code is right where they disagree.
 
-BFM today manages one PostgreSQL cluster per watcher, and its packages install one agent per server. This design
-lets one server carry several PostgreSQL clusters, lets one watcher (or one Raft group of three) run all of them
-from a single console, and adds two wizards that take the hand-editing out of installation: one on each
-database server, one in the console.
+Before this work BFM managed one PostgreSQL cluster per watcher, and its packages installed one agent per server.
+This design lets one server carry several PostgreSQL clusters, lets one watcher (or one Raft group of three) run
+all of them from a single console, and adds wizards that take the hand-editing out of installation: one on each
+database server, one for the watcher, and one in the console.
 
 ---
 
 ## 1. Summary
 
-| Today | After |
+| Before | Now |
 | --- | --- |
 | One `minipgagent` per server, fixed paths | One agent **instance** per PostgreSQL instance: `minipgagent@<instance>`, its own directory, port, VIP and sudo rule |
 | One cluster per watcher process | One watcher (group) runs **many clusters**; each keeps its own failover loop, epoch, lease and operations |
@@ -22,8 +23,8 @@ database server, one in the console.
 | `agent.properties`, `watcher.yml`, sudoers and pg_hba edited by hand | `minipgagent setup` on the server, **Add cluster** in the console, `bfm-watcher setup` for the first start |
 | The console shows one cluster | A **Fleet** page, a **Hosts** page and a cluster switcher; every cluster page as today |
 
-Three phases deliver this, each useful on its own (§12). The first one is small and closes a safety gap that opens
-the moment anyone runs two clusters on one server today (§3).
+Four phases delivered this, each useful on its own (§12). The first one was small and closed a safety gap that
+opened the moment anyone ran two clusters on one server (§3).
 
 ---
 
@@ -50,22 +51,22 @@ the moment anyone runs two clusters on one server today (§3).
 
 ---
 
-## 3. Safety first: what goes wrong today with two clusters on a host
+## 3. Safety first: what went wrong with two clusters on a host
 
-Running two agents on one host already works (the lab does it). What is missing is anything that stops one
-cluster's watcher from steering the other cluster's instance:
+Running two agents on one host already worked before this design (the lab did it). What was missing was anything
+that stopped one cluster's watcher from steering the other cluster's instance:
 
 1. **A wrong port is enough.** If cluster `erp` lists `https://db01:8009` (crm's agent) instead of `:8008`, the
    watcher talks to crm's instance as if it were erp's: it can fence it, point it at erp's primary, or promote it.
-   Epochs do not help: they are plain numbers per agent, not tied to a cluster. The watcher never compares
-   PostgreSQL system identifiers today.
-2. **Two agents can share a state directory.** Nothing locks `state.dir`; a copied `agent.properties` with the
-   default `/var/lib/minipgagent` makes two agents share one epoch, fence flag and lease.
+   Epochs did not help: they were plain numbers per agent, not tied to a cluster, and the watcher never compared
+   PostgreSQL system identifiers.
+2. **Two agents could share a state directory.** Nothing locked `state.dir`; a copied `agent.properties` with the
+   default `/var/lib/minipgagent` made two agents share one epoch, fence flag and lease.
 3. **The hardware watchdog is per host.** Two agents arming `/dev/watchdog` conflict, and its reset takes down every
    instance on the host.
 4. **A host failure is several failovers at once.** If db01 holds the primaries of three clusters, losing db01 fails
    over three clusters at the same moment, and nobody was told that risk existed.
-5. **Two nodes of the same cluster on one host give no HA**, and nothing says so.
+5. **Two nodes of the same cluster on one host give no HA**, and nothing said so.
 
 The design answers each:
 
@@ -124,24 +125,28 @@ Non-goals (this design)
 | Sudo rule | `/etc/sudoers.d/minipgagent-<instance>` (that instance's VIP and interface only) |
 | Service | `minipgagent@<instance>.service` (template unit) |
 
-`<instance>` is `[a-z0-9-]{1,32}`, by default the cluster name. The current single layout
+`<instance>` is `[a-z0-9-]{1,32}`, by default the cluster name. The single layout
 (`/etc/bfm/minipgagent/agent.properties`, `minipgagent.service`, `/var/lib/minipgagent`) stays valid as the
-*default instance*; `minipgagent setup --adopt-default <name>` moves it into the new layout when wanted.
+*default instance* for one PostgreSQL instance on the host. No command moves it into the instance layout, and
+`minipgagent setup` does not offer a data directory that an enabled or running `minipgagent.service` manages
+(it lists it as managed by `minipgagent`).
 
-The template unit:
+The template unit (`packaging/minipgagent@.service`, comments left out):
 
 ```ini
 [Unit]
-Description=MiniPG agent %i
+Description=MiniPG agent %i (PostgreSQL role changes and VIP)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 User=postgres
 Group=postgres
+Environment=MINIPGAGENT_INSTANCE=%i
 EnvironmentFile=-/etc/bfm/minipgagent/%i/agent.env
 ExecStart=/usr/bin/minipgagent /etc/bfm/minipgagent/%i/agent.properties
 Restart=always
+SuccessExitStatus=143
 RestartSec=2
 KillMode=process
 LimitNOFILE=65536
@@ -150,13 +155,16 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 ```
 
+`SuccessExitStatus=143` makes a stopped agent *inactive* rather than *failed* (the JVM ends with 143 on SIGTERM);
+`KillMode=process` keeps PostgreSQL running when the agent is restarted or stopped.
+
 ### 5.3 Agent changes
 
 - `cluster.id` in `agent.properties` (written by the wizard) and the binding check on every command (§3).
 - `state.dir` lock; host-wide watchdog lock.
 - `/v1/status` adds `clusterId`, `instance`, `hostId` (`/etc/machine-id`), `hostname`, data directory size and free
   space on its filesystem (for re-initialize planning), and the PostgreSQL system identifier it already reports.
-- `/v1/checks` (new, read only): the readiness checks of §9.2 step 5, so the console wizard can show them live.
+- `/v1/checks` (new, read only): the readiness checks of §9.2 step 4, so the console wizard can show them live.
 - Nothing else in the API changes; old watchers that send no `clusterId` keep working against unbound agents.
 
 ---
@@ -432,8 +440,9 @@ reload, which drops no connections.
 **Step 6 – Verify**: waits until the agent answers and the watcher reports it online, then prints the next step
 (*"back in the console, crm shows pg-b1 enrolled"*).
 
-Undo: `minipgagent remove crm` stops and disables the instance, removes its sudo rule and settings (kept as a
-`.bak`), and offers to re-enable the PostgreSQL unit. PostgreSQL keeps running and its data is not touched.
+Undo: `minipgagent remove crm` stops and disables the instance, moves its settings directory and its sudo rule
+aside to `<path>.removed-<time>` (sudo ignores the rule there), keeps the state directory for the record, and offers
+to hand PostgreSQL back to its own service. PostgreSQL keeps running and its data is not touched.
 
 ### 9.3 Console: **Add cluster**
 
@@ -493,11 +502,36 @@ each host. Typed confirmation with the cluster name; written to the event log.
 
 ## 10. Packaging
 
-- `minipgagent` RPM: adds `minipgagent@.service`, keeps `minipgagent.service` for the default instance, creates
-  `/var/lib/minipgagent` with one directory per instance on demand. `minipgagent setup` and `minipgagent remove`
-  are subcommands of the existing launcher.
-- `bfm-watcher` RPM: unchanged files; `bfm-watcher setup` subcommand.
-- No new runtime dependency: the terminal wizards use plain Java console I/O (works over SSH, no curses).
+One build on Rocky Linux 9 makes every package (`packaging/build.sh`, in the image `packaging/Containerfile.build`;
+how to run it: [Building the packages](../build-packages.md)):
+
+| Format | Targets | Differences between targets |
+| --- | --- | --- |
+| RPM `bfm-watcher`, `minipgagent` (`noarch`) | Rocky / RHEL 8, 9, 10 | the `dist` tag only |
+| DEB `bfm-watcher`, `minipgagent` (`all`) | Ubuntu 22.04, 24.04, 26.04 | version suffix; systemd units in `/lib/systemd/system` (22.04, 24.04) or `/usr/lib/systemd/system` (26.04) |
+
+- **`minipgagent`**: the launcher with its `setup` and `remove` subcommands, `minipgagent@.service` for the
+  instances and `minipgagent.service` for the default instance; `/var/lib/minipgagent` holds one directory per
+  instance, made on demand.
+- **`bfm-watcher`**: the launcher with its `setup` subcommand, `bfm-watcher.service`, `bfm-make-certs`.
+- **Runtime.** Both depend on the distribution's Java 21 (`java-21-headless`, `openjdk-21-jre-headless`); the
+  launchers pick it even when the host's default `java` is older (`BFM_JAVA` names another). The terminal wizards
+  use plain Java console I/O (works over SSH, no curses), so there is no other runtime dependency. The agent and
+  its sudo rule use `ip` and `arping` where the host has them (`arping` is in `/usr/bin` on Ubuntu, `/usr/sbin`
+  on RHEL).
+- **Settings belong to no package.** The examples are installed under `/usr/share/bfm/examples/`; one shared
+  helper (`/usr/share/bfm/pkg/<package>.sh`, called by the RPM scriptlets and the DEB maintainer scripts) makes
+  `watcher.yml`, `agent.properties` and the sudo rule from them when they are missing, and never touches them
+  again. So an upgrade leaves nothing behind (no `.rpmnew`, `.rpmsave`, `.dpkg-dist`) and does not restart the
+  services, which would interrupt a running `pg_basebackup`, `pg_rewind` or switchover.
+- **Removal** stops and disables the services (PostgreSQL keeps running) and keeps the settings, the sudo rules
+  and the state. On Ubuntu `apt purge` deletes them.
+- **Reinstallation** finds the kept settings. The DEB asks at install time whether to use them (debconf; No moves
+  them to `/etc/bfm/backup/<package>-<time>/`); the RPM cannot ask (scriptlets have no terminal, and a waiting
+  install would stop automation), so it uses them, names them, and the wizards ask before replacing them.
+- **Not yet:** the agent does not take over a cluster laid out the Ubuntu way (settings in
+  `/etc/postgresql/<version>/<cluster>/`, started by `postgresql.service`); it needs `postgresql.conf` in the data
+  directory.
 
 ---
 
@@ -539,3 +573,72 @@ host.
 | 6 | Per-cluster permissions in this work or later | Later; the shapes are ready (§8.4) |
 | 7 | Warn when several primaries share a host? | No; the Hosts page shows the distribution only |
 | 8 | Scope | All four phases (§12) |
+
+---
+
+## 14. As built: where the code differs from this design
+
+Checked against the code on 2026-11-06. Each line gives what the design above says, then what was built.
+
+**Agent and host safety (§3, §5)**
+
+| Design | Built |
+| --- | --- |
+| Refusal text *"this agent belongs to cluster crm as pg-b1"* | *"this MiniPG belongs to cluster crm (&lt;id&gt;) as pg-b1; the command is for cluster …"*; a bound agent also refuses a command that carries no cluster id |
+| The wizard turns the watchdog off when a host runs more than one instance | `minipgagent setup` always writes `watchdog.enabled=false` |
+| Both wizards refuse two nodes of one cluster on one host; the console marks *No host redundancy* | Only the console's Add cluster checks it (a per-cluster *allow co-location* box under Advanced); the Hosts page notes it; `minipgagent setup` does not check |
+| Re-initialize and rejoin queued per host (`rebuilds-per-host`) | No per-host queue: a node that is already busy is refused |
+| `/v1/status` adds data directory size and free space | It adds `clusterId`, `clusterName`, `instance`, `hostId`, `hostname`; the free-space check is a readiness check only |
+| `/v1/checks` read only | `POST /v1/checks`; there is also `POST /v1/unbind`, which detach uses |
+
+**Watcher (§6)**
+
+| Design | Built |
+| --- | --- |
+| Registry entries carry VIPs | They do not; VIPs stay in each agent's settings |
+| `bfm.console.co-location` and `bfm.rebuilds-per-host` | Neither key exists (see above) |
+| Console-made clusters can be exported as YAML | No export button |
+| The fleet reads a summary each engine caches once per poll | The summary is computed when the Fleet page asks for it |
+
+**Console and API (§7, §8)**
+
+| Design | Built |
+| --- | --- |
+| A *Mail server* page under Settings | The SMTP server is edited on each cluster's Notifications page; the navigation also has **MiniPG certificates** (`/certificates`) |
+| `/clusters/new` | `/clusters/new/<draft>?step=<n>` |
+| Fleet with a *Problems first* selector | Always worst first; a filter by environment only |
+| `POST /api/v1/clusters` creates a cluster; `DELETE /api/v1/clusters/{name}` detaches | Creation goes through drafts: `POST /drafts`, `PUT /drafts/{n}`, `POST /drafts/{n}/enrollments`, `GET /drafts/{n}/checks`, `POST /drafts/{n}/create`; `DELETE /api/v1/clusters/{name}?confirm=<name>` detaches. Also `POST`/`DELETE /clusters/{c}/nodes[/{n}]`, `GET /clusters/{c}`, `POST /api/v1/enroll` and `GET`/`POST /api/v1/ca` |
+| A new cluster's mail rules are copied from another cluster | They start from the defaults |
+| Tokens bound to an expected host | Bound to cluster and node; host name and id are only written to the event |
+| The printed command always pins `--fingerprint` | Without TLS on the console it carries `--insecure-http` instead (lab only) |
+| Every issue, use and expiry is logged | Issue and use are logged, and a refused expired or reused token; expiry itself is not |
+
+**Terminal wizards (§9.1, §9.2)**
+
+| Design | Built |
+| --- | --- |
+| `bfm-watcher setup`: id and port, admin, console TLS, CA mode, Raft with join tokens, write and start | Six steps: 1 This watcher, 2 First admin, 3 Certificates (one choice, `ca` or `files`, for both the console and the agents), 4 Watchers (Raft peers), 5 Review, 6 Done. No join token: the first watcher makes the others' key stores and prints the `scp` lines for them (and `secret.key`); the others run setup with `certificates=files` |
+| A watcher without a cluster opens on Add cluster | It opens on Fleet, whose empty state offers Add cluster |
+| `minipgagent setup` is safe to run again | It stops on an instance that is already managed, and on an instance name whose `agent.properties` exists (`minipgagent remove` first) |
+| Step 2 asks for a token or *offline* | Joining takes `--enroll URL --token T --fingerprint F` or `--bundle DIR` on the command line |
+| Version check: same as the other nodes | Version check: PostgreSQL 13 or later; the same major version across nodes is checked by the console wizard |
+| Verify waits until the watcher reports the node online | Verify waits up to 60 s for the agent's port, then says what the console should show |
+
+**Console wizards (§9.3–9.5)**
+
+| Design | Built |
+| --- | --- |
+| A draft after every step | Basics and Nodes are kept in the draft; the Start choice is not |
+| Node rows with VIP, replication role and expected host | Name, MiniPG address, PostgreSQL address, port, data center, priority, never promote |
+| Checks table | Block: MiniPG answers, bound to another cluster, same major version, at most one primary, pg_hba.conf, replication role, version, `wal_level`. Different system identifiers only warn when exactly one primary runs (*Build* rebuilds the others). No VIP, sudo, subnet or *replicas stream* check |
+| After creation the console opens the Overview | After *Build* it opens Operations, to follow the re-initialize; after *Adopt*, the Overview |
+| Add node: steps 2–5 for one node, with a choice of how it joins | One dialog (fields, then the token), with no checks and no choice of how the node joins. Only clusters made in the console have it |
+| Detach: pause, final lease, unbind, stop the engine | Pause failover, stop the engine's loop, final lease without fencing, unbind every agent, remove the registry entry. Refused while an operation runs, and for clusters defined in `watcher.yml` |
+
+**Testing (§11)**
+
+| Design | Built |
+| --- | --- |
+| Playwright runs through Add cluster | No Playwright test in the repository; the console wizards are covered by service and API tests |
+| A real-PostgreSQL test with two clusters side by side | `AgentPostgresIT` and `WatcherPostgresIT` run one cluster each; several clusters are covered by unit and API tests and by a three-watcher Raft test (`RaftManyClustersTest`) |
+| Lab: host crash with two primaries, wrong agent port, co-location, enrollment | `scripts/local-lab.sh` can run a second cluster (`fleet-up`) and a wrong agent port (`LAB_WRONG_AGENT`); the other scenarios are not scripted |

@@ -1,6 +1,7 @@
 #!/bin/bash
-# Builds the installation guide and the architecture (English and Turkish), the user guide and the installation reference as single HTML files, screenshots and style inside, so they
-# open anywhere without a network connection.
+# Builds the installation guide, the architecture and the package build guide (English and Turkish), the user
+# guide, the installation reference and the multi-cluster design as single HTML files, screenshots and style
+# inside, so they open anywhere without a network connection.
 #
 #   scripts/docs-html.sh [OUT_DIR]      default: target/docs-html
 #
@@ -25,8 +26,8 @@ build() {  # source title [language]
     --metadata pagetitle="$title" \
     --metadata lang="$lang" \
     --metadata footer="BFM · built from $VERSION on $(date -u +%Y-%m-%d)" \
-    --output "$OUT/${src%.md}.html"
-  echo "$OUT/${src%.md}.html"
+    --output "$OUT/$(basename "${src%.md}").html"
+  echo "$OUT/$(basename "${src%.md}").html"
 }
 
 build install-rpm.md "BFM installation (RPM)"
@@ -37,3 +38,4 @@ build user-guide.md "BFM user guide"
 build install.md "BFM installation reference"
 build build-packages.md "Building the BFM packages"
 build build-packages.tr.md "BFM paketlerini derlemek" tr
+build design/multi-cluster.md "BFM design: several clusters per server"
